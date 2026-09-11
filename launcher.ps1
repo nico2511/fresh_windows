@@ -1,7 +1,7 @@
 #Requires -RunAsAdministrator
 # ============================================================
 #  TOOLBOX AMD GAMER + CURSOR - Launcher
-#  Configs locales si présentes, sinon GitHub raw
+#  Listes toujours lues depuis GitHub (édition à distance)
 # ============================================================
 
 $ErrorActionPreference = "Continue"
@@ -13,71 +13,21 @@ try {
         [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 } catch { }
 
-# Détection automatique du compte / dépôt GitHub (aucune invitation)
-function Get-GitHubIdentity {
-    $owner  = $null
-    $repo   = "fresh_windows"
-    $branch = "main"
-
-    # 1) Remote git du dépôt courant (le plus fiable)
-    try {
-        $remote = (& git -C $PSScriptRoot remote get-url origin 2>$null | Select-Object -First 1)
-        if (-not $remote) {
-            $remote = (& git remote get-url origin 2>$null | Select-Object -First 1)
-        }
-        if ($remote -match 'github\.com[:/](?<owner>[^/]+)/(?<repo>[^/.]+)') {
-            $owner = $Matches.owner
-            $repo  = $Matches.repo
-        }
-    } catch { }
-
-    # 2) Compte authentifié via GitHub CLI
-    if (-not $owner) {
-        try {
-            $login = (& gh api user --jq .login 2>$null | Select-Object -First 1)
-            if ($login) { $owner = $login.Trim() }
-        } catch { }
-    }
-
-    # 3) Propriétaire connu de ce dépôt (évite le faux match avec le profil Windows)
-    if (-not $owner) {
-        $owner = "nico2511"
-    }
-
-    [pscustomobject]@{
-        Owner  = $owner
-        Repo   = $repo
-        Branch = $branch
-    }
-}
-
-$identity     = Get-GitHubIdentity
-$RemoteBaseUrl = "https://raw.githubusercontent.com/$($identity.Owner)/$($identity.Repo)/$($identity.Branch)/configs"
-$LocalConfigDir = Join-Path $PSScriptRoot "configs"
-$UseLocalConfigs = Test-Path -LiteralPath $LocalConfigDir -PathType Container
+# Source unique : listes JSON sur GitHub (pas de configs locales)
+$BaseUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/main/configs"
 
 function Get-Config {
     param([string]$FileName)
     try {
-        if ($UseLocalConfigs) {
-            $path = Join-Path $LocalConfigDir $FileName
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-                throw "Fichier introuvable : $path"
-            }
-            $json = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
-        }
-        else {
-            $url  = "$RemoteBaseUrl/$FileName"
-            $json = Invoke-RestMethod -Uri $url -UseBasicParsing
-        }
-
+        $url  = "$BaseUrl/$FileName"
+        $json = Invoke-RestMethod -Uri $url -UseBasicParsing
         if ($null -eq $json) {
             throw "Config vide ou invalide."
         }
         return @($json)
     }
     catch {
-        Write-Host "Erreur lors du chargement de $FileName" -ForegroundColor Red
+        Write-Host "Erreur lors du téléchargement de $FileName" -ForegroundColor Red
         Write-Host $_.Exception.Message -ForegroundColor DarkRed
         return $null
     }
@@ -169,12 +119,7 @@ function Show-Menu {
     Write-Host "=======================================================" -ForegroundColor Cyan
     Write-Host "       TOOLBOX AMD GAMER + CURSOR (GitHub)" -ForegroundColor Cyan
     Write-Host "=======================================================" -ForegroundColor Cyan
-    if ($UseLocalConfigs) {
-        Write-Host "Configs : local ($LocalConfigDir)" -ForegroundColor DarkGray
-    }
-    else {
-        Write-Host "Configs : $RemoteBaseUrl" -ForegroundColor DarkGray
-    }
+    Write-Host "Configs : $BaseUrl" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "1. Installer Apps Standard" -ForegroundColor Green
     Write-Host "2. Installer Apps Gaming" -ForegroundColor Magenta
