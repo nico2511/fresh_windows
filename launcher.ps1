@@ -40,6 +40,23 @@ function Get-Config {
     }
 }
 
+function Show-InstallProgress {
+    param(
+        [int]$Current,
+        [int]$Total,
+        [string]$App,
+        [string]$Category
+    )
+    $pct    = if ($Total -gt 0) { [math]::Round(($Current / $Total) * 100) } else { 0 }
+    $width  = 28
+    $filled = [math]::Round(($pct / 100) * $width)
+    $bar    = ('#' * $filled) + ('-' * ($width - $filled))
+
+    Write-Progress -Activity "Installation : $Category" -Status "$Current / $Total — $App" -PercentComplete $pct
+    Write-Host ("  [{0}] {1,3}%  ({2}/{3})  {4}" -f $bar, $pct, $Current, $Total, $App) -ForegroundColor DarkCyan
+    try { $Host.UI.RawUI.WindowTitle = "Toolbox [$Current/$Total] $Category — $App" } catch { }
+}
+
 function Install-FromJson {
     param(
         [string]$FileName,
@@ -52,11 +69,16 @@ function Install-FromJson {
         return $false
     }
 
-    Write-Host "`n→ Installation de la catégorie : $Category" -ForegroundColor Yellow
+    $apps = @($apps | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $total = $apps.Count
+    $index = 0
     $failed = @()
+
+    Write-Host "`n→ Installation de la catégorie : $Category ($total apps)" -ForegroundColor Yellow
+
     foreach ($app in $apps) {
-        if ([string]::IsNullOrWhiteSpace($app)) { continue }
-        Write-Host "  → $app" -ForegroundColor Gray
+        $index++
+        Show-InstallProgress -Current $index -Total $total -App $app -Category $Category
         winget install -e --id $app --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
         # 0 = OK, -1978335189 (0x8A15002B) = déjà installé
         if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) {
@@ -65,11 +87,14 @@ function Install-FromJson {
         }
     }
 
+    Write-Progress -Activity "Installation : $Category" -Completed
+    try { $Host.UI.RawUI.WindowTitle = "Toolbox AMD Gamer + Cursor" } catch { }
+
     if ($failed.Count -gt 0) {
         Write-Host "`nÉchecs ($Category) : $($failed -join ', ')" -ForegroundColor Red
     }
     else {
-        Write-Host "`nCatégorie $Category terminée." -ForegroundColor Green
+        Write-Host "`nCatégorie $Category terminée. [$total/$total]" -ForegroundColor Green
     }
 
     if (-not $NoPause) { Pause }
