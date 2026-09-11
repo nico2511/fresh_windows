@@ -2,7 +2,14 @@
 # ============================================================
 #  TOOLBOX AMD GAMER + CURSOR - Launcher
 #  Listes toujours lues depuis GitHub (édition à distance)
+#
+#  Modes non interactifs (sans menu) :
+#    $env:FRESH_WIN_MODE='full'; irm ... | iex
+#    Modes : standard | gaming | dev | full
 # ============================================================
+
+# Via env (compatible irm | iex) — pas de param() qui casse le pipe
+$Mode = if ($env:FRESH_WIN_MODE) { $env:FRESH_WIN_MODE.Trim().ToLowerInvariant() } else { 'menu' }
 
 $ErrorActionPreference = "Continue"
 $Host.UI.RawUI.WindowTitle = "Toolbox AMD Gamer + Cursor"
@@ -132,7 +139,39 @@ function Show-Menu {
     Write-Host ""
 }
 
-# ========== BOUCLE PRINCIPALE ==========
+function Invoke-SilentMode {
+    param([string]$InstallMode)
+
+    Write-Host "Mode silencieux : $InstallMode" -ForegroundColor Cyan
+    switch ($InstallMode) {
+        "standard" {
+            Install-FromJson -FileName "apps-standard.json" -Category "Standard" -NoPause | Out-Null
+        }
+        "gaming" {
+            Install-FromJson -FileName "apps-gaming.json" -Category "Gaming" -NoPause | Out-Null
+        }
+        "dev" {
+            Install-FromJson -FileName "apps-dev.json" -Category "Dev" -NoPause | Out-Null
+        }
+        "full" {
+            Install-FromJson -FileName "apps-standard.json" -Category "Standard" -NoPause | Out-Null
+            Install-FromJson -FileName "apps-gaming.json" -Category "Gaming" -NoPause | Out-Null
+            Install-FromJson -FileName "apps-dev.json" -Category "Dev" -NoPause | Out-Null
+            Write-Host "`nFull Setup terminé !" -ForegroundColor Green
+        }
+        default {
+            Write-Host "Mode inconnu : $InstallMode (standard|gaming|dev|full)" -ForegroundColor Red
+            exit 1
+        }
+    }
+    exit 0
+}
+
+# ========== ENTRÉE ==========
+if ($Mode -ne 'menu') {
+    Invoke-SilentMode -InstallMode $Mode
+}
+
 do {
     Show-Menu
     $choice = Read-Host "Ton choix"
@@ -150,7 +189,7 @@ do {
         }
         "5" { Open-Extensions }
         "6" {
-            winget upgrade --all --accept-package-agreements --accept-source-agreements
+            winget upgrade --all --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
             Pause
         }
         "7" {
