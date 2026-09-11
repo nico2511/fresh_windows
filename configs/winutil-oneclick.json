@@ -1,7 +1,15 @@
 [
+  "WPFTweaksRestorePoint",
+  "WPFTweaksActivity",
   "WPFTweaksConsumerFeatures",
+  "WPFTweaksDisableExplorerAutoDiscovery",
   "WPFTweaksWPBT",
+  "WPFTweaksLocation",
   "WPFTweaksServices",
   "WPFTweaksTelemetry",
+  "WPFTweaksDeliveryOptimization",
+  "WPFTweaksDiskCleanup",
+  "WPFTweaksDeleteTempFiles",
+  "WPFTweaksEndTaskOnTaskbar",
   "WPFFeatureshyperv"
 ]

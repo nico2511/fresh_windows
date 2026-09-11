@@ -297,11 +297,11 @@ function Invoke-WinUtilOneClick {
 
     $configUrl = "$BaseUrl/winutil-oneclick.json"
     Write-Host "`n=== PROFIL ONE-CLICK (WinUtil) ===" -ForegroundColor Cyan
-    Write-Host "Tweaks Minimal + Hyper-V + prefs + Ultimate Performance" -ForegroundColor DarkGray
+    Write-Host "Tweaks Standard + Hyper-V + prefs + Ultimate Performance" -ForegroundColor DarkGray
     Write-Host "Config : $configUrl" -ForegroundColor DarkGray
 
     try {
-        Write-Host "`n[1/3] WinUtil : Minimal + Hyper-V..." -ForegroundColor Yellow
+        Write-Host "`n[1/3] WinUtil : Standard + Hyper-V..." -ForegroundColor Yellow
         & ([ScriptBlock]::Create((Invoke-RestMethod -Uri "https://christitus.com/win" -UseBasicParsing))) -Config $configUrl
 
         Write-Host "`n[2/3] Customize Preferences..." -ForegroundColor Yellow
@@ -347,7 +347,7 @@ function Open-WinUtilMenu {
         Write-Host "Calibrage Windows via WinUtil (Chris Titus)." -ForegroundColor DarkGray
         Write-Host ""
         Write-Host "1. PROFIL ONE-CLICK  ★" -ForegroundColor Green
-        Write-Host "   Minimal + Dark/Game Mode + Hyper-V + Ultimate Perf" -ForegroundColor DarkGreen
+        Write-Host "   Standard + Dark/Game Mode + Hyper-V + Ultimate Perf" -ForegroundColor DarkGreen
         Write-Host ""
         Write-Host "2. Preset Standard (WinUtil)" -ForegroundColor Yellow
         Write-Host "3. Preset Minimal (WinUtil)" -ForegroundColor Yellow
