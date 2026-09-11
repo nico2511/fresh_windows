@@ -6,7 +6,7 @@
 #  Modes non interactifs (sans menu) :
 #    $env:FRESH_WIN_MODE='full'; irm ... | iex
 #    Modes apps : standard | gaming | dev | full
-#    Modes WinUtil : winutil-standard | winutil-minimal | winutil-advanced | winutil-appx
+#    Modes WinUtil : winutil-oneclick | winutil-standard | winutil-minimal | winutil-advanced | winutil-appx
 # ============================================================
 
 # Via env (compatible irm | iex) — pas de param() qui casse le pipe
@@ -147,6 +147,97 @@ function Open-Extensions {
     }
 }
 
+function Set-RegistryDWord {
+    param([string]$Path, [string]$Name, [int]$Value)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        New-Item -Path $Path -Force | Out-Null
+    }
+    Set-ItemProperty -LiteralPath $Path -Name $Name -Value $Value -Type DWord -Force
+}
+
+function Invoke-WinUtilPreferences {
+    # Customize Preferences utiles (WinUtil ne les applique pas via -Config AutoRun)
+    Write-Host "  → Dark Mode" -ForegroundColor Gray
+    Set-RegistryDWord "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" "AppsUseLightTheme" 0
+    Set-RegistryDWord "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" "SystemUsesLightTheme" 0
+
+    Write-Host "  → Game Mode" -ForegroundColor Gray
+    Set-RegistryDWord "HKCU:\Software\Microsoft\GameBar" "AllowAutoGameMode" 1
+    Set-RegistryDWord "HKCU:\Software\Microsoft\GameBar" "AutoGameModeEnabled" 1
+
+    Write-Host "  → Extensions de fichiers visibles" -ForegroundColor Gray
+    Set-RegistryDWord "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" "HideFileExt" 0
+
+    Write-Host "  → Fichiers cachés visibles" -ForegroundColor Gray
+    Set-RegistryDWord "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" "Hidden" 1
+
+    Write-Host "  → Long Paths" -ForegroundColor Gray
+    Set-RegistryDWord "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" "LongPathsEnabled" 1
+
+    Write-Host "  → Désactiver Bing Search (menu Démarrer)" -ForegroundColor Gray
+    Set-RegistryDWord "HKCU:\Software\Policies\Microsoft\Windows\Explorer" "DisableSearchBoxSuggestions" 1
+    Set-RegistryDWord "HKCU:\Software\Microsoft\Windows\CurrentVersion\Search" "BingSearchEnabled" 0
+
+    # Rafraîchir Explorer pour le thème / fichiers
+    try {
+        Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 800
+        Start-Process explorer
+    } catch { }
+}
+
+function Enable-UltimatePerformance {
+    Write-Host "  → Ultimate Performance (power plan)" -ForegroundColor Gray
+    $schemeGuid = "e9a42b02-d5df-448d-aa00-03f14749eb61"
+    $dup = powercfg /duplicatescheme $schemeGuid 2>&1 | Out-String
+    $match = [regex]::Match($dup, '[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}')
+    if ($match.Success) {
+        powercfg /setactive $match.Value | Out-Null
+        Write-Host "    Plan activé : $($match.Value)" -ForegroundColor DarkGray
+    }
+    else {
+        # Déjà présent : activer s'il existe dans la liste
+        $list = powercfg /list 2>&1 | Out-String
+        $existing = [regex]::Match($list, '(?i)([A-Fa-f0-9-]{36}).*Ultimate Performance')
+        if ($existing.Success) {
+            powercfg /setactive $existing.Groups[1].Value | Out-Null
+            Write-Host "    Plan Ultimate déjà présent, activé." -ForegroundColor DarkGray
+        }
+        else {
+            Write-Host "    Impossible d'activer Ultimate Performance." -ForegroundColor Red
+            Write-Host "    $dup" -ForegroundColor DarkRed
+        }
+    }
+}
+
+function Invoke-WinUtilOneClick {
+    param([switch]$NoPause)
+
+    $configUrl = "$BaseUrl/winutil-oneclick.json"
+    Write-Host "`n=== PROFIL ONE-CLICK (WinUtil) ===" -ForegroundColor Cyan
+    Write-Host "Tweaks Minimal + Hyper-V + prefs + Ultimate Performance" -ForegroundColor DarkGray
+    Write-Host "Config : $configUrl" -ForegroundColor DarkGray
+
+    try {
+        Write-Host "`n[1/3] WinUtil : Minimal + Hyper-V..." -ForegroundColor Yellow
+        & ([ScriptBlock]::Create((Invoke-RestMethod -Uri "https://christitus.com/win" -UseBasicParsing))) -Config $configUrl
+
+        Write-Host "`n[2/3] Customize Preferences..." -ForegroundColor Yellow
+        Invoke-WinUtilPreferences
+
+        Write-Host "`n[3/3] Mode Performance..." -ForegroundColor Yellow
+        Enable-UltimatePerformance
+
+        Write-Host "`nProfil one-click terminé. Un redémarrage peut être requis (Hyper-V)." -ForegroundColor Green
+    }
+    catch {
+        Write-Host "Échec du profil one-click" -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor DarkRed
+    }
+
+    if (-not $NoPause) { Pause }
+}
+
 function Invoke-WinUtilPreset {
     param(
         [Parameter(Mandatory)]
@@ -170,28 +261,32 @@ function Invoke-WinUtilPreset {
 function Open-WinUtilMenu {
     do {
         Clear-Host
-        Write-Host "=== WINUTIL (PRESETS AUTO) ===" -ForegroundColor Cyan
-        Write-Host "Applique les tweaks Chris Titus silencieusement." -ForegroundColor DarkGray
+        Write-Host "=== WINUTIL ===" -ForegroundColor Cyan
+        Write-Host "Calibrage Windows via WinUtil (Chris Titus)." -ForegroundColor DarkGray
         Write-Host ""
-        Write-Host "1. Standard  — baseline recommandée (+ restore point)" -ForegroundColor Green
-        Write-Host "2. Minimal   — tweaks légers (télémétrie / services)" -ForegroundColor Yellow
-        Write-Host "3. Advanced  — power user (OneDrive, widgets, menu...)" -ForegroundColor Magenta
-        Write-Host "4. AppxDefault — retire les apps bloat courantes" -ForegroundColor DarkYellow
-        Write-Host "5. Ouvrir WinUtil (interface graphique)" -ForegroundColor White
-        Write-Host "6. Retour" -ForegroundColor Gray
+        Write-Host "1. PROFIL ONE-CLICK  ★" -ForegroundColor Green
+        Write-Host "   Minimal + Dark/Game Mode + Hyper-V + Ultimate Perf" -ForegroundColor DarkGreen
+        Write-Host ""
+        Write-Host "2. Preset Standard (WinUtil)" -ForegroundColor Yellow
+        Write-Host "3. Preset Minimal (WinUtil)" -ForegroundColor Yellow
+        Write-Host "4. Preset Advanced (WinUtil)" -ForegroundColor Magenta
+        Write-Host "5. AppxDefault — retire les apps bloat" -ForegroundColor DarkYellow
+        Write-Host "6. Ouvrir WinUtil (interface graphique)" -ForegroundColor White
+        Write-Host "7. Retour" -ForegroundColor Gray
         Write-Host ""
         $c = Read-Host "Choix"
 
         switch ($c) {
-            "1" { Invoke-WinUtilPreset -Preset Standard }
-            "2" { Invoke-WinUtilPreset -Preset Minimal }
-            "3" { Invoke-WinUtilPreset -Preset Advanced }
-            "4" { Invoke-WinUtilPreset -Preset AppxDefault }
-            "5" {
+            "1" { Invoke-WinUtilOneClick }
+            "2" { Invoke-WinUtilPreset -Preset Standard }
+            "3" { Invoke-WinUtilPreset -Preset Minimal }
+            "4" { Invoke-WinUtilPreset -Preset Advanced }
+            "5" { Invoke-WinUtilPreset -Preset AppxDefault }
+            "6" {
                 Write-Host "Lancement de WinUtil (GUI)..." -ForegroundColor Yellow
                 irm "https://christitus.com/win" | iex
             }
-            "6" { return }
+            "7" { return }
             default {
                 Write-Host "Choix invalide" -ForegroundColor Red
                 Start-Sleep 1
@@ -213,7 +308,7 @@ function Show-Menu {
     Write-Host "4. Full Setup (Standard + Gaming + Dev)" -ForegroundColor Cyan
     Write-Host "5. Extensions Navigateur (Firefox / Chrome-based)" -ForegroundColor Yellow
     Write-Host "6. Mettre à jour toutes les apps (winget upgrade --all)" -ForegroundColor White
-    Write-Host "7. WinUtil — presets auto / GUI" -ForegroundColor Gray
+    Write-Host "7. WinUtil — one-click / presets / GUI" -ForegroundColor Gray
     Write-Host "0. Quitter" -ForegroundColor Red
     Write-Host ""
 }
@@ -238,6 +333,9 @@ function Invoke-SilentMode {
             Install-FromJson -FileName "apps-dev.json" -Category "Dev" -NoPause | Out-Null
             Write-Host "`nFull Setup terminé !" -ForegroundColor Green
         }
+        "winutil-oneclick" {
+            Invoke-WinUtilOneClick -NoPause
+        }
         "winutil-standard" {
             & ([ScriptBlock]::Create((Invoke-RestMethod -Uri "https://christitus.com/win" -UseBasicParsing))) -Preset Standard
         }
@@ -253,7 +351,7 @@ function Invoke-SilentMode {
         default {
             Write-Host "Mode inconnu : $InstallMode" -ForegroundColor Red
             Write-Host "Apps: standard|gaming|dev|full" -ForegroundColor DarkGray
-            Write-Host "WinUtil: winutil-standard|winutil-minimal|winutil-advanced|winutil-appx" -ForegroundColor DarkGray
+            Write-Host "WinUtil: winutil-oneclick|winutil-standard|winutil-minimal|winutil-advanced|winutil-appx" -ForegroundColor DarkGray
             exit 1
         }
     }
