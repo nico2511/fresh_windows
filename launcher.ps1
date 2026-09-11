@@ -321,10 +321,31 @@ function Invoke-WinUtilOneClick {
     if (-not $NoPause) { Pause }
 }
 
+function Invoke-WinUtilConfig {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ConfigUrl,
+        [string]$Label = "config",
+        [switch]$NoPause
+    )
+
+    Write-Host "`n→ WinUtil $Label (sans UI, via -Config)..." -ForegroundColor Yellow
+    Write-Host "  Config : $ConfigUrl" -ForegroundColor DarkGray
+    try {
+        & ([ScriptBlock]::Create((Invoke-RestMethod -Uri "https://christitus.com/win" -UseBasicParsing))) -Config $ConfigUrl
+        Write-Host "`n$Label terminé." -ForegroundColor Green
+    }
+    catch {
+        Write-Host "Échec WinUtil $Label" -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor DarkRed
+    }
+    if (-not $NoPause) { Pause }
+}
+
 function Invoke-WinUtilPreset {
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('Standard', 'Minimal', 'Advanced', 'AppxDefault')]
+        [ValidateSet('Standard', 'Minimal', 'Advanced')]
         [string]$Preset
     )
 
@@ -353,7 +374,7 @@ function Open-WinUtilMenu {
         Write-Host "2. Preset Standard (WinUtil)" -ForegroundColor Yellow
         Write-Host "3. Preset Minimal (WinUtil)" -ForegroundColor Yellow
         Write-Host "4. Preset Advanced (WinUtil)" -ForegroundColor Magenta
-        Write-Host "5. AppxDefault — retire les apps bloat" -ForegroundColor DarkYellow
+        Write-Host "5. AppX bloat — retire les apps safe (via -Config)" -ForegroundColor DarkYellow
         Write-Host "6. Ouvrir WinUtil (interface graphique)" -ForegroundColor White
         Write-Host "7. Retour" -ForegroundColor Gray
         Write-Host ""
@@ -364,7 +385,7 @@ function Open-WinUtilMenu {
             "2" { Invoke-WinUtilPreset -Preset Standard }
             "3" { Invoke-WinUtilPreset -Preset Minimal }
             "4" { Invoke-WinUtilPreset -Preset Advanced }
-            "5" { Invoke-WinUtilPreset -Preset AppxDefault }
+            "5" { Invoke-WinUtilConfig -ConfigUrl "$BaseUrl/winutil-appx.json" -Label "AppX bloat" }
             "6" {
                 Write-Host "Lancement de WinUtil (GUI)..." -ForegroundColor Yellow
                 irm "https://christitus.com/win" | iex
@@ -563,7 +584,7 @@ function Invoke-SilentMode {
             & ([ScriptBlock]::Create((Invoke-RestMethod -Uri "https://christitus.com/win" -UseBasicParsing))) -Preset Advanced
         }
         "winutil-appx" {
-            & ([ScriptBlock]::Create((Invoke-RestMethod -Uri "https://christitus.com/win" -UseBasicParsing))) -Preset AppxDefault
+            Invoke-WinUtilConfig -ConfigUrl "$BaseUrl/winutil-appx.json" -Label "AppX bloat" -NoPause
         }
         "winget-task" {
             Register-WingetUpgradeTask -At "12:00" -NoPause | Out-Null
