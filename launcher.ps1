@@ -5,7 +5,8 @@
 #
 #  Modes non interactifs (sans menu) :
 #    $env:FRESH_WIN_MODE='full'; irm ... | iex
-#    Modes : standard | gaming | dev | full
+#    Modes apps : standard | gaming | dev | full
+#    Modes WinUtil : winutil-standard | winutil-minimal | winutil-advanced | winutil-appx
 # ============================================================
 
 # Via env (compatible irm | iex) — pas de param() qui casse le pipe
@@ -146,6 +147,59 @@ function Open-Extensions {
     }
 }
 
+function Invoke-WinUtilPreset {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('Standard', 'Minimal', 'Advanced', 'AppxDefault')]
+        [string]$Preset
+    )
+
+    Write-Host "`n→ WinUtil preset '$Preset' (sans UI)..." -ForegroundColor Yellow
+    Write-Host "  Source : https://christitus.com/win" -ForegroundColor DarkGray
+    try {
+        & ([ScriptBlock]::Create((Invoke-RestMethod -Uri "https://christitus.com/win" -UseBasicParsing))) -Preset $Preset
+        Write-Host "`nPreset '$Preset' terminé." -ForegroundColor Green
+    }
+    catch {
+        Write-Host "Échec WinUtil preset '$Preset'" -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor DarkRed
+    }
+    Pause
+}
+
+function Open-WinUtilMenu {
+    do {
+        Clear-Host
+        Write-Host "=== WINUTIL (PRESETS AUTO) ===" -ForegroundColor Cyan
+        Write-Host "Applique les tweaks Chris Titus silencieusement." -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "1. Standard  — baseline recommandée (+ restore point)" -ForegroundColor Green
+        Write-Host "2. Minimal   — tweaks légers (télémétrie / services)" -ForegroundColor Yellow
+        Write-Host "3. Advanced  — power user (OneDrive, widgets, menu...)" -ForegroundColor Magenta
+        Write-Host "4. AppxDefault — retire les apps bloat courantes" -ForegroundColor DarkYellow
+        Write-Host "5. Ouvrir WinUtil (interface graphique)" -ForegroundColor White
+        Write-Host "6. Retour" -ForegroundColor Gray
+        Write-Host ""
+        $c = Read-Host "Choix"
+
+        switch ($c) {
+            "1" { Invoke-WinUtilPreset -Preset Standard }
+            "2" { Invoke-WinUtilPreset -Preset Minimal }
+            "3" { Invoke-WinUtilPreset -Preset Advanced }
+            "4" { Invoke-WinUtilPreset -Preset AppxDefault }
+            "5" {
+                Write-Host "Lancement de WinUtil (GUI)..." -ForegroundColor Yellow
+                irm "https://christitus.com/win" | iex
+            }
+            "6" { return }
+            default {
+                Write-Host "Choix invalide" -ForegroundColor Red
+                Start-Sleep 1
+            }
+        }
+    } while ($true)
+}
+
 function Show-Menu {
     Clear-Host
     Write-Host "=======================================================" -ForegroundColor Cyan
@@ -159,7 +213,7 @@ function Show-Menu {
     Write-Host "4. Full Setup (Standard + Gaming + Dev)" -ForegroundColor Cyan
     Write-Host "5. Extensions Navigateur (Firefox / Chrome-based)" -ForegroundColor Yellow
     Write-Host "6. Mettre à jour toutes les apps (winget upgrade --all)" -ForegroundColor White
-    Write-Host "7. Lancer WinUtil" -ForegroundColor Gray
+    Write-Host "7. WinUtil — presets auto / GUI" -ForegroundColor Gray
     Write-Host "0. Quitter" -ForegroundColor Red
     Write-Host ""
 }
@@ -184,8 +238,22 @@ function Invoke-SilentMode {
             Install-FromJson -FileName "apps-dev.json" -Category "Dev" -NoPause | Out-Null
             Write-Host "`nFull Setup terminé !" -ForegroundColor Green
         }
+        "winutil-standard" {
+            & ([ScriptBlock]::Create((Invoke-RestMethod -Uri "https://christitus.com/win" -UseBasicParsing))) -Preset Standard
+        }
+        "winutil-minimal" {
+            & ([ScriptBlock]::Create((Invoke-RestMethod -Uri "https://christitus.com/win" -UseBasicParsing))) -Preset Minimal
+        }
+        "winutil-advanced" {
+            & ([ScriptBlock]::Create((Invoke-RestMethod -Uri "https://christitus.com/win" -UseBasicParsing))) -Preset Advanced
+        }
+        "winutil-appx" {
+            & ([ScriptBlock]::Create((Invoke-RestMethod -Uri "https://christitus.com/win" -UseBasicParsing))) -Preset AppxDefault
+        }
         default {
-            Write-Host "Mode inconnu : $InstallMode (standard|gaming|dev|full)" -ForegroundColor Red
+            Write-Host "Mode inconnu : $InstallMode" -ForegroundColor Red
+            Write-Host "Apps: standard|gaming|dev|full" -ForegroundColor DarkGray
+            Write-Host "WinUtil: winutil-standard|winutil-minimal|winutil-advanced|winutil-appx" -ForegroundColor DarkGray
             exit 1
         }
     }
@@ -217,10 +285,7 @@ do {
             winget upgrade --all --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
             Pause
         }
-        "7" {
-            Write-Host "Téléchargement et exécution de WinUtil (christitus.com)..." -ForegroundColor Yellow
-            irm "https://christitus.com/win" | iex
-        }
+        "7" { Open-WinUtilMenu }
         "0" { exit }
         default {
             Write-Host "Choix invalide" -ForegroundColor Red
