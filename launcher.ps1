@@ -58,6 +58,84 @@ function Show-InstallProgress {
     try { $Host.UI.RawUI.WindowTitle = "Toolbox [$Current/$Total] $Category — $App" } catch { }
 }
 
+function Get-AppLabel {
+    param($App)
+    if ($App -is [string]) { return $App }
+    if ($App.name) { return [string]$App.name }
+    if ($App.url) { return [string]$App.url }
+    return "$App"
+}
+
+function Install-GitHubDownload {
+    param($App)
+
+    $name     = if ($App.name) { [string]$App.name } else { "download" }
+    $url      = [string]$App.url
+    $fileName = if ($App.fileName) { [string]$App.fileName } else { Split-Path $url -Leaf }
+    $destDir  = if ($App.destDir) {
+        [Environment]::ExpandEnvironmentVariables([string]$App.destDir)
+    } else {
+        Join-Path $env:LOCALAPPDATA "Programs\$name"
+    }
+    $destPath = Join-Path $destDir $fileName
+
+    if ([string]::IsNullOrWhiteSpace($url)) {
+        Write-Host "    URL manquante pour $name" -ForegroundColor Red
+        return $false
+    }
+
+    New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+    Write-Host "    Téléchargement → $destPath" -ForegroundColor DarkGray
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $destPath -UseBasicParsing
+    }
+    catch {
+        Write-Host "    Échec téléchargement : $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
+
+    if (-not (Test-Path -LiteralPath $destPath)) {
+        Write-Host "    Fichier introuvable après téléchargement." -ForegroundColor Red
+        return $false
+    }
+
+    if ($App.shortcut -eq $true) {
+        try {
+            $programs = [Environment]::GetFolderPath('Programs')
+            $lnkPath  = Join-Path $programs "$name.lnk"
+            $wsh = New-Object -ComObject WScript.Shell
+            $lnk = $wsh.CreateShortcut($lnkPath)
+            $lnk.TargetPath = $destPath
+            $lnk.WorkingDirectory = $destDir
+            $lnk.Description = $name
+            $lnk.Save()
+            Write-Host "    Raccourci menu Démarrer créé." -ForegroundColor DarkGray
+        }
+        catch {
+            Write-Host "    Raccourci non créé : $($_.Exception.Message)" -ForegroundColor DarkYellow
+        }
+    }
+
+    return $true
+}
+
+function Install-AppEntry {
+    param($App)
+
+    if ($App -is [string]) {
+        winget install -e --id $App --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
+        # 0 = OK, -1978335189 (0x8A15002B) = déjà installé
+        return ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189)
+    }
+
+    if ($App.url) {
+        return (Install-GitHubDownload -App $App)
+    }
+
+    Write-Host "    Entrée non reconnue (attendu: winget id ou objet url)." -ForegroundColor Red
+    return $false
+}
+
 function Install-FromJson {
     param(
         [string]$FileName,
@@ -70,7 +148,12 @@ function Install-FromJson {
         return $false
     }
 
-    $apps = @($apps | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $apps = @(
+        $apps | Where-Object {
+            if ($_ -is [string]) { -not [string]::IsNullOrWhiteSpace($_) }
+            else { $true }
+        }
+    )
     $total = $apps.Count
     $index = 0
     $failed = @()
@@ -79,12 +162,11 @@ function Install-FromJson {
 
     foreach ($app in $apps) {
         $index++
-        Show-InstallProgress -Current $index -Total $total -App $app -Category $Category
-        winget install -e --id $app --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
-        # 0 = OK, -1978335189 (0x8A15002B) = déjà installé
-        if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) {
-            Write-Host "    Échec (code $LASTEXITCODE)" -ForegroundColor Red
-            $failed += $app
+        $label = Get-AppLabel -App $app
+        Show-InstallProgress -Current $index -Total $total -App $label -Category $Category
+        if (-not (Install-AppEntry -App $app)) {
+            Write-Host "    Échec : $label" -ForegroundColor Red
+            $failed += $label
         }
     }
 
