@@ -7,6 +7,7 @@
 #    $env:FRESH_WIN_MODE='full'; irm ... | iex
 #    Modes apps : standard | gaming | dev | full
 #    Modes WinUtil : winutil-oneclick | winutil-standard | winutil-minimal | winutil-advanced | winutil-appx
+#    Autre : winget-task (crée la tâche planifiée MAJ)
 # ============================================================
 
 # Via env (compatible irm | iex) — pas de param() qui casse le pipe
@@ -391,8 +392,142 @@ function Show-Menu {
     Write-Host "5. Extensions Navigateur (Firefox / Chrome-based)" -ForegroundColor Yellow
     Write-Host "6. Mettre à jour toutes les apps (winget upgrade --all)" -ForegroundColor White
     Write-Host "7. WinUtil — one-click / presets / GUI" -ForegroundColor Gray
+    Write-Host "8. Tâche planifiée — MAJ winget auto" -ForegroundColor DarkCyan
     Write-Host "0. Quitter" -ForegroundColor Red
     Write-Host ""
+}
+
+$script:WingetUpgradeTaskName = "FreshWindows-WingetUpgrade"
+
+function Get-WingetExecutable {
+    $cmd = Get-Command winget -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source) { return $cmd.Source }
+    $candidates = @(
+        "$env:LocalAppData\Microsoft\WindowsApps\winget.exe",
+        "$env:ProgramFiles\WindowsApps\Microsoft.DesktopAppInstaller_*_x64__8wekyb3d8bbwe\winget.exe"
+    )
+    foreach ($c in $candidates) {
+        $resolved = Get-Item $c -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($resolved) { return $resolved.FullName }
+    }
+    return $null
+}
+
+function Register-WingetUpgradeTask {
+    param(
+        [string]$At = "12:00",
+        [switch]$NoPause
+    )
+
+    $winget = Get-WingetExecutable
+    if (-not $winget) {
+        Write-Host "winget introuvable — impossible de créer la tâche." -ForegroundColor Red
+        if (-not $NoPause) { Pause }
+        return $false
+    }
+
+    $args = "upgrade --all --accept-package-agreements --accept-source-agreements --silent --disable-interactivity"
+    $action = New-ScheduledTaskAction -Execute $winget -Argument $args
+    $trigger = New-ScheduledTaskTrigger -Daily -At $At
+    # StartWhenAvailable = rattrapage si le PC était éteint à l'heure prévue
+    $settings = New-ScheduledTaskSettingsSet `
+        -StartWhenAvailable `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -RunOnlyIfNetworkAvailable `
+        -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
+        -MultipleInstances IgnoreNew `
+        -RestartCount 1 `
+        -RestartInterval (New-TimeSpan -Minutes 5)
+
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest
+
+    try {
+        Register-ScheduledTask `
+            -TaskName $script:WingetUpgradeTaskName `
+            -Action $action `
+            -Trigger $trigger `
+            -Settings $settings `
+            -Principal $principal `
+            -Description "MAJ silencieuse de toutes les apps via winget. Rattrapage (StartWhenAvailable) si l'heure quotidienne a été manquée." `
+            -Force | Out-Null
+
+        Write-Host "`nTâche créée : $script:WingetUpgradeTaskName" -ForegroundColor Green
+        Write-Host "  Horaire   : tous les jours à $At" -ForegroundColor DarkGray
+        Write-Host "  Rattrapage: oui (dès que le PC est allumé / réseau dispo)" -ForegroundColor DarkGray
+        Write-Host "  Action    : winget upgrade --all (silencieux)" -ForegroundColor DarkGray
+        if (-not $NoPause) { Pause }
+        return $true
+    }
+    catch {
+        Write-Host "Échec création tâche : $($_.Exception.Message)" -ForegroundColor Red
+        if (-not $NoPause) { Pause }
+        return $false
+    }
+}
+
+function Unregister-WingetUpgradeTask {
+    param([switch]$NoPause)
+    try {
+        $existing = Get-ScheduledTask -TaskName $script:WingetUpgradeTaskName -ErrorAction SilentlyContinue
+        if (-not $existing) {
+            Write-Host "Aucune tâche '$script:WingetUpgradeTaskName' à supprimer." -ForegroundColor Yellow
+        }
+        else {
+            Unregister-ScheduledTask -TaskName $script:WingetUpgradeTaskName -Confirm:$false
+            Write-Host "Tâche '$script:WingetUpgradeTaskName' supprimée." -ForegroundColor Green
+        }
+    }
+    catch {
+        Write-Host "Échec suppression : $($_.Exception.Message)" -ForegroundColor Red
+    }
+    if (-not $NoPause) { Pause }
+}
+
+function Show-WingetUpgradeTaskStatus {
+    $task = Get-ScheduledTask -TaskName $script:WingetUpgradeTaskName -ErrorAction SilentlyContinue
+    if (-not $task) {
+        Write-Host "Statut : absente" -ForegroundColor Yellow
+        return
+    }
+    $info = Get-ScheduledTaskInfo -TaskName $script:WingetUpgradeTaskName
+    Write-Host "Statut     : $($task.State)" -ForegroundColor Cyan
+    Write-Host "Dernière   : $($info.LastRunTime) (code $($info.LastTaskResult))" -ForegroundColor DarkGray
+    Write-Host "Prochaine  : $($info.NextRunTime)" -ForegroundColor DarkGray
+}
+
+function Open-WingetUpgradeTaskMenu {
+    do {
+        Clear-Host
+        Write-Host "=== MAJ WINGET AUTO (TÂCHE PLANIFIÉE) ===" -ForegroundColor Cyan
+        Write-Host "Upgrade quotidien + rattrapage si l'heure a été manquée." -ForegroundColor DarkGray
+        Write-Host ""
+        Show-WingetUpgradeTaskStatus
+        Write-Host ""
+        Write-Host "1. Activer (tous les jours 12:00 + rattrapage)" -ForegroundColor Green
+        Write-Host "2. Activer (tous les jours 18:00 + rattrapage)" -ForegroundColor Green
+        Write-Host "3. Lancer la MAJ maintenant" -ForegroundColor Yellow
+        Write-Host "4. Désactiver / supprimer la tâche" -ForegroundColor Red
+        Write-Host "5. Retour" -ForegroundColor Gray
+        Write-Host ""
+        $c = Read-Host "Choix"
+
+        switch ($c) {
+            "1" { Register-WingetUpgradeTask -At "12:00" }
+            "2" { Register-WingetUpgradeTask -At "18:00" }
+            "3" {
+                Write-Host "`n→ winget upgrade --all..." -ForegroundColor Yellow
+                winget upgrade --all --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
+                Pause
+            }
+            "4" { Unregister-WingetUpgradeTask }
+            "5" { return }
+            default {
+                Write-Host "Choix invalide" -ForegroundColor Red
+                Start-Sleep 1
+            }
+        }
+    } while ($true)
 }
 
 function Invoke-SilentMode {
@@ -430,10 +565,14 @@ function Invoke-SilentMode {
         "winutil-appx" {
             & ([ScriptBlock]::Create((Invoke-RestMethod -Uri "https://christitus.com/win" -UseBasicParsing))) -Preset AppxDefault
         }
+        "winget-task" {
+            Register-WingetUpgradeTask -At "12:00" -NoPause | Out-Null
+        }
         default {
             Write-Host "Mode inconnu : $InstallMode" -ForegroundColor Red
             Write-Host "Apps: standard|gaming|dev|full" -ForegroundColor DarkGray
             Write-Host "WinUtil: winutil-oneclick|winutil-standard|winutil-minimal|winutil-advanced|winutil-appx" -ForegroundColor DarkGray
+            Write-Host "Autre: winget-task" -ForegroundColor DarkGray
             exit 1
         }
     }
@@ -466,6 +605,7 @@ do {
             Pause
         }
         "7" { Open-WinUtilMenu }
+        "8" { Open-WingetUpgradeTaskMenu }
         "0" { exit }
         default {
             Write-Host "Choix invalide" -ForegroundColor Red
