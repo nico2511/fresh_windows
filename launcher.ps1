@@ -150,6 +150,10 @@ function Install-AppEntry {
             Start-Sleep -Seconds 2
             Apply-PowerToysProfile | Out-Null
         }
+        if ($ok -and $App -eq 'OO-Software.ShutUp10') {
+            Start-Sleep -Seconds 1
+            Invoke-ShutUp10Recommended -LaunchGui | Out-Null
+        }
         return $ok
     }
 
@@ -222,6 +226,117 @@ function Apply-PowerToysProfile {
     }
 
     Write-Host "    Profil PowerToys écrit : $settingsPath" -ForegroundColor DarkGray
+    return $true
+}
+
+function Find-ShutUp10Executable {
+    $candidates = @()
+
+    # WinUtil cache
+    $candidates += Join-Path $env:LOCALAPPDATA "winutil\ooshutup10.exe"
+
+    # Winget links / packages (portable)
+    $link = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\ooshutup10.exe"
+    $candidates += $link
+
+    try {
+        $pkgRoots = @(
+            (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages"),
+            (Join-Path $env:ProgramFiles "WinGet\Packages")
+        )
+        foreach ($root in $pkgRoots) {
+            if (Test-Path $root) {
+                Get-ChildItem $root -Directory -Filter "OO-Software.ShutUp10*" -ErrorAction SilentlyContinue |
+                    ForEach-Object {
+                        Get-ChildItem $_.FullName -Recurse -Filter "ooshutup10*.exe" -ErrorAction SilentlyContinue |
+                            Select-Object -First 2 -ExpandProperty FullName
+                    } | ForEach-Object { $candidates += $_ }
+            }
+        }
+    } catch { }
+
+    # PATH
+    $cmd = Get-Command ooshutup10.exe -ErrorAction SilentlyContinue
+    if ($cmd) { $candidates += $cmd.Source }
+
+    foreach ($c in $candidates) {
+        if ($c -and (Test-Path -LiteralPath $c)) { return $c }
+    }
+    return $null
+}
+
+function Get-ShutUp10Exe {
+    $exe = Find-ShutUp10Executable
+    if ($exe) { return $exe }
+
+    # Fallback : portable officiel (comme WinUtil)
+    $destDir = Join-Path $env:LOCALAPPDATA "winutil"
+    $dest = Join-Path $destDir "ooshutup10.exe"
+    New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+    Write-Host "  → Téléchargement O&O ShutUp10 (portable)..." -ForegroundColor Gray
+    try {
+        # URL winget / package O&O (version flottante via page produit si besoin)
+        $url = "https://dl5.oo-software.com/files/ooshutup10/OOSU10.exe"
+        Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+        if (Test-Path -LiteralPath $dest) { return $dest }
+    }
+    catch {
+        Write-Host "    Échec download ShutUp10 : $($_.Exception.Message)" -ForegroundColor Red
+    }
+    return $null
+}
+
+function Invoke-ShutUp10Recommended {
+    param(
+        [switch]$LaunchGui,
+        [switch]$NoPause
+    )
+
+    Write-Host "`n→ O&O ShutUp10++" -ForegroundColor Cyan
+    $exe = Get-ShutUp10Exe
+    if (-not $exe) {
+        Write-Host "  ShutUp10 introuvable. Installe OO-Software.ShutUp10 (apps standard) d'abord." -ForegroundColor Red
+        if (-not $NoPause) { Pause }
+        return $false
+    }
+
+    Write-Host "  Exe : $exe" -ForegroundColor DarkGray
+
+    # Free v3 : pas de vrai CLI « apply recommended » documenté (Premium = protection auto).
+    # On tente un import silencieux SI un profil .cfg est hébergé sur le repo.
+    $cfgUrl = "$BaseUrl/shutup10-recommended.cfg"
+    $cfgLocal = Join-Path $env:TEMP "fresh_windows-shutup10-recommended.cfg"
+    $cfgOk = $false
+    try {
+        Invoke-WebRequest -Uri $cfgUrl -OutFile $cfgLocal -UseBasicParsing -ErrorAction Stop
+        if ((Test-Path $cfgLocal) -and ((Get-Item $cfgLocal).Length -gt 100)) {
+            # Legacy quiet apply (v1/v2 et parfois encore accepté)
+            Write-Host "  → Tentative d'import silencieux du profil GitHub..." -ForegroundColor Yellow
+            $p = Start-Process -FilePath $exe -ArgumentList @("`"$cfgLocal`"", "/quiet") -PassThru -Wait -WindowStyle Hidden
+            if ($p.ExitCode -eq 0) {
+                Write-Host "  Profil appliqué via /quiet." -ForegroundColor Green
+                $cfgOk = $true
+            }
+            else {
+                Write-Host "  /quiet non supporté ou échec (code $($p.ExitCode)) — ouverture GUI." -ForegroundColor DarkYellow
+            }
+        }
+    }
+    catch {
+        Write-Host "  Pas de configs/shutup10-recommended.cfg sur GitHub (normal pour l'instant)." -ForegroundColor DarkGray
+    }
+
+    if (-not $cfgOk -or $LaunchGui) {
+        Write-Host ""
+        Write-Host "  Free ShutUp10++ : applique le profil recommandé dans l'UI :" -ForegroundColor Yellow
+        Write-Host "    Actions → Appliquer tous les paramètres recommandés" -ForegroundColor White
+        Write-Host "  (crée un point de restauration — c'est normal)" -ForegroundColor DarkGray
+        Write-Host "  Premium = ré-application auto après Windows Update." -ForegroundColor DarkGray
+        Write-Host ""
+        Start-Process -FilePath $exe
+    }
+
+    if (-not $NoPause) { Pause }
     return $true
 }
 
@@ -463,8 +578,9 @@ function Open-WinUtilMenu {
         Write-Host "3. Preset Minimal (WinUtil)" -ForegroundColor Yellow
         Write-Host "4. Preset Advanced (WinUtil)" -ForegroundColor Magenta
         Write-Host "5. AppX bloat — retire les apps safe (via -Config)" -ForegroundColor DarkYellow
-        Write-Host "6. Ouvrir WinUtil (interface graphique)" -ForegroundColor White
-        Write-Host "7. Retour" -ForegroundColor Gray
+        Write-Host "6. O&O ShutUp10 — profil recommandé (GUI / cfg)" -ForegroundColor White
+        Write-Host "7. Ouvrir WinUtil (interface graphique)" -ForegroundColor Gray
+        Write-Host "8. Retour" -ForegroundColor DarkGray
         Write-Host ""
         $c = Read-Host "Choix"
 
@@ -474,11 +590,12 @@ function Open-WinUtilMenu {
             "3" { Invoke-WinUtilPreset -Preset Minimal }
             "4" { Invoke-WinUtilPreset -Preset Advanced }
             "5" { Invoke-WinUtilConfig -ConfigUrl "$BaseUrl/winutil-appx.json" -Label "AppX bloat" }
-            "6" {
+            "6" { Invoke-ShutUp10Recommended -LaunchGui }
+            "7" {
                 Write-Host "Lancement de WinUtil (GUI)..." -ForegroundColor Yellow
                 irm "https://christitus.com/win" | iex
             }
-            "7" { return }
+            "8" { return }
             default {
                 Write-Host "Choix invalide" -ForegroundColor Red
                 Start-Sleep 1
@@ -907,6 +1024,9 @@ function Invoke-SilentMode {
         }
         "powertoys-profile" {
             Apply-PowerToysProfile | Out-Null
+        }
+        "shutup10" {
+            Invoke-ShutUp10Recommended -LaunchGui -NoPause
         }
         default {
             Write-Host "Mode inconnu : $InstallMode" -ForegroundColor Red
