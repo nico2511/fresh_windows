@@ -1,20 +1,31 @@
 #Requires -RunAsAdministrator
 # ============================================================
-#  TOOLBOX REINSTALL WINDOWS 
-#  Listes toujours lues depuis GitHub (édition à distance)
+#  Fresh Windows — toolbox reinstall / maintenance
+#  Configs lues depuis GitHub (édition à distance)
 #
-#  Modes non interactifs (sans menu) :
+#  Modes non interactifs :
 #    $env:FRESH_WIN_MODE='full'; irm ... | iex
-#    Modes apps : standard | gaming | dev | full
-#    Modes WinUtil : winutil-oneclick | winutil-standard | winutil-minimal | winutil-advanced | winutil-appx
-#    Autre : winget-task | tasks (crée toutes les tâches planifiées)
+#    Apps : standard | gaming | dev | full
+#    WinUtil : winutil-oneclick | winutil-standard | winutil-minimal |
+#              winutil-advanced | winutil-appx | maintenance
+#    Autre : tasks | game-mode | powertoys-profile | shutup10
+#
+#  Pin de version (commit / tag / branche) :
+#    $env:FRESH_WIN_REF='abc1234'
+#    irm https://raw.githubusercontent.com/nico2511/fresh_windows/$env:FRESH_WIN_REF/launcher.ps1 | iex
 # ============================================================
 
 # Via env (compatible irm | iex) — pas de param() qui casse le pipe
 $Mode = if ($env:FRESH_WIN_MODE) { $env:FRESH_WIN_MODE.Trim().ToLowerInvariant() } else { 'menu' }
+$RepoRef = if ($env:FRESH_WIN_REF -and $env:FRESH_WIN_REF.Trim()) {
+    $env:FRESH_WIN_REF.Trim()
+} else {
+    'main'
+}
 
-$ErrorActionPreference = "Continue"
-$Host.UI.RawUI.WindowTitle = "Toolbox AMD Gamer + Cursor"
+# Stop = les échecs remontent (try/catch locaux pour les cas attendus)
+$ErrorActionPreference = "Stop"
+$Host.UI.RawUI.WindowTitle = "Fresh Windows"
 
 # TLS 1.2 requis sur certaines machines / vieux PowerShell
 try {
@@ -23,11 +34,14 @@ try {
 } catch { }
 
 # Source unique : listes JSON sur GitHub (pas de configs locales)
-$BaseUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/main/configs"
-$GuidesBaseUrl = "https://github.com/nico2511/fresh_windows/blob/main/guides"
-$LauncherUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/main/launcher.ps1"
-$IconUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/main/assets/fresh-windows.ico"
+$RepoRawRoot = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef"
+$RepoBlobRoot = "https://github.com/nico2511/fresh_windows/blob/$RepoRef"
+$BaseUrl = "$RepoRawRoot/configs"
+$GuidesBaseUrl = "$RepoBlobRoot/guides"
+$LauncherUrl = "$RepoRawRoot/launcher.ps1"
+$IconUrl = "$RepoRawRoot/assets/fresh-windows.ico"
 $FreshAppData = Join-Path $env:LOCALAPPDATA "FreshWindows"
+$script:FreshBrand = "Fresh Windows"
 
 function Get-Config {
     param([string]$FileName)
@@ -77,7 +91,7 @@ function Show-InstallProgress {
 
     Write-Progress -Activity "Installation : $Category" -Status "$Current / $Total — $App" -PercentComplete $pct
     Write-Host ("  [{0}] {1,3}%  ({2}/{3})  {4}" -f $bar, $pct, $Current, $Total, $App) -ForegroundColor DarkCyan
-    try { $Host.UI.RawUI.WindowTitle = "Toolbox [$Current/$Total] $Category — $App" } catch { }
+    try { $Host.UI.RawUI.WindowTitle = "Fresh Windows [$Current/$Total] $Category — $App" } catch { }
 }
 
 function Get-AppLabel {
@@ -359,10 +373,17 @@ function Invoke-MaintenanceReapply {
     param([switch]$NoPause)
 
     Write-Host "`n=== MAINTENANCE HEBDO : WinUtil + ShutUp10 ===" -ForegroundColor Cyan
-    Invoke-WinUtilOneClick -NoPause
-    Invoke-ShutUp10Recommended -NoPause
-    Write-Host "`nMaintenance terminée." -ForegroundColor Green
+    $wuOk = Invoke-WinUtilOneClick -NoPause
+    $suOk = Invoke-ShutUp10Recommended -NoPause
+    $ok = [bool]$wuOk -and [bool]$suOk
+    if ($ok) {
+        Write-Host "`nMaintenance terminée." -ForegroundColor Green
+    }
+    else {
+        Write-Host "`nMaintenance terminée avec des erreurs." -ForegroundColor Red
+    }
     if (-not $NoPause) { Pause }
+    return $ok
 }
 
 function Install-FromJson {
@@ -400,10 +421,11 @@ function Install-FromJson {
     }
 
     Write-Progress -Activity "Installation : $Category" -Completed
-    try { $Host.UI.RawUI.WindowTitle = "Toolbox AMD Gamer + Cursor" } catch { }
+    try { $Host.UI.RawUI.WindowTitle = $script:FreshBrand } catch { }
 
     if ($failed.Count -gt 0) {
         Write-Host "`nÉchecs ($Category) : $($failed -join ', ')" -ForegroundColor Red
+        Write-Host "  ($($failed.Count)/$total en échec — codes winget / réseau non ignorés)" -ForegroundColor DarkYellow
     }
     else {
         Write-Host "`nCatégorie $Category terminée. [$total/$total]" -ForegroundColor Green
@@ -529,6 +551,7 @@ function Invoke-WinUtilOneClick {
     Write-Host "Tweaks Standard + AppX bloat + Hyper-V + prefs + Ultimate Performance" -ForegroundColor DarkGray
     Write-Host "Config : $configUrl" -ForegroundColor DarkGray
 
+    $ok = $false
     try {
         Write-Host "`n[1/3] WinUtil : Standard + AppX (safe) + Hyper-V..." -ForegroundColor Yellow
         & ([ScriptBlock]::Create((Invoke-RestMethod -Uri "https://christitus.com/win" -UseBasicParsing))) -Config $configUrl
@@ -540,13 +563,16 @@ function Invoke-WinUtilOneClick {
         Enable-UltimatePerformance
 
         Write-Host "`nProfil one-click terminé. Un redémarrage peut être requis (Hyper-V)." -ForegroundColor Green
+        $ok = $true
     }
     catch {
         Write-Host "Échec du profil one-click" -ForegroundColor Red
         Write-Host $_.Exception.Message -ForegroundColor DarkRed
+        $ok = $false
     }
 
     if (-not $NoPause) { Pause }
+    return $ok
 }
 
 function Invoke-WinUtilConfig {
@@ -559,35 +585,44 @@ function Invoke-WinUtilConfig {
 
     Write-Host "`n→ WinUtil $Label (sans UI, via -Config)..." -ForegroundColor Yellow
     Write-Host "  Config : $ConfigUrl" -ForegroundColor DarkGray
+    $ok = $false
     try {
         & ([ScriptBlock]::Create((Invoke-RestMethod -Uri "https://christitus.com/win" -UseBasicParsing))) -Config $ConfigUrl
         Write-Host "`n$Label terminé." -ForegroundColor Green
+        $ok = $true
     }
     catch {
         Write-Host "Échec WinUtil $Label" -ForegroundColor Red
         Write-Host $_.Exception.Message -ForegroundColor DarkRed
+        $ok = $false
     }
     if (-not $NoPause) { Pause }
+    return $ok
 }
 
 function Invoke-WinUtilPreset {
     param(
         [Parameter(Mandatory)]
         [ValidateSet('Standard', 'Minimal', 'Advanced')]
-        [string]$Preset
+        [string]$Preset,
+        [switch]$NoPause
     )
 
     Write-Host "`n→ WinUtil preset '$Preset' (sans UI)..." -ForegroundColor Yellow
     Write-Host "  Source : https://christitus.com/win" -ForegroundColor DarkGray
+    $ok = $false
     try {
         & ([ScriptBlock]::Create((Invoke-RestMethod -Uri "https://christitus.com/win" -UseBasicParsing))) -Preset $Preset
         Write-Host "`nPreset '$Preset' terminé." -ForegroundColor Green
+        $ok = $true
     }
     catch {
         Write-Host "Échec WinUtil preset '$Preset'" -ForegroundColor Red
         Write-Host $_.Exception.Message -ForegroundColor DarkRed
+        $ok = $false
     }
-    Pause
+    if (-not $NoPause) { Pause }
+    return $ok
 }
 
 function Open-WinUtilMenu {
@@ -632,8 +667,9 @@ function Open-WinUtilMenu {
 function Show-Menu {
     Clear-Host
     Write-Host "=======================================================" -ForegroundColor Cyan
-    Write-Host "       TOOLBOX AMD GAMER + CURSOR (GitHub)" -ForegroundColor Cyan
+    Write-Host "              FRESH WINDOWS (GitHub)" -ForegroundColor Cyan
     Write-Host "=======================================================" -ForegroundColor Cyan
+    Write-Host "Ref     : $RepoRef" -ForegroundColor DarkGray
     Write-Host "Configs : $BaseUrl" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "1. Installer Apps Standard" -ForegroundColor Green
@@ -713,7 +749,7 @@ function Register-AllScheduledTasks {
 
     # 2) WinUtil + ShutUp10 dimanche 12:00 + rattrapage
     try {
-        $maintInner = "`$env:FRESH_WIN_MODE='maintenance'; irm '$LauncherUrl' | iex"
+        $maintInner = "`$env:FRESH_WIN_REF='$RepoRef'; `$env:FRESH_WIN_MODE='maintenance'; irm '$LauncherUrl' | iex"
         $maintArg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$maintInner`""
         $maintAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $maintArg
         $maintTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At "12:00"
@@ -933,7 +969,7 @@ function Invoke-GameModeKill {
     $list = Get-Config -FileName "game-mode-kill.json"
     if (-not $list) {
         if (-not $NoPause) { Pause }
-        return
+        return $false
     }
 
     # Ne jamais tuer le shell courant
@@ -971,69 +1007,90 @@ function Invoke-GameModeKill {
 
     Write-Host "`nAstuce : active aussi le plan Ultimate Performance (menu WinUtil one-click)." -ForegroundColor DarkCyan
     if (-not $NoPause) { Pause }
+    return ($skipped.Count -eq 0)
 }
 
 function Invoke-SilentMode {
     param([string]$InstallMode)
 
-    Write-Host "Mode silencieux : $InstallMode" -ForegroundColor Cyan
-    switch ($InstallMode) {
-        "standard" {
-            Install-FromJson -FileName "apps-standard.json" -Category "Standard" -NoPause | Out-Null
-        }
-        "gaming" {
-            Install-FromJson -FileName "apps-gaming.json" -Category "Gaming" -NoPause | Out-Null
-        }
-        "dev" {
-            Install-FromJson -FileName "apps-dev.json" -Category "Dev" -NoPause | Out-Null
-        }
-        "full" {
-            Install-FromJson -FileName "apps-standard.json" -Category "Standard" -NoPause | Out-Null
-            Install-FromJson -FileName "apps-gaming.json" -Category "Gaming" -NoPause | Out-Null
-            Install-FromJson -FileName "apps-dev.json" -Category "Dev" -NoPause | Out-Null
-            Write-Host "`nFull Setup terminé !" -ForegroundColor Green
-        }
-        "winutil-oneclick" {
-            Invoke-WinUtilOneClick -NoPause
-        }
-        "maintenance" {
-            Invoke-MaintenanceReapply -NoPause
-        }
-        "winutil-standard" {
-            & ([ScriptBlock]::Create((Invoke-RestMethod -Uri "https://christitus.com/win" -UseBasicParsing))) -Preset Standard
-        }
-        "winutil-minimal" {
-            & ([ScriptBlock]::Create((Invoke-RestMethod -Uri "https://christitus.com/win" -UseBasicParsing))) -Preset Minimal
-        }
-        "winutil-advanced" {
-            & ([ScriptBlock]::Create((Invoke-RestMethod -Uri "https://christitus.com/win" -UseBasicParsing))) -Preset Advanced
-        }
-        "winutil-appx" {
-            Invoke-WinUtilConfig -ConfigUrl "$BaseUrl/winutil-appx.json" -Label "AppX bloat" -NoPause
-        }
-        "winget-task" {
-            Register-AllScheduledTasks -NoPause | Out-Null
-        }
-        "winutil-task" {
-            Register-AllScheduledTasks -NoPause | Out-Null
-        }
-        "tasks" {
-            Register-AllScheduledTasks -NoPause | Out-Null
-        }
-        "game-mode" {
-            Invoke-GameModeKill -NoPause
-        }
-        "powertoys-profile" {
-            Apply-PowerToysProfile | Out-Null
-        }
-        "shutup10" {
-            Invoke-ShutUp10Recommended -LaunchGui -NoPause
-        }
-        default {
-            Write-Host "Mode inconnu : $InstallMode" -ForegroundColor Red
-            exit 1
+    Write-Host "Mode silencieux : $InstallMode (ref=$RepoRef)" -ForegroundColor Cyan
+    $ok = $true
+
+    try {
+        switch ($InstallMode) {
+            "standard" {
+                $ok = [bool](Install-FromJson -FileName "apps-standard.json" -Category "Standard" -NoPause)
+            }
+            "gaming" {
+                $ok = [bool](Install-FromJson -FileName "apps-gaming.json" -Category "Gaming" -NoPause)
+            }
+            "dev" {
+                $ok = [bool](Install-FromJson -FileName "apps-dev.json" -Category "Dev" -NoPause)
+            }
+            "full" {
+                $a = [bool](Install-FromJson -FileName "apps-standard.json" -Category "Standard" -NoPause)
+                $b = [bool](Install-FromJson -FileName "apps-gaming.json" -Category "Gaming" -NoPause)
+                $c = [bool](Install-FromJson -FileName "apps-dev.json" -Category "Dev" -NoPause)
+                $ok = $a -and $b -and $c
+                if ($ok) {
+                    Write-Host "`nFull Setup terminé !" -ForegroundColor Green
+                }
+                else {
+                    Write-Host "`nFull Setup terminé avec des échecs." -ForegroundColor Red
+                }
+            }
+            "winutil-oneclick" {
+                $ok = [bool](Invoke-WinUtilOneClick -NoPause)
+            }
+            "maintenance" {
+                $ok = [bool](Invoke-MaintenanceReapply -NoPause)
+            }
+            "winutil-standard" {
+                $ok = [bool](Invoke-WinUtilPreset -Preset Standard -NoPause)
+            }
+            "winutil-minimal" {
+                $ok = [bool](Invoke-WinUtilPreset -Preset Minimal -NoPause)
+            }
+            "winutil-advanced" {
+                $ok = [bool](Invoke-WinUtilPreset -Preset Advanced -NoPause)
+            }
+            "winutil-appx" {
+                $ok = [bool](Invoke-WinUtilConfig -ConfigUrl "$BaseUrl/winutil-appx.json" -Label "AppX bloat" -NoPause)
+            }
+            "winget-task" {
+                $ok = [bool](Register-AllScheduledTasks -NoPause)
+            }
+            "winutil-task" {
+                $ok = [bool](Register-AllScheduledTasks -NoPause)
+            }
+            "tasks" {
+                $ok = [bool](Register-AllScheduledTasks -NoPause)
+            }
+            "game-mode" {
+                $ok = [bool](Invoke-GameModeKill -NoPause)
+            }
+            "powertoys-profile" {
+                $ok = [bool](Apply-PowerToysProfile)
+            }
+            "shutup10" {
+                $ok = [bool](Invoke-ShutUp10Recommended -NoPause)
+            }
+            default {
+                Write-Host "Mode inconnu : $InstallMode" -ForegroundColor Red
+                exit 1
+            }
         }
     }
+    catch {
+        Write-Host "Erreur fatale (mode $InstallMode) : $($_.Exception.Message)" -ForegroundColor Red
+        $ok = $false
+    }
+
+    if (-not $ok) {
+        Write-Host "`nÉchec — exit 1 (voir messages ci-dessus)." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "`nOK — exit 0" -ForegroundColor Green
     exit 0
 }
 
@@ -1055,14 +1112,15 @@ function Install-FreshWindowsDesktopShortcut {
             Invoke-WebRequest -Uri $IconUrl -OutFile $iconPath -UseBasicParsing
         }
 
-        # Stub local : toujours la dernière version GitHub, en admin
+        # Stub local : même ref GitHub que ce run, en admin
         $stubPath = Join-Path $FreshAppData "Launch-FreshWindows.ps1"
         $stub = @"
 #Requires -RunAsAdministrator
-`$ErrorActionPreference = 'Continue'
+`$ErrorActionPreference = 'Stop'
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 } catch {}
+`$env:FRESH_WIN_REF = '$RepoRef'
 irm '$LauncherUrl' | iex
 "@
         Set-Content -LiteralPath $stubPath -Value $stub -Encoding UTF8
@@ -1076,7 +1134,7 @@ irm '$LauncherUrl' | iex
         $lnk.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$stubPath`""
         $lnk.WorkingDirectory = $FreshAppData
         $lnk.WindowStyle = 1
-        $lnk.Description = "Toolbox Fresh Windows (GitHub) — admin"
+        $lnk.Description = "Fresh Windows (GitHub) — admin"
         if (Test-Path -LiteralPath $iconPath) {
             $lnk.IconLocation = "$iconPath,0"
         }
@@ -1106,31 +1164,51 @@ do {
     Show-Menu
     $choice = Read-Host "Ton choix"
 
-    switch ($choice) {
-        "1" { Install-FromJson -FileName "apps-standard.json" -Category "Standard" | Out-Null }
-        "2" { Install-FromJson -FileName "apps-gaming.json" -Category "Gaming" | Out-Null }
-        "3" { Install-FromJson -FileName "apps-dev.json" -Category "Dev" | Out-Null }
-        "4" {
-            Install-FromJson -FileName "apps-standard.json" -Category "Standard" -NoPause | Out-Null
-            Install-FromJson -FileName "apps-gaming.json" -Category "Gaming" -NoPause | Out-Null
-            Install-FromJson -FileName "apps-dev.json" -Category "Dev" -NoPause | Out-Null
-            Write-Host "`nFull Setup terminé !" -ForegroundColor Green
-            Pause
+    try {
+        switch ($choice) {
+            "1" { Install-FromJson -FileName "apps-standard.json" -Category "Standard" | Out-Null }
+            "2" { Install-FromJson -FileName "apps-gaming.json" -Category "Gaming" | Out-Null }
+            "3" { Install-FromJson -FileName "apps-dev.json" -Category "Dev" | Out-Null }
+            "4" {
+                $a = [bool](Install-FromJson -FileName "apps-standard.json" -Category "Standard" -NoPause)
+                $b = [bool](Install-FromJson -FileName "apps-gaming.json" -Category "Gaming" -NoPause)
+                $c = [bool](Install-FromJson -FileName "apps-dev.json" -Category "Dev" -NoPause)
+                if ($a -and $b -and $c) {
+                    Write-Host "`nFull Setup terminé !" -ForegroundColor Green
+                }
+                else {
+                    Write-Host "`nFull Setup terminé avec des échecs (détail ci-dessus)." -ForegroundColor Red
+                }
+                Pause
+            }
+            "5" { Open-Extensions }
+            "6" {
+                winget source update --disable-interactivity
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host "Échec winget source update (code $LASTEXITCODE)" -ForegroundColor Red
+                }
+                winget upgrade --all --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host "Échec / partiel winget upgrade (code $LASTEXITCODE)" -ForegroundColor Red
+                }
+                else {
+                    Write-Host "winget upgrade terminé." -ForegroundColor Green
+                }
+                Pause
+            }
+            "7" { Open-WinUtilMenu }
+            "8" { Open-ScheduledTasksMenu }
+            "9" { Open-GpuMenu }
+            "10" { Invoke-GameModeKill }
+            "0" { exit 0 }
+            default {
+                Write-Host "Choix invalide" -ForegroundColor Red
+                Start-Sleep 1
+            }
         }
-        "5" { Open-Extensions }
-        "6" {
-            winget source update --disable-interactivity
-            winget upgrade --all --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
-            Pause
-        }
-        "7" { Open-WinUtilMenu }
-        "8" { Open-ScheduledTasksMenu }
-        "9" { Open-GpuMenu }
-        "10" { Invoke-GameModeKill }
-        "0" { exit }
-        default {
-            Write-Host "Choix invalide" -ForegroundColor Red
-            Start-Sleep 1
-        }
+    }
+    catch {
+        Write-Host "`nErreur : $($_.Exception.Message)" -ForegroundColor Red
+        Pause
     }
 } while ($true)
