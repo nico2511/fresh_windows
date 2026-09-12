@@ -1,0 +1,12 @@
+{
+  "amd": {
+    "downloadUrl": "https://drivers.amd.com/drivers/installer/26.10/whql/amd-software-adrenalin-edition-26.8.1-minimalsetup-260818_web.exe",
+    "driversPage": "https://www.amd.com/en/support/download/drivers.html",
+    "guideUrl": "https://github.com/nico2511/fresh_windows/blob/main/guides/amd-adrenalin.md"
+  },
+  "nvidia": {
+    "driversPage": "https://www.nvidia.com/Download/index.aspx",
+    "nvcleanstallUrl": "https://www.techpowerup.com/download/techpowerup-nvcleanstall/",
+    "guideUrl": "https://github.com/nico2511/fresh_windows/blob/main/guides/nvidia-nvcleanstall.md"
+  }
+}

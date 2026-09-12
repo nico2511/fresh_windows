@@ -1,0 +1,21 @@
+{
+  "startup": true,
+  "enabled": {
+    "FancyZones": true,
+    "Keyboard Manager": true,
+    "PowerToys Run": true,
+    "ColorPicker": true,
+    "TextExtractor": true,
+    "Image Resizer": true,
+    "Peek": true,
+    "Awake": true,
+    "PowerRename": true,
+    "Shortcut Guide": false,
+    "CropAndLock": false,
+    "Hosts": false,
+    "RegistryPreview": false,
+    "Environment Variables": false,
+    "Workspaces": false,
+    "AdvancedPaste": false
+  }
+}

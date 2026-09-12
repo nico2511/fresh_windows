@@ -20,6 +20,11 @@
   "WireGuard.WireGuard",
   "WinSCP.WinSCP",
   "Martchus.syncthingtray",
+  "TechPowerUp.NVCleanstall",
+  "ONLYOFFICE.DesktopEditors",
+  "StirlingTools.StirlingPDF",
+  "Wagnardsoft.DisplayDriverUninstaller",
+
   {
     "name": "CyberScribe",
     "url": "https://github.com/nico2511/CyberScribe/releases/latest/download/CyberScribe.exe",

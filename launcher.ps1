@@ -1,6 +1,6 @@
 #Requires -RunAsAdministrator
 # ============================================================
-#  TOOLBOX AMD GAMER + CURSOR - Launcher
+#  TOOLBOX REINSTALL WINDOWS 
 #  Listes toujours lues depuis GitHub (édition à distance)
 #
 #  Modes non interactifs (sans menu) :
@@ -24,6 +24,8 @@ try {
 
 # Source unique : listes JSON sur GitHub (pas de configs locales)
 $BaseUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/main/configs"
+$GuidesBaseUrl = "https://github.com/nico2511/fresh_windows/blob/main/guides"
+$LauncherUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/main/launcher.ps1"
 
 function Get-Config {
     param([string]$FileName)
@@ -34,6 +36,23 @@ function Get-Config {
             throw "Config vide ou invalide."
         }
         return @($json)
+    }
+    catch {
+        Write-Host "Erreur lors du téléchargement de $FileName" -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor DarkRed
+        return $null
+    }
+}
+
+function Get-ConfigObject {
+    param([string]$FileName)
+    try {
+        $url  = "$BaseUrl/$FileName"
+        $json = Invoke-RestMethod -Uri $url -UseBasicParsing
+        if ($null -eq $json) {
+            throw "Config vide ou invalide."
+        }
+        return $json
     }
     catch {
         Write-Host "Erreur lors du téléchargement de $FileName" -ForegroundColor Red
@@ -126,7 +145,12 @@ function Install-AppEntry {
     if ($App -is [string]) {
         winget install -e --id $App --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
         # 0 = OK, -1978335189 (0x8A15002B) = déjà installé
-        return ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189)
+        $ok = ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189)
+        if ($ok -and $App -eq 'Microsoft.PowerToys') {
+            Start-Sleep -Seconds 2
+            Apply-PowerToysProfile | Out-Null
+        }
+        return $ok
     }
 
     if ($App.url) {
@@ -135,6 +159,70 @@ function Install-AppEntry {
 
     Write-Host "    Entrée non reconnue (attendu: winget id ou objet url)." -ForegroundColor Red
     return $false
+}
+
+function Apply-PowerToysProfile {
+    Write-Host "  → Application du profil PowerToys..." -ForegroundColor Gray
+    $profile = Get-ConfigObject -FileName "powertoys-profile.json"
+    if (-not $profile) {
+        Write-Host "    Profil PowerToys introuvable sur GitHub." -ForegroundColor Red
+        return $false
+    }
+
+    $settingsPath = Join-Path $env:LOCALAPPDATA "Microsoft\PowerToys\settings.json"
+    $dir = Split-Path $settingsPath -Parent
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+
+    # Stopper PowerToys pour écrire settings.json proprement
+    Get-Process -Name "PowerToys*","PowerToys.Settings" -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 800
+
+    $settings = $null
+    if (Test-Path -LiteralPath $settingsPath) {
+        try {
+            $settings = Get-Content -LiteralPath $settingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        } catch {
+            $settings = $null
+        }
+    }
+    if (-not $settings) {
+        $settings = [pscustomobject]@{
+            startup = $true
+            enabled = [pscustomobject]@{}
+        }
+    }
+
+    if ($null -ne $profile.startup) {
+        $settings | Add-Member -NotePropertyName startup -NotePropertyValue ([bool]$profile.startup) -Force
+    }
+
+    if (-not $settings.enabled) {
+        $settings | Add-Member -NotePropertyName enabled -NotePropertyValue ([pscustomobject]@{}) -Force
+    }
+
+    if ($profile.enabled) {
+        foreach ($prop in $profile.enabled.PSObject.Properties) {
+            $settings.enabled | Add-Member -NotePropertyName $prop.Name -NotePropertyValue ([bool]$prop.Value) -Force
+        }
+    }
+
+    $settings | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $settingsPath -Encoding UTF8
+
+    # Relancer PowerToys si installé
+    $ptCandidates = @(
+        "$env:LOCALAPPDATA\PowerToys\PowerToys.exe",
+        "$env:ProgramFiles\PowerToys\PowerToys.exe"
+    )
+    foreach ($exe in $ptCandidates) {
+        if (Test-Path -LiteralPath $exe) {
+            Start-Process -FilePath $exe | Out-Null
+            break
+        }
+    }
+
+    Write-Host "    Profil PowerToys écrit : $settingsPath" -ForegroundColor DarkGray
+    return $true
 }
 
 function Install-FromJson {
@@ -413,12 +501,15 @@ function Show-Menu {
     Write-Host "5. Extensions Navigateur (Firefox / Chrome-based)" -ForegroundColor Yellow
     Write-Host "6. Mettre à jour toutes les apps (winget upgrade --all)" -ForegroundColor White
     Write-Host "7. WinUtil — one-click / presets / GUI" -ForegroundColor Gray
-    Write-Host "8. Tâche planifiée — MAJ winget auto" -ForegroundColor DarkCyan
-    Write-Host "0. Quitter" -ForegroundColor Red
+    Write-Host "8. Tâches planifiées (winget + re-apply WinUtil)" -ForegroundColor DarkCyan
+    Write-Host "9. Carte graphique (AMD / NVIDIA)" -ForegroundColor DarkYellow
+    Write-Host "10. Mode Jeu — kill process dev" -ForegroundColor Red
+    Write-Host "0. Quitter" -ForegroundColor DarkGray
     Write-Host ""
 }
 
 $script:WingetUpgradeTaskName = "FreshWindows-WingetUpgrade"
+$script:WinUtilReapplyTaskName = "FreshWindows-WinUtilReapply"
 
 function Get-WingetExecutable {
     $cmd = Get-Command winget -ErrorAction SilentlyContinue
@@ -440,17 +531,17 @@ function Register-WingetUpgradeTask {
         [switch]$NoPause
     )
 
-    $winget = Get-WingetExecutable
-    if (-not $winget) {
+    if (-not (Get-WingetExecutable)) {
         Write-Host "winget introuvable — impossible de créer la tâche." -ForegroundColor Red
         if (-not $NoPause) { Pause }
         return $false
     }
 
-    $args = "upgrade --all --accept-package-agreements --accept-source-agreements --silent --disable-interactivity"
-    $action = New-ScheduledTaskAction -Execute $winget -Argument $args
+    # source update + upgrade (rattrapage via StartWhenAvailable)
+    $cmd = 'winget source update --disable-interactivity; winget upgrade --all --accept-package-agreements --accept-source-agreements --silent --disable-interactivity'
+    $arg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$cmd`""
+    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg
     $trigger = New-ScheduledTaskTrigger -Daily -At $At
-    # StartWhenAvailable = rattrapage si le PC était éteint à l'heure prévue
     $settings = New-ScheduledTaskSettingsSet `
         -StartWhenAvailable `
         -AllowStartIfOnBatteries `
@@ -470,13 +561,13 @@ function Register-WingetUpgradeTask {
             -Trigger $trigger `
             -Settings $settings `
             -Principal $principal `
-            -Description "MAJ silencieuse de toutes les apps via winget. Rattrapage (StartWhenAvailable) si l'heure quotidienne a été manquée." `
+            -Description "winget source update + upgrade --all. StartWhenAvailable si heure manquée." `
             -Force | Out-Null
 
         Write-Host "`nTâche créée : $script:WingetUpgradeTaskName" -ForegroundColor Green
-        Write-Host "  Horaire   : tous les jours à $At" -ForegroundColor DarkGray
-        Write-Host "  Rattrapage: oui (dès que le PC est allumé / réseau dispo)" -ForegroundColor DarkGray
-        Write-Host "  Action    : winget upgrade --all (silencieux)" -ForegroundColor DarkGray
+        Write-Host "  Horaire    : tous les jours à $At" -ForegroundColor DarkGray
+        Write-Host "  Rattrapage : oui (PC allumé / réseau)" -ForegroundColor DarkGray
+        Write-Host "  Action     : winget source update + upgrade --all" -ForegroundColor DarkGray
         if (-not $NoPause) { Pause }
         return $true
     }
@@ -487,16 +578,63 @@ function Register-WingetUpgradeTask {
     }
 }
 
-function Unregister-WingetUpgradeTask {
-    param([switch]$NoPause)
+function Register-WinUtilReapplyTask {
+    param(
+        [string]$At = "10:00",
+        [switch]$NoPause
+    )
+
+    # Hebdo : Windows Update peut réactiver télémétrie / services
+    $inner = "`$env:FRESH_WIN_MODE='winutil-oneclick'; irm '$LauncherUrl' | iex"
+    $arg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$inner`""
+    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg
+
+    # Dimanche
+    $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At $At
+    $settings = New-ScheduledTaskSettingsSet `
+        -StartWhenAvailable `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -RunOnlyIfNetworkAvailable `
+        -ExecutionTimeLimit (New-TimeSpan -Hours 3) `
+        -MultipleInstances IgnoreNew
+
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest
+
     try {
-        $existing = Get-ScheduledTask -TaskName $script:WingetUpgradeTaskName -ErrorAction SilentlyContinue
+        Register-ScheduledTask `
+            -TaskName $script:WinUtilReapplyTaskName `
+            -Action $action `
+            -Trigger $trigger `
+            -Settings $settings `
+            -Principal $principal `
+            -Description "Re-applique le profil WinUtil one-click (tweaks/prefs) après éventuels resets Windows Update." `
+            -Force | Out-Null
+
+        Write-Host "`nTâche créée : $script:WinUtilReapplyTaskName" -ForegroundColor Green
+        Write-Host "  Horaire    : chaque dimanche à $At" -ForegroundColor DarkGray
+        Write-Host "  Rattrapage : oui" -ForegroundColor DarkGray
+        Write-Host "  Action     : FRESH_WIN_MODE=winutil-oneclick" -ForegroundColor DarkGray
+        if (-not $NoPause) { Pause }
+        return $true
+    }
+    catch {
+        Write-Host "Échec création tâche : $($_.Exception.Message)" -ForegroundColor Red
+        if (-not $NoPause) { Pause }
+        return $false
+    }
+}
+
+function Unregister-NamedTask {
+    param([string]$TaskName, [switch]$NoPause)
+    try {
+        $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         if (-not $existing) {
-            Write-Host "Aucune tâche '$script:WingetUpgradeTaskName' à supprimer." -ForegroundColor Yellow
+            Write-Host "Aucune tâche '$TaskName' à supprimer." -ForegroundColor Yellow
         }
         else {
-            Unregister-ScheduledTask -TaskName $script:WingetUpgradeTaskName -Confirm:$false
-            Write-Host "Tâche '$script:WingetUpgradeTaskName' supprimée." -ForegroundColor Green
+            Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+            Write-Host "Tâche '$TaskName' supprimée." -ForegroundColor Green
         }
     }
     catch {
@@ -505,31 +643,37 @@ function Unregister-WingetUpgradeTask {
     if (-not $NoPause) { Pause }
 }
 
-function Show-WingetUpgradeTaskStatus {
-    $task = Get-ScheduledTask -TaskName $script:WingetUpgradeTaskName -ErrorAction SilentlyContinue
+function Show-NamedTaskStatus {
+    param([string]$TaskName, [string]$Label)
+    Write-Host "-- $Label ($TaskName) --" -ForegroundColor Cyan
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if (-not $task) {
         Write-Host "Statut : absente" -ForegroundColor Yellow
         return
     }
-    $info = Get-ScheduledTaskInfo -TaskName $script:WingetUpgradeTaskName
-    Write-Host "Statut     : $($task.State)" -ForegroundColor Cyan
+    $info = Get-ScheduledTaskInfo -TaskName $TaskName
+    Write-Host "Statut     : $($task.State)" -ForegroundColor Green
     Write-Host "Dernière   : $($info.LastRunTime) (code $($info.LastTaskResult))" -ForegroundColor DarkGray
     Write-Host "Prochaine  : $($info.NextRunTime)" -ForegroundColor DarkGray
 }
 
-function Open-WingetUpgradeTaskMenu {
+function Open-ScheduledTasksMenu {
     do {
         Clear-Host
-        Write-Host "=== MAJ WINGET AUTO (TÂCHE PLANIFIÉE) ===" -ForegroundColor Cyan
-        Write-Host "Upgrade quotidien + rattrapage si l'heure a été manquée." -ForegroundColor DarkGray
+        Write-Host "=== TÂCHES PLANIFIÉES ===" -ForegroundColor Cyan
         Write-Host ""
-        Show-WingetUpgradeTaskStatus
+        Show-NamedTaskStatus -TaskName $script:WingetUpgradeTaskName -Label "MAJ winget"
         Write-Host ""
-        Write-Host "1. Activer (tous les jours 12:00 + rattrapage)" -ForegroundColor Green
-        Write-Host "2. Activer (tous les jours 18:00 + rattrapage)" -ForegroundColor Green
-        Write-Host "3. Lancer la MAJ maintenant" -ForegroundColor Yellow
-        Write-Host "4. Désactiver / supprimer la tâche" -ForegroundColor Red
-        Write-Host "5. Retour" -ForegroundColor Gray
+        Show-NamedTaskStatus -TaskName $script:WinUtilReapplyTaskName -Label "Re-apply WinUtil"
+        Write-Host ""
+        Write-Host "1. Activer MAJ winget (12:00 + rattrapage + source update)" -ForegroundColor Green
+        Write-Host "2. Activer MAJ winget (18:00 + rattrapage + source update)" -ForegroundColor Green
+        Write-Host "3. Lancer MAJ winget maintenant" -ForegroundColor Yellow
+        Write-Host "4. Supprimer tâche winget" -ForegroundColor Red
+        Write-Host "5. Activer re-apply WinUtil (dimanche 10:00 + rattrapage)" -ForegroundColor Cyan
+        Write-Host "6. Lancer re-apply WinUtil maintenant" -ForegroundColor Yellow
+        Write-Host "7. Supprimer tâche WinUtil re-apply" -ForegroundColor Red
+        Write-Host "8. Retour" -ForegroundColor Gray
         Write-Host ""
         $c = Read-Host "Choix"
 
@@ -537,11 +681,128 @@ function Open-WingetUpgradeTaskMenu {
             "1" { Register-WingetUpgradeTask -At "12:00" }
             "2" { Register-WingetUpgradeTask -At "18:00" }
             "3" {
-                Write-Host "`n→ winget upgrade --all..." -ForegroundColor Yellow
+                Write-Host "`n→ winget source update..." -ForegroundColor Yellow
+                winget source update --disable-interactivity
+                Write-Host "→ winget upgrade --all..." -ForegroundColor Yellow
                 winget upgrade --all --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
                 Pause
             }
-            "4" { Unregister-WingetUpgradeTask }
+            "4" { Unregister-NamedTask -TaskName $script:WingetUpgradeTaskName }
+            "5" { Register-WinUtilReapplyTask -At "10:00" }
+            "6" { Invoke-WinUtilOneClick }
+            "7" { Unregister-NamedTask -TaskName $script:WinUtilReapplyTaskName }
+            "8" { return }
+            default {
+                Write-Host "Choix invalide" -ForegroundColor Red
+                Start-Sleep 1
+            }
+        }
+    } while ($true)
+}
+
+function Open-GpuMenu {
+    $gpu = Get-ConfigObject -FileName "gpu.json"
+    do {
+        Clear-Host
+        Write-Host "=== CARTE GRAPHIQUE ===" -ForegroundColor Cyan
+        Write-Host "1. AMD" -ForegroundColor Red
+        Write-Host "2. NVIDIA" -ForegroundColor Green
+        Write-Host "3. Retour" -ForegroundColor Gray
+        Write-Host ""
+        $c = Read-Host "Choix"
+
+        switch ($c) {
+            "1" { Open-AmdGpuMenu -GpuConfig $gpu }
+            "2" { Open-NvidiaGpuMenu -GpuConfig $gpu }
+            "3" { return }
+            default {
+                Write-Host "Choix invalide" -ForegroundColor Red
+                Start-Sleep 1
+            }
+        }
+    } while ($true)
+}
+
+function Open-AmdGpuMenu {
+    param($GpuConfig)
+    do {
+        Clear-Host
+        Write-Host "=== AMD / ADRENALIN ===" -ForegroundColor Red
+        Write-Host "1. Télécharger Adrenalin (setup minimal)" -ForegroundColor Yellow
+        Write-Host "2. Ouvrir la page drivers AMD" -ForegroundColor White
+        Write-Host "3. Ouvrir le guide de config Adrenalin" -ForegroundColor Cyan
+        Write-Host "4. Retour" -ForegroundColor Gray
+        Write-Host ""
+        $c = Read-Host "Choix"
+
+        switch ($c) {
+            "1" {
+                $url = if ($GpuConfig -and $GpuConfig.amd.downloadUrl) { $GpuConfig.amd.downloadUrl } else {
+                    "https://drivers.amd.com/drivers/installer/26.10/whql/amd-software-adrenalin-edition-26.8.1-minimalsetup-260818_web.exe"
+                }
+                $dest = Join-Path $env:TEMP "amd-adrenalin-minimalsetup.exe"
+                Write-Host "`n→ Téléchargement Adrenalin..." -ForegroundColor Yellow
+                Write-Host "  $url" -ForegroundColor DarkGray
+                try {
+                    Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+                    Write-Host "  Sauvé : $dest" -ForegroundColor Green
+                    Start-Process $dest
+                }
+                catch {
+                    Write-Host "Échec téléchargement : $($_.Exception.Message)" -ForegroundColor Red
+                    Write-Host "Ouverture de la page drivers à la place..." -ForegroundColor Yellow
+                    $page = if ($GpuConfig) { $GpuConfig.amd.driversPage } else { "https://www.amd.com/en/support/download/drivers.html" }
+                    Start-Process $page
+                }
+                Pause
+            }
+            "2" {
+                $page = if ($GpuConfig) { $GpuConfig.amd.driversPage } else { "https://www.amd.com/en/support/download/drivers.html" }
+                Start-Process $page
+            }
+            "3" {
+                $guide = if ($GpuConfig -and $GpuConfig.amd.guideUrl) { $GpuConfig.amd.guideUrl } else { "$GuidesBaseUrl/amd-adrenalin.md" }
+                Start-Process $guide
+            }
+            "4" { return }
+            default {
+                Write-Host "Choix invalide" -ForegroundColor Red
+                Start-Sleep 1
+            }
+        }
+    } while ($true)
+}
+
+function Open-NvidiaGpuMenu {
+    param($GpuConfig)
+    do {
+        Clear-Host
+        Write-Host "=== NVIDIA / NVCLEANSTALL ===" -ForegroundColor Green
+        Write-Host "1. Ouvrir le guide NVCleanstall (GitHub)" -ForegroundColor Cyan
+        Write-Host "2. Ouvrir la page drivers NVIDIA" -ForegroundColor White
+        Write-Host "3. Ouvrir la page NVCleanstall" -ForegroundColor Yellow
+        Write-Host "4. Installer NVCleanstall (winget)" -ForegroundColor Magenta
+        Write-Host "5. Retour" -ForegroundColor Gray
+        Write-Host ""
+        $c = Read-Host "Choix"
+
+        switch ($c) {
+            "1" {
+                $guide = if ($GpuConfig -and $GpuConfig.nvidia.guideUrl) { $GpuConfig.nvidia.guideUrl } else { "$GuidesBaseUrl/nvidia-nvcleanstall.md" }
+                Start-Process $guide
+            }
+            "2" {
+                $page = if ($GpuConfig) { $GpuConfig.nvidia.driversPage } else { "https://www.nvidia.com/Download/index.aspx" }
+                Start-Process $page
+            }
+            "3" {
+                $page = if ($GpuConfig) { $GpuConfig.nvidia.nvcleanstallUrl } else { "https://www.techpowerup.com/download/techpowerup-nvcleanstall/" }
+                Start-Process $page
+            }
+            "4" {
+                winget install -e --id TechPowerUp.NVCleanstall --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
+                Pause
+            }
             "5" { return }
             default {
                 Write-Host "Choix invalide" -ForegroundColor Red
@@ -549,6 +810,55 @@ function Open-WingetUpgradeTaskMenu {
             }
         }
     } while ($true)
+}
+
+function Invoke-GameModeKill {
+    param([switch]$NoPause)
+
+    Write-Host "`n=== MODE JEU — kill process dev ===" -ForegroundColor Red
+    Write-Host "Ferme les apps lourdes de dev / navigateur pour libérer RAM/CPU/GPU." -ForegroundColor DarkGray
+
+    $list = Get-Config -FileName "game-mode-kill.json"
+    if (-not $list) {
+        if (-not $NoPause) { Pause }
+        return
+    }
+
+    # Ne jamais tuer le shell courant
+    $selfPid = $PID
+    $killed = @()
+    $skipped = @()
+
+    foreach ($name in $list) {
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $procs = Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $selfPid }
+        if (-not $procs) { continue }
+
+        foreach ($p in $procs) {
+            try {
+                Stop-Process -Id $p.Id -Force -ErrorAction Stop
+                $killed += "$($p.ProcessName) ($($p.Id))"
+            }
+            catch {
+                $skipped += "$($p.ProcessName) ($($p.Id))"
+            }
+        }
+    }
+
+    if ($killed.Count -gt 0) {
+        Write-Host "`nTués ($($killed.Count)) :" -ForegroundColor Green
+        $killed | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
+    }
+    else {
+        Write-Host "`nAucun process de la liste n'était ouvert." -ForegroundColor Yellow
+    }
+    if ($skipped.Count -gt 0) {
+        Write-Host "Ignorés / protégés :" -ForegroundColor DarkYellow
+        $skipped | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
+    }
+
+    Write-Host "`nAstuce : active aussi le plan Ultimate Performance (menu WinUtil one-click)." -ForegroundColor DarkCyan
+    if (-not $NoPause) { Pause }
 }
 
 function Invoke-SilentMode {
@@ -589,11 +899,17 @@ function Invoke-SilentMode {
         "winget-task" {
             Register-WingetUpgradeTask -At "12:00" -NoPause | Out-Null
         }
+        "winutil-task" {
+            Register-WinUtilReapplyTask -At "10:00" -NoPause | Out-Null
+        }
+        "game-mode" {
+            Invoke-GameModeKill -NoPause
+        }
+        "powertoys-profile" {
+            Apply-PowerToysProfile | Out-Null
+        }
         default {
             Write-Host "Mode inconnu : $InstallMode" -ForegroundColor Red
-            Write-Host "Apps: standard|gaming|dev|full" -ForegroundColor DarkGray
-            Write-Host "WinUtil: winutil-oneclick|winutil-standard|winutil-minimal|winutil-advanced|winutil-appx" -ForegroundColor DarkGray
-            Write-Host "Autre: winget-task" -ForegroundColor DarkGray
             exit 1
         }
     }
@@ -622,11 +938,14 @@ do {
         }
         "5" { Open-Extensions }
         "6" {
+            winget source update --disable-interactivity
             winget upgrade --all --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
             Pause
         }
         "7" { Open-WinUtilMenu }
-        "8" { Open-WingetUpgradeTaskMenu }
+        "8" { Open-ScheduledTasksMenu }
+        "9" { Open-GpuMenu }
+        "10" { Invoke-GameModeKill }
         "0" { exit }
         default {
             Write-Host "Choix invalide" -ForegroundColor Red
