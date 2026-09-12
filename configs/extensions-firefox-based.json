@@ -1,9 +1,11 @@
 [
-    "https://addons.mozilla.org/firefox/addon/ublock-origin/",
-    "https://addons.mozilla.org/firefox/addon/bitwarden-password-manager/",
-    "https://addons.mozilla.org/firefox/addon/darkreader/",
-    "https://addons.mozilla.org/firefox/addon/clearurls/",
-    "https://addons.mozilla.org/firefox/addon/sponsorblock/",
-    "https://addons.mozilla.org/firefox/addon/return-youtube-dislikes/",
-    "https://addons.mozilla.org/firefox/addon/istilldontcareaboutcookies/"
-  ]
+  "https://addons.mozilla.org/firefox/addon/ublock-origin/",
+  "https://addons.mozilla.org/firefox/addon/bitwarden-password-manager/",
+  "https://addons.mozilla.org/firefox/addon/darkreader/",
+  "https://addons.mozilla.org/firefox/addon/clearurls/",
+  "https://addons.mozilla.org/firefox/addon/sponsorblock/",
+  "https://addons.mozilla.org/firefox/addon/return-youtube-dislikes/",
+  "https://addons.mozilla.org/firefox/addon/istilldontcareaboutcookies/",
+  "https://addons.mozilla.org/firefox/addon/ghostery/",
+  "https://addons.mozilla.org/firefox/addon/privacy-badger17/"
+]
