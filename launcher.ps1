@@ -26,6 +26,8 @@ try {
 $BaseUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/main/configs"
 $GuidesBaseUrl = "https://github.com/nico2511/fresh_windows/blob/main/guides"
 $LauncherUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/main/launcher.ps1"
+$IconUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/main/assets/fresh-windows.ico"
+$FreshAppData = Join-Path $env:LOCALAPPDATA "FreshWindows"
 
 function Get-Config {
     param([string]$FileName)
@@ -1039,6 +1041,66 @@ function Invoke-SilentMode {
 if ($Mode -ne 'menu') {
     Invoke-SilentMode -InstallMode $Mode
 }
+
+function Install-FreshWindowsDesktopShortcut {
+    $marker = Join-Path $FreshAppData "desktop-shortcut.done"
+    if (Test-Path -LiteralPath $marker) { return }
+
+    try {
+        New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null
+
+        $iconPath = Join-Path $FreshAppData "fresh-windows.ico"
+        if (-not (Test-Path -LiteralPath $iconPath)) {
+            Write-Host "→ Icône Fresh Windows..." -ForegroundColor DarkCyan
+            Invoke-WebRequest -Uri $IconUrl -OutFile $iconPath -UseBasicParsing
+        }
+
+        # Stub local : toujours la dernière version GitHub, en admin
+        $stubPath = Join-Path $FreshAppData "Launch-FreshWindows.ps1"
+        $stub = @"
+#Requires -RunAsAdministrator
+`$ErrorActionPreference = 'Continue'
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+} catch {}
+irm '$LauncherUrl' | iex
+"@
+        Set-Content -LiteralPath $stubPath -Value $stub -Encoding UTF8
+
+        $desktop = [Environment]::GetFolderPath('Desktop')
+        $lnkPath = Join-Path $desktop "Fresh Windows.lnk"
+
+        $wsh = New-Object -ComObject WScript.Shell
+        $lnk = $wsh.CreateShortcut($lnkPath)
+        $lnk.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+        $lnk.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$stubPath`""
+        $lnk.WorkingDirectory = $FreshAppData
+        $lnk.WindowStyle = 1
+        $lnk.Description = "Toolbox Fresh Windows (GitHub) — admin"
+        if (Test-Path -LiteralPath $iconPath) {
+            $lnk.IconLocation = "$iconPath,0"
+        }
+        $lnk.Save()
+
+        # Demander élévation via le raccourci (bit RunAs)
+        try {
+            $bytes = [IO.File]::ReadAllBytes($lnkPath)
+            # Shortcut flags at offset 0x15: set RunAsAdmin bit (0x20)
+            if ($bytes.Length -gt 0x15) {
+                $bytes[0x15] = $bytes[0x15] -bor 0x20
+                [IO.File]::WriteAllBytes($lnkPath, $bytes)
+            }
+        } catch { }
+
+        Set-Content -LiteralPath $marker -Value (Get-Date -Format o) -Encoding UTF8
+        Write-Host "→ Raccourci Bureau créé : Fresh Windows.lnk" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "Raccourci Bureau non créé : $($_.Exception.Message)" -ForegroundColor DarkYellow
+    }
+}
+
+Install-FreshWindowsDesktopShortcut
 
 do {
     Show-Menu
