@@ -7,7 +7,7 @@
 #    $env:FRESH_WIN_MODE='full'; irm ... | iex
 #    Modes apps : standard | gaming | dev | full
 #    Modes WinUtil : winutil-oneclick | winutil-standard | winutil-minimal | winutil-advanced | winutil-appx
-#    Autre : winget-task (crée la tâche planifiée MAJ)
+#    Autre : winget-task | tasks (crée toutes les tâches planifiées)
 # ============================================================
 
 # Via env (compatible irm | iex) — pas de param() qui casse le pipe
@@ -641,7 +641,7 @@ function Show-Menu {
     Write-Host "5. Extensions Navigateur (Firefox / Chrome-based)" -ForegroundColor Yellow
     Write-Host "6. Mettre à jour toutes les apps (winget upgrade --all)" -ForegroundColor White
     Write-Host "7. WinUtil — one-click / presets / GUI" -ForegroundColor Gray
-    Write-Host "8. Tâches planifiées (winget + re-apply WinUtil)" -ForegroundColor DarkCyan
+    Write-Host "8. Tâches planifiées (tout activer en 1 clic)" -ForegroundColor DarkCyan
     Write-Host "9. Carte graphique (AMD / NVIDIA)" -ForegroundColor DarkYellow
     Write-Host "10. Mode Jeu — kill process dev" -ForegroundColor Red
     Write-Host "0. Quitter" -ForegroundColor DarkGray
@@ -651,188 +651,157 @@ function Show-Menu {
 $script:WingetUpgradeTaskName = "FreshWindows-WingetUpgrade"
 $script:WinUtilReapplyTaskName = "FreshWindows-WinUtilReapply"
 
-function Get-WingetExecutable {
-    $cmd = Get-Command winget -ErrorAction SilentlyContinue
-    if ($cmd -and $cmd.Source) { return $cmd.Source }
-    $candidates = @(
-        "$env:LocalAppData\Microsoft\WindowsApps\winget.exe",
-        "$env:ProgramFiles\WindowsApps\Microsoft.DesktopAppInstaller_*_x64__8wekyb3d8bbwe\winget.exe"
-    )
-    foreach ($c in $candidates) {
-        $resolved = Get-Item $c -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($resolved) { return $resolved.FullName }
-    }
-    return $null
+function Test-IsAdmin {
+    try {
+        $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $p  = [Security.Principal.WindowsPrincipal]::new($id)
+        return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch { return $false }
 }
 
-function Register-WingetUpgradeTask {
-    param(
-        [string]$At = "12:00",
-        [switch]$NoPause
-    )
-
-    if (-not (Get-WingetExecutable)) {
-        Write-Host "winget introuvable — impossible de créer la tâche." -ForegroundColor Red
-        if (-not $NoPause) { Pause }
-        return $false
-    }
-
-    # source update + upgrade (rattrapage via StartWhenAvailable)
-    $cmd = 'winget source update --disable-interactivity; winget upgrade --all --accept-package-agreements --accept-source-agreements --silent --disable-interactivity'
-    $arg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$cmd`""
-    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg
-    $trigger = New-ScheduledTaskTrigger -Daily -At $At
-    $settings = New-ScheduledTaskSettingsSet `
+function Get-CommonTaskSettings {
+    param([int]$Hours = 3)
+    return (New-ScheduledTaskSettingsSet `
         -StartWhenAvailable `
         -AllowStartIfOnBatteries `
         -DontStopIfGoingOnBatteries `
         -RunOnlyIfNetworkAvailable `
-        -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
-        -MultipleInstances IgnoreNew `
-        -RestartCount 1 `
-        -RestartInterval (New-TimeSpan -Minutes 5)
+        -ExecutionTimeLimit (New-TimeSpan -Hours $Hours) `
+        -MultipleInstances IgnoreNew)
+}
+
+function Register-AllScheduledTasks {
+    param([switch]$NoPause)
+
+    if (-not (Test-IsAdmin)) {
+        Write-Host "`nAccès refusé : relance le script en PowerShell Administrateur." -ForegroundColor Red
+        Write-Host "  Clic droit → Exécuter en tant qu'administrateur" -ForegroundColor Yellow
+        if (-not $NoPause) { Pause }
+        return $false
+    }
 
     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest
+    $settings  = Get-CommonTaskSettings -Hours 3
+    $ok = $true
 
+    Write-Host "`n→ Création des tâches planifiées (une fois)..." -ForegroundColor Cyan
+
+    # 1) Winget quotidien 12:00 + rattrapage
     try {
+        $wingetCmd = 'winget source update --disable-interactivity; winget upgrade --all --accept-package-agreements --accept-source-agreements --silent --disable-interactivity'
+        $wingetArg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$wingetCmd`""
+        $wingetAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $wingetArg
+        $wingetTrigger = New-ScheduledTaskTrigger -Daily -At "12:00"
+
         Register-ScheduledTask `
             -TaskName $script:WingetUpgradeTaskName `
-            -Action $action `
-            -Trigger $trigger `
+            -Action $wingetAction `
+            -Trigger $wingetTrigger `
             -Settings $settings `
             -Principal $principal `
-            -Description "winget source update + upgrade --all. StartWhenAvailable si heure manquée." `
-            -Force | Out-Null
+            -Description "Fresh Windows: winget source update + upgrade --all (StartWhenAvailable)." `
+            -Force -ErrorAction Stop | Out-Null
 
-        Write-Host "`nTâche créée : $script:WingetUpgradeTaskName" -ForegroundColor Green
-        Write-Host "  Horaire    : tous les jours à $At" -ForegroundColor DarkGray
-        Write-Host "  Rattrapage : oui (PC allumé / réseau)" -ForegroundColor DarkGray
-        Write-Host "  Action     : winget source update + upgrade --all" -ForegroundColor DarkGray
-        if (-not $NoPause) { Pause }
-        return $true
+        Write-Host "  [OK] $script:WingetUpgradeTaskName — tous les jours 12:00 (+ rattrapage)" -ForegroundColor Green
     }
     catch {
-        Write-Host "Échec création tâche : $($_.Exception.Message)" -ForegroundColor Red
-        if (-not $NoPause) { Pause }
-        return $false
+        Write-Host "  [KO] Winget : $($_.Exception.Message)" -ForegroundColor Red
+        $ok = $false
     }
-}
 
-function Register-WinUtilReapplyTask {
-    param(
-        [string]$At = "10:00",
-        [switch]$NoPause
-    )
-
-    # Hebdo : WinUtil one-click + ShutUp10 (cfg silencieux si présent)
-    $inner = "`$env:FRESH_WIN_MODE='maintenance'; irm '$LauncherUrl' | iex"
-    $arg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$inner`""
-    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg
-
-    # Dimanche
-    $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At $At
-    $settings = New-ScheduledTaskSettingsSet `
-        -StartWhenAvailable `
-        -AllowStartIfOnBatteries `
-        -DontStopIfGoingOnBatteries `
-        -RunOnlyIfNetworkAvailable `
-        -ExecutionTimeLimit (New-TimeSpan -Hours 3) `
-        -MultipleInstances IgnoreNew
-
-    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest
-
+    # 2) WinUtil + ShutUp10 dimanche 12:00 + rattrapage
     try {
+        $maintInner = "`$env:FRESH_WIN_MODE='maintenance'; irm '$LauncherUrl' | iex"
+        $maintArg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$maintInner`""
+        $maintAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $maintArg
+        $maintTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At "12:00"
+
         Register-ScheduledTask `
             -TaskName $script:WinUtilReapplyTaskName `
-            -Action $action `
-            -Trigger $trigger `
+            -Action $maintAction `
+            -Trigger $maintTrigger `
             -Settings $settings `
             -Principal $principal `
-            -Description "Hebdo: WinUtil one-click + ShutUp10 (import cfg /quiet si configs/shutup10-recommended.cfg)." `
-            -Force | Out-Null
+            -Description "Fresh Windows: WinUtil one-click + ShutUp10 (StartWhenAvailable)." `
+            -Force -ErrorAction Stop | Out-Null
 
-        Write-Host "`nTâche créée : $script:WinUtilReapplyTaskName" -ForegroundColor Green
-        Write-Host "  Horaire    : chaque dimanche à $At" -ForegroundColor DarkGray
-        Write-Host "  Rattrapage : oui" -ForegroundColor DarkGray
-        Write-Host "  Action     : WinUtil one-click + ShutUp10" -ForegroundColor DarkGray
-        Write-Host "  ShutUp10   : auto si shutup10-recommended.cfg sur GitHub, sinon skip (pas de GUI)" -ForegroundColor DarkGray
-        if (-not $NoPause) { Pause }
-        return $true
+        Write-Host "  [OK] $script:WinUtilReapplyTaskName — dimanche 12:00 (+ rattrapage)" -ForegroundColor Green
+        Write-Host "       WinUtil one-click + ShutUp10 (cfg silencieux si présent)" -ForegroundColor DarkGray
     }
     catch {
-        Write-Host "Échec création tâche : $($_.Exception.Message)" -ForegroundColor Red
-        if (-not $NoPause) { Pause }
-        return $false
+        Write-Host "  [KO] WinUtil/ShutUp10 : $($_.Exception.Message)" -ForegroundColor Red
+        $ok = $false
     }
+
+    if ($ok) {
+        Write-Host "`nTout est en place. PC éteint à l'heure prévue → rattrapage au prochain allumage." -ForegroundColor Cyan
+    }
+    else {
+        Write-Host "`nCertaines tâches ont échoué (souvent: pas admin)." -ForegroundColor Yellow
+    }
+
+    if (-not $NoPause) { Pause }
+    return $ok
 }
 
-function Unregister-NamedTask {
-    param([string]$TaskName, [switch]$NoPause)
-    try {
-        $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        if (-not $existing) {
-            Write-Host "Aucune tâche '$TaskName' à supprimer." -ForegroundColor Yellow
+function Unregister-AllScheduledTasks {
+    param([switch]$NoPause)
+
+    foreach ($name in @($script:WingetUpgradeTaskName, $script:WinUtilReapplyTaskName)) {
+        try {
+            $existing = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+            if (-not $existing) {
+                Write-Host "  (déjà absente) $name" -ForegroundColor DarkGray
+            }
+            else {
+                Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction Stop
+                Write-Host "  [OK] supprimée : $name" -ForegroundColor Green
+            }
         }
-        else {
-            Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-            Write-Host "Tâche '$TaskName' supprimée." -ForegroundColor Green
+        catch {
+            Write-Host "  [KO] $name : $($_.Exception.Message)" -ForegroundColor Red
         }
-    }
-    catch {
-        Write-Host "Échec suppression : $($_.Exception.Message)" -ForegroundColor Red
     }
     if (-not $NoPause) { Pause }
 }
 
 function Show-NamedTaskStatus {
     param([string]$TaskName, [string]$Label)
-    Write-Host "-- $Label ($TaskName) --" -ForegroundColor Cyan
+    Write-Host "-- $Label --" -ForegroundColor Cyan
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if (-not $task) {
-        Write-Host "Statut : absente" -ForegroundColor Yellow
+        Write-Host "  absente" -ForegroundColor Yellow
         return
     }
     $info = Get-ScheduledTaskInfo -TaskName $TaskName
-    Write-Host "Statut     : $($task.State)" -ForegroundColor Green
-    Write-Host "Dernière   : $($info.LastRunTime) (code $($info.LastTaskResult))" -ForegroundColor DarkGray
-    Write-Host "Prochaine  : $($info.NextRunTime)" -ForegroundColor DarkGray
+    Write-Host "  $($task.State) | dernière $($info.LastRunTime) | prochaine $($info.NextRunTime)" -ForegroundColor Green
 }
 
 function Open-ScheduledTasksMenu {
     do {
         Clear-Host
         Write-Host "=== TÂCHES PLANIFIÉES ===" -ForegroundColor Cyan
+        Write-Host "Une seule activation crée tout (winget + WinUtil/ShutUp10)." -ForegroundColor DarkGray
         Write-Host ""
-        Show-NamedTaskStatus -TaskName $script:WingetUpgradeTaskName -Label "MAJ winget"
+        if (-not (Test-IsAdmin)) {
+            Write-Host "⚠️  Pas en admin — l'activation échouera (Accès refusé)." -ForegroundColor Red
+            Write-Host ""
+        }
+        Show-NamedTaskStatus -TaskName $script:WingetUpgradeTaskName -Label "Winget (quotidien 12:00)"
+        Show-NamedTaskStatus -TaskName $script:WinUtilReapplyTaskName -Label "WinUtil+ShutUp10 (dimanche 12:00)"
         Write-Host ""
-        Show-NamedTaskStatus -TaskName $script:WinUtilReapplyTaskName -Label "Re-apply WinUtil + ShutUp10"
-        Write-Host ""
-        Write-Host "1. Activer MAJ winget (12:00 + rattrapage + source update)" -ForegroundColor Green
-        Write-Host "2. Activer MAJ winget (18:00 + rattrapage + source update)" -ForegroundColor Green
-        Write-Host "3. Lancer MAJ winget maintenant" -ForegroundColor Yellow
-        Write-Host "4. Supprimer tâche winget" -ForegroundColor Red
-        Write-Host "5. Activer re-apply WinUtil+ShutUp10 (dimanche 10:00)" -ForegroundColor Cyan
-        Write-Host "6. Lancer re-apply WinUtil+ShutUp10 maintenant" -ForegroundColor Yellow
-        Write-Host "7. Supprimer tâche WinUtil+ShutUp10" -ForegroundColor Red
-        Write-Host "8. Retour" -ForegroundColor Gray
+        Write-Host "1. Activer toutes les tâches" -ForegroundColor Green
+        Write-Host "2. Lancer la maintenance maintenant (WinUtil + ShutUp10)" -ForegroundColor Yellow
+        Write-Host "3. Supprimer toutes les tâches" -ForegroundColor Red
+        Write-Host "4. Retour" -ForegroundColor Gray
         Write-Host ""
         $c = Read-Host "Choix"
 
         switch ($c) {
-            "1" { Register-WingetUpgradeTask -At "12:00" }
-            "2" { Register-WingetUpgradeTask -At "18:00" }
-            "3" {
-                Write-Host "`n→ winget source update..." -ForegroundColor Yellow
-                winget source update --disable-interactivity
-                Write-Host "→ winget upgrade --all..." -ForegroundColor Yellow
-                winget upgrade --all --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
-                Pause
-            }
-            "4" { Unregister-NamedTask -TaskName $script:WingetUpgradeTaskName }
-            "5" { Register-WinUtilReapplyTask -At "10:00" }
-            "6" { Invoke-MaintenanceReapply }
-            "7" { Unregister-NamedTask -TaskName $script:WinUtilReapplyTaskName }
-            "8" { return }
+            "1" { Register-AllScheduledTasks }
+            "2" { Invoke-MaintenanceReapply }
+            "3" { Unregister-AllScheduledTasks }
+            "4" { return }
             default {
                 Write-Host "Choix invalide" -ForegroundColor Red
                 Start-Sleep 1
@@ -1041,10 +1010,13 @@ function Invoke-SilentMode {
             Invoke-WinUtilConfig -ConfigUrl "$BaseUrl/winutil-appx.json" -Label "AppX bloat" -NoPause
         }
         "winget-task" {
-            Register-WingetUpgradeTask -At "12:00" -NoPause | Out-Null
+            Register-AllScheduledTasks -NoPause | Out-Null
         }
         "winutil-task" {
-            Register-WinUtilReapplyTask -At "10:00" -NoPause | Out-Null
+            Register-AllScheduledTasks -NoPause | Out-Null
+        }
+        "tasks" {
+            Register-AllScheduledTasks -NoPause | Out-Null
         }
         "game-mode" {
             Invoke-GameModeKill -NoPause
