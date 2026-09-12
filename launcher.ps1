@@ -304,49 +304,49 @@ function Invoke-ShutUp10Recommended {
 
     Write-Host "  Exe : $exe" -ForegroundColor DarkGray
 
-    # Free v3 : pas de vrai CLI « apply recommended » documenté (Premium = protection auto).
-    # On tente un import silencieux SI un profil .cfg est hébergé sur le repo.
     $cfgUrl = "$BaseUrl/shutup10-recommended.cfg"
     $cfgLocal = Join-Path $env:TEMP "fresh_windows-shutup10-recommended.cfg"
     $cfgOk = $false
+    $cfgDownloaded = $false
+
     try {
         Invoke-WebRequest -Uri $cfgUrl -OutFile $cfgLocal -UseBasicParsing -ErrorAction Stop
-        if ((Test-Path $cfgLocal) -and ((Get-Item $cfgLocal).Length -gt 100)) {
-            # Legacy quiet apply (v1/v2 et parfois encore accepté)
-            Write-Host "  → Tentative d'import silencieux du profil GitHub..." -ForegroundColor Yellow
-            $p = Start-Process -FilePath $exe -ArgumentList @("`"$cfgLocal`"", "/quiet") -PassThru -Wait -WindowStyle Hidden
+        if ((Test-Path $cfgLocal) -and ((Get-Item $cfgLocal).Length -gt 50)) {
+            $cfgDownloaded = $true
+            # Format applyable : SettingID[TAB]+|-   (pas le OOSU10.cfg UI)
+            # CLI officiel : ooshutup10.exe <ConfigFile> [/quiet] [/nosrp] [/lang:xx]
+            Write-Host "  → Import silencieux du profil GitHub..." -ForegroundColor Yellow
+            $p = Start-Process -FilePath $exe -ArgumentList @(
+                $cfgLocal, '/quiet', '/nosrp', '/lang:fr'
+            ) -PassThru -Wait -WindowStyle Hidden
             if ($p.ExitCode -eq 0) {
-                Write-Host "  Profil appliqué via /quiet." -ForegroundColor Green
+                Write-Host "  Profil recommandé appliqué (quiet)." -ForegroundColor Green
                 $cfgOk = $true
             }
             else {
-                Write-Host "  /quiet non supporté ou échec (code $($p.ExitCode)) — ouverture GUI." -ForegroundColor DarkYellow
+                Write-Host "  Échec import quiet (code $($p.ExitCode))." -ForegroundColor DarkYellow
             }
         }
     }
     catch {
-        Write-Host "  Pas de configs/shutup10-recommended.cfg sur GitHub (normal pour l'instant)." -ForegroundColor DarkGray
+        Write-Host "  Impossible de télécharger shutup10-recommended.cfg : $($_.Exception.Message)" -ForegroundColor DarkGray
     }
 
     if ($LaunchGui) {
-        Write-Host ""
-        Write-Host "  Free ShutUp10++ : applique le profil recommandé dans l'UI :" -ForegroundColor Yellow
-        Write-Host "    Actions → Appliquer tous les paramètres recommandés" -ForegroundColor White
-        Write-Host "  (crée un point de restauration — c'est normal)" -ForegroundColor DarkGray
-        Write-Host "  Premium = ré-application auto après Windows Update." -ForegroundColor DarkGray
-        Write-Host ""
+        Write-Host "  Ouverture GUI ShutUp10..." -ForegroundColor DarkGray
         Start-Process -FilePath $exe
     }
     elseif (-not $cfgOk) {
         if ($NoPause) {
-            Write-Host "  Mode silencieux : pas de .cfg GitHub — ShutUp10 ignoré (pas de GUI)." -ForegroundColor DarkYellow
-            Write-Host "  Dépose configs/shutup10-recommended.cfg pour l'auto-apply hebdo." -ForegroundColor DarkGray
+            if ($cfgDownloaded) {
+                Write-Host "  Mode silencieux : import échoué — ShutUp10 non appliqué (pas de GUI)." -ForegroundColor DarkYellow
+            }
+            else {
+                Write-Host "  Mode silencieux : cfg GitHub absent — ShutUp10 ignoré." -ForegroundColor DarkYellow
+            }
         }
         else {
-            Write-Host ""
-            Write-Host "  Free ShutUp10++ : applique le profil recommandé dans l'UI :" -ForegroundColor Yellow
-            Write-Host "    Actions → Appliquer tous les paramètres recommandés" -ForegroundColor White
-            Write-Host ""
+            Write-Host "  Ouverture GUI (applique manuellement Actions → paramètres recommandés)." -ForegroundColor Yellow
             Start-Process -FilePath $exe
         }
     }
