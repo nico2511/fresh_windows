@@ -15,7 +15,8 @@ WinUtil **lance** ShutUp10 (outil Config), mais **n’applique pas** tout seul l
 2. Après install, le launcher **ouvre ShutUp10** et te rappelle le clic :
    - **Actions → Appliquer tous les paramètres recommandés**
 3. Menu **7 → 6** : relancer ShutUp10 pour ça.
-4. Si tu déposes un `configs/shutup10-recommended.cfg` (export après apply), le script tentera un import `/quiet`.
+4. Tâche hebdo **WinUtil + ShutUp10** (menu 8) : re-applique WinUtil, puis tente ShutUp10 en `/quiet` si `configs/shutup10-recommended.cfg` existe (pas de GUI en tâche planifiée).
+5. Si tu déposes un `configs/shutup10-recommended.cfg` (export après apply), le script tentera l’apply silencieux.
 
 ## Exporter un profil pour l’automation
 1. Applique le profil recommandé une fois.

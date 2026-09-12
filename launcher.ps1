@@ -326,7 +326,7 @@ function Invoke-ShutUp10Recommended {
         Write-Host "  Pas de configs/shutup10-recommended.cfg sur GitHub (normal pour l'instant)." -ForegroundColor DarkGray
     }
 
-    if (-not $cfgOk -or $LaunchGui) {
+    if ($LaunchGui) {
         Write-Host ""
         Write-Host "  Free ShutUp10++ : applique le profil recommandé dans l'UI :" -ForegroundColor Yellow
         Write-Host "    Actions → Appliquer tous les paramètres recommandés" -ForegroundColor White
@@ -335,9 +335,32 @@ function Invoke-ShutUp10Recommended {
         Write-Host ""
         Start-Process -FilePath $exe
     }
+    elseif (-not $cfgOk) {
+        if ($NoPause) {
+            Write-Host "  Mode silencieux : pas de .cfg GitHub — ShutUp10 ignoré (pas de GUI)." -ForegroundColor DarkYellow
+            Write-Host "  Dépose configs/shutup10-recommended.cfg pour l'auto-apply hebdo." -ForegroundColor DarkGray
+        }
+        else {
+            Write-Host ""
+            Write-Host "  Free ShutUp10++ : applique le profil recommandé dans l'UI :" -ForegroundColor Yellow
+            Write-Host "    Actions → Appliquer tous les paramètres recommandés" -ForegroundColor White
+            Write-Host ""
+            Start-Process -FilePath $exe
+        }
+    }
 
     if (-not $NoPause) { Pause }
-    return $true
+    return ($cfgOk -or $LaunchGui -or -not $NoPause)
+}
+
+function Invoke-MaintenanceReapply {
+    param([switch]$NoPause)
+
+    Write-Host "`n=== MAINTENANCE HEBDO : WinUtil + ShutUp10 ===" -ForegroundColor Cyan
+    Invoke-WinUtilOneClick -NoPause
+    Invoke-ShutUp10Recommended -NoPause
+    Write-Host "`nMaintenance terminée." -ForegroundColor Green
+    if (-not $NoPause) { Pause }
 }
 
 function Install-FromJson {
@@ -701,8 +724,8 @@ function Register-WinUtilReapplyTask {
         [switch]$NoPause
     )
 
-    # Hebdo : Windows Update peut réactiver télémétrie / services
-    $inner = "`$env:FRESH_WIN_MODE='winutil-oneclick'; irm '$LauncherUrl' | iex"
+    # Hebdo : WinUtil one-click + ShutUp10 (cfg silencieux si présent)
+    $inner = "`$env:FRESH_WIN_MODE='maintenance'; irm '$LauncherUrl' | iex"
     $arg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$inner`""
     $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg
 
@@ -725,13 +748,14 @@ function Register-WinUtilReapplyTask {
             -Trigger $trigger `
             -Settings $settings `
             -Principal $principal `
-            -Description "Re-applique le profil WinUtil one-click (tweaks/prefs) après éventuels resets Windows Update." `
+            -Description "Hebdo: WinUtil one-click + ShutUp10 (import cfg /quiet si configs/shutup10-recommended.cfg)." `
             -Force | Out-Null
 
         Write-Host "`nTâche créée : $script:WinUtilReapplyTaskName" -ForegroundColor Green
         Write-Host "  Horaire    : chaque dimanche à $At" -ForegroundColor DarkGray
         Write-Host "  Rattrapage : oui" -ForegroundColor DarkGray
-        Write-Host "  Action     : FRESH_WIN_MODE=winutil-oneclick" -ForegroundColor DarkGray
+        Write-Host "  Action     : WinUtil one-click + ShutUp10" -ForegroundColor DarkGray
+        Write-Host "  ShutUp10   : auto si shutup10-recommended.cfg sur GitHub, sinon skip (pas de GUI)" -ForegroundColor DarkGray
         if (-not $NoPause) { Pause }
         return $true
     }
@@ -781,15 +805,15 @@ function Open-ScheduledTasksMenu {
         Write-Host ""
         Show-NamedTaskStatus -TaskName $script:WingetUpgradeTaskName -Label "MAJ winget"
         Write-Host ""
-        Show-NamedTaskStatus -TaskName $script:WinUtilReapplyTaskName -Label "Re-apply WinUtil"
+        Show-NamedTaskStatus -TaskName $script:WinUtilReapplyTaskName -Label "Re-apply WinUtil + ShutUp10"
         Write-Host ""
         Write-Host "1. Activer MAJ winget (12:00 + rattrapage + source update)" -ForegroundColor Green
         Write-Host "2. Activer MAJ winget (18:00 + rattrapage + source update)" -ForegroundColor Green
         Write-Host "3. Lancer MAJ winget maintenant" -ForegroundColor Yellow
         Write-Host "4. Supprimer tâche winget" -ForegroundColor Red
-        Write-Host "5. Activer re-apply WinUtil (dimanche 10:00 + rattrapage)" -ForegroundColor Cyan
-        Write-Host "6. Lancer re-apply WinUtil maintenant" -ForegroundColor Yellow
-        Write-Host "7. Supprimer tâche WinUtil re-apply" -ForegroundColor Red
+        Write-Host "5. Activer re-apply WinUtil+ShutUp10 (dimanche 10:00)" -ForegroundColor Cyan
+        Write-Host "6. Lancer re-apply WinUtil+ShutUp10 maintenant" -ForegroundColor Yellow
+        Write-Host "7. Supprimer tâche WinUtil+ShutUp10" -ForegroundColor Red
         Write-Host "8. Retour" -ForegroundColor Gray
         Write-Host ""
         $c = Read-Host "Choix"
@@ -806,7 +830,7 @@ function Open-ScheduledTasksMenu {
             }
             "4" { Unregister-NamedTask -TaskName $script:WingetUpgradeTaskName }
             "5" { Register-WinUtilReapplyTask -At "10:00" }
-            "6" { Invoke-WinUtilOneClick }
+            "6" { Invoke-MaintenanceReapply }
             "7" { Unregister-NamedTask -TaskName $script:WinUtilReapplyTaskName }
             "8" { return }
             default {
@@ -1000,6 +1024,9 @@ function Invoke-SilentMode {
         }
         "winutil-oneclick" {
             Invoke-WinUtilOneClick -NoPause
+        }
+        "maintenance" {
+            Invoke-MaintenanceReapply -NoPause
         }
         "winutil-standard" {
             & ([ScriptBlock]::Create((Invoke-RestMethod -Uri "https://christitus.com/win" -UseBasicParsing))) -Preset Standard
