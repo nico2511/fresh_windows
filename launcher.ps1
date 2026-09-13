@@ -394,20 +394,87 @@ function Invoke-ShutUp10Recommended {
     return ($cfgOk -or $LaunchGui -or -not $NoPause)
 }
 
+function Get-FreshWindowsLogDir {
+    $dir = Join-Path $FreshAppData 'logs'
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    return $dir
+}
+
+function Write-FreshStep {
+    param(
+        [string]$Title,
+        [string]$Detail = '',
+        [ConsoleColor]$Color = 'Cyan'
+    )
+    $ts = Get-Date -Format 'HH:mm:ss'
+    Write-Host ""
+    Write-Host ("[{0}] {1}" -f $ts, $Title) -ForegroundColor $Color
+    if ($Detail) {
+        Write-Host ("         {0}" -f $Detail) -ForegroundColor DarkGray
+    }
+    try { $Host.UI.RawUI.WindowTitle = "Fresh Windows — $Title" } catch { }
+}
+
 function Invoke-MaintenanceReapply {
     param([switch]$NoPause)
 
-    Write-Host "`n=== MAINTENANCE HEBDO : WinUtil + ShutUp10 ===" -ForegroundColor Cyan
+    $logPath = $null
+    try {
+        $logPath = Join-Path (Get-FreshWindowsLogDir) ("maintenance-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+        Start-Transcript -Path $logPath -Force | Out-Null
+    } catch { }
+
+    Write-Host "=======================================================" -ForegroundColor Cyan
+    Write-Host "       FRESH WINDOWS — MAINTENANCE HEBDO" -ForegroundColor Cyan
+    Write-Host "=======================================================" -ForegroundColor Cyan
+    Write-Host "Étapes : 1) WinUtil one-click  2) ShutUp10 quiet" -ForegroundColor DarkGray
+    if ($logPath) {
+        Write-Host "Log    : $logPath" -ForegroundColor DarkGray
+    }
+    Write-Host "Ref    : $RepoRef" -ForegroundColor DarkGray
+
+    Write-FreshStep -Title "[1/2] WinUtil one-click" -Detail "Standard + AppX + prefs + Ultimate Performance (peut prendre plusieurs minutes)" -Color Yellow
     $wuOk = Invoke-WinUtilOneClick -NoPause
-    $suOk = Invoke-ShutUp10Recommended -NoPause
-    $ok = [bool]$wuOk -and [bool]$suOk
-    if ($ok) {
-        Write-Host "`nMaintenance terminée." -ForegroundColor Green
+    if ($wuOk) {
+        Write-FreshStep -Title "[1/2] WinUtil — OK" -Color Green
     }
     else {
-        Write-Host "`nMaintenance terminée avec des erreurs." -ForegroundColor Red
+        Write-FreshStep -Title "[1/2] WinUtil — ÉCHEC" -Color Red
     }
-    if (-not $NoPause) { Pause }
+
+    Write-FreshStep -Title "[2/2] ShutUp10 quiet" -Detail "Import du cfg GitHub (sans GUI)" -Color Yellow
+    $suOk = Invoke-ShutUp10Recommended -NoPause
+    if ($suOk) {
+        Write-FreshStep -Title "[2/2] ShutUp10 — OK" -Color Green
+    }
+    else {
+        Write-FreshStep -Title "[2/2] ShutUp10 — ÉCHEC" -Color Red
+    }
+
+    $ok = [bool]$wuOk -and [bool]$suOk
+    Write-Host ""
+    Write-Host "=======================================================" -ForegroundColor Cyan
+    if ($ok) {
+        Write-Host "  MAINTENANCE TERMINÉE — OK" -ForegroundColor Green
+    }
+    else {
+        Write-Host "  MAINTENANCE TERMINÉE — AVEC ERREURS" -ForegroundColor Red
+        Write-Host ("  WinUtil={0}  ShutUp10={1}" -f $wuOk, $suOk) -ForegroundColor DarkYellow
+    }
+    if ($logPath) {
+        Write-Host "  Log : $logPath" -ForegroundColor DarkGray
+    }
+    Write-Host "=======================================================" -ForegroundColor Cyan
+
+    try { Stop-Transcript | Out-Null } catch { }
+
+    if ($NoPause) {
+        Write-Host "`nFermeture dans 20 secondes..." -ForegroundColor DarkGray
+        Start-Sleep -Seconds 20
+    }
+    else {
+        Pause
+    }
     return $ok
 }
 
@@ -898,9 +965,10 @@ function Register-AllScheduledTasks {
     }
 
     # 2) WinUtil + ShutUp10 dimanche 12:00 + rattrapage
+    # Fenêtre visible : étapes + log (pas Hidden — sinon on ne voit rien)
     try {
         $maintInner = "`$env:FRESH_WIN_REF='$RepoRef'; `$env:FRESH_WIN_MODE='maintenance'; irm '$LauncherUrl' | iex"
-        $maintArg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$maintInner`""
+        $maintArg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Normal -Command `"$maintInner`""
         $maintAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $maintArg
         $maintTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At "12:00"
 
@@ -910,11 +978,11 @@ function Register-AllScheduledTasks {
             -Trigger $maintTrigger `
             -Settings $settings `
             -Principal $principal `
-            -Description "Fresh Windows: WinUtil one-click + ShutUp10 (StartWhenAvailable)." `
+            -Description "Fresh Windows: WinUtil + ShutUp10. Fenêtre visible + log dans %LOCALAPPDATA%\FreshWindows\logs." `
             -Force -ErrorAction Stop | Out-Null
 
         Write-Host "  [OK] $script:WinUtilReapplyTaskName — dimanche 12:00 (+ rattrapage)" -ForegroundColor Green
-        Write-Host "       WinUtil one-click + ShutUp10 (cfg silencieux si présent)" -ForegroundColor DarkGray
+        Write-Host "       Fenêtre PowerShell visible + log FreshWindows\logs" -ForegroundColor DarkGray
     }
     catch {
         Write-Host "  [KO] WinUtil/ShutUp10 : $($_.Exception.Message)" -ForegroundColor Red
@@ -970,6 +1038,7 @@ function Open-ScheduledTasksMenu {
         Clear-Host
         Write-Host "=== TÂCHES PLANIFIÉES ===" -ForegroundColor Cyan
         Write-Host "Une seule activation crée tout (winget + WinUtil/ShutUp10)." -ForegroundColor DarkGray
+        Write-Host "Maintenance = fenêtre visible + log dans %LOCALAPPDATA%\FreshWindows\logs" -ForegroundColor DarkGray
         Write-Host ""
         if (-not (Test-IsAdmin)) {
             Write-Host "⚠️  Pas en admin — l'activation échouera (Accès refusé)." -ForegroundColor Red

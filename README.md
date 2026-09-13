@@ -73,7 +73,7 @@ Pas dans les listes d’apps : Cascadia vient déjà avec Windows Terminal ; Jet
 | Tâche | Quand | Effet |
 |-------|--------|--------|
 | `FreshWindows-WingetUpgrade` | tous les jours 12:00 | `winget upgrade --all` (+ rattrapage si PC éteint) |
-| `FreshWindows-WinUtilReapply` | dimanche | WinUtil one-click + ShutUp10 quiet (`FRESH_WIN_MODE=maintenance`) |
+| `FreshWindows-WinUtilReapply` | dimanche | WinUtil + ShutUp10 — **fenêtre PowerShell visible** + log `%LOCALAPPDATA%\FreshWindows\logs` |
 
 Les tâches enregistrent la **ref** courante (`FRESH_WIN_REF`) pour rester cohérentes.
 
