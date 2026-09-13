@@ -8,8 +8,8 @@
 #    Apps : standard | gaming | dev | full
 #    WinUtil : winutil-oneclick | winutil-standard | winutil-minimal |
 #              winutil-advanced | winutil-appx | maintenance
-#    Autre : tasks | game-mode | powertoys-profile | shutup10 |
-#            brave-debloat | betterzen
+#    Autre : tasks | game-mode | game-mode-shortcuts | game-mode-watch |
+#            powertoys-profile | shutup10 | brave-debloat | betterzen
 #
 #  Pin de version (commit / tag / branche) :
 #    $env:FRESH_WIN_REF='abc1234'
@@ -898,7 +898,8 @@ function Show-Menu {
     Write-Host "7. WinUtil — one-click / presets / GUI" -ForegroundColor Gray
     Write-Host "8. Tâches planifiées (tout activer en 1 clic)" -ForegroundColor DarkCyan
     Write-Host "9. Carte graphique (AMD / NVIDIA)" -ForegroundColor DarkYellow
-    Write-Host "10. Mode Jeu — kill process dev" -ForegroundColor Red
+    Write-Host "10. Mode Jeu — kill liste générique (pas comm/gaming)" -ForegroundColor Red
+    Write-Host "11. Mode Jeu — raccourci Bureau + agent surveillance (option)" -ForegroundColor DarkRed
     Write-Host "0. Quitter" -ForegroundColor DarkGray
     Write-Host ""
 }
@@ -1179,54 +1180,144 @@ function Open-NvidiaGpuMenu {
     } while ($true)
 }
 
+function Import-GameModeCommon {
+    $dest = Join-Path $FreshAppData "GameMode-Common.ps1"
+    $url  = "$RepoRawRoot/scripts/GameMode-Common.ps1"
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+        . $dest -RepoRef $RepoRef
+        return $true
+    }
+    catch {
+        Write-Host "Impossible de charger GameMode-Common.ps1 : $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
+}
+
 function Invoke-GameModeKill {
     param([switch]$NoPause)
 
-    Write-Host "`n=== MODE JEU — kill process dev ===" -ForegroundColor Red
-    Write-Host "Ferme les apps lourdes de dev / navigateur pour libérer RAM/CPU/GPU." -ForegroundColor DarkGray
+    Write-Host "`n=== MODE JEU — fermeture processus lourds ===" -ForegroundColor Red
+    Write-Host "Liste générique (dev / IA / 3D / vidéo / sync). Jamais comm ni gaming." -ForegroundColor DarkGray
 
-    $list = Get-Config -FileName "game-mode-kill.json"
-    if (-not $list) {
+    if (-not (Import-GameModeCommon)) {
         if (-not $NoPause) { Pause }
         return $false
     }
 
-    # Ne jamais tuer le shell courant
-    $selfPid = $PID
-    $killed = @()
-    $skipped = @()
+    $cfg = Get-GameModeKillConfig
+    $result = Stop-GameModeKillListProcesses -KillNames $cfg.KillNames -ProtectNames $cfg.ProtectNames
 
-    foreach ($name in $list) {
-        if ([string]::IsNullOrWhiteSpace($name)) { continue }
-        $procs = Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $selfPid }
-        if (-not $procs) { continue }
-
-        foreach ($p in $procs) {
-            try {
-                Stop-Process -Id $p.Id -Force -ErrorAction Stop
-                $killed += "$($p.ProcessName) ($($p.Id))"
-            }
-            catch {
-                $skipped += "$($p.ProcessName) ($($p.Id))"
-            }
-        }
-    }
-
-    if ($killed.Count -gt 0) {
-        Write-Host "`nTués ($($killed.Count)) :" -ForegroundColor Green
-        $killed | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
+    if ($result.Killed.Count -gt 0) {
+        Write-Host "`nFermés ($($result.Killed.Count)) :" -ForegroundColor Green
+        $result.Killed | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
     }
     else {
         Write-Host "`nAucun process de la liste n'était ouvert." -ForegroundColor Yellow
     }
-    if ($skipped.Count -gt 0) {
+    if ($result.Skipped.Count -gt 0) {
         Write-Host "Ignorés / protégés :" -ForegroundColor DarkYellow
-        $skipped | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
+        $result.Skipped | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
     }
 
-    Write-Host "`nAstuce : active aussi le plan Ultimate Performance (menu WinUtil one-click)." -ForegroundColor DarkCyan
+    Write-Host "`nAstuce : raccourci Bureau « Mode Jeu » ou agent barre des tâches (menu 11)." -ForegroundColor DarkCyan
+    Write-Host "Plan Ultimate Performance : menu WinUtil one-click." -ForegroundColor DarkCyan
     if (-not $NoPause) { Pause }
-    return ($skipped.Count -eq 0)
+    return ($result.Skipped.Count -eq 0)
+}
+
+function Install-GameModeShortcuts {
+    param([switch]$NoPause, [switch]$IncludeWatchAgent)
+
+    New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null
+
+    $iconPath = Join-Path $FreshAppData "fresh-windows.ico"
+    if (-not (Test-Path -LiteralPath $iconPath)) {
+        try { Invoke-WebRequest -Uri $IconUrl -OutFile $iconPath -UseBasicParsing } catch { }
+    }
+
+    foreach ($scriptName in @('GameMode-Common.ps1', 'Invoke-GameModeKill.ps1', 'GameMode-WatchAgent.ps1')) {
+        $dest = Join-Path $FreshAppData $scriptName
+        $url  = "$RepoRawRoot/scripts/$scriptName"
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+            Write-Host "→ $scriptName" -ForegroundColor DarkGray
+        }
+        catch {
+            Write-Host "Échec téléchargement $scriptName : $($_.Exception.Message)" -ForegroundColor Red
+            if (-not $NoPause) { Pause }
+            return $false
+        }
+    }
+
+    $killStub = Join-Path $FreshAppData "Launch-GameModeKill.ps1"
+    $killStubContent = @"
+#Requires -Version 5.1
+`$env:FRESH_WIN_REF = '$RepoRef'
+`$env:FRESH_WIN_NO_PAUSE = '1'
+& '$FreshAppData\Invoke-GameModeKill.ps1'
+"@
+    Set-Content -LiteralPath $killStub -Value $killStubContent -Encoding UTF8
+
+    $watchStub = Join-Path $FreshAppData "Launch-GameModeWatch.ps1"
+    $watchStubContent = @"
+#Requires -Version 5.1
+`$env:FRESH_WIN_REF = '$RepoRef'
+& '$FreshAppData\GameMode-WatchAgent.ps1'
+"@
+    Set-Content -LiteralPath $watchStub -Value $watchStubContent -Encoding UTF8
+
+    $wsh = New-Object -ComObject WScript.Shell
+    $desktop = [Environment]::GetFolderPath('Desktop')
+
+    $lnkKill = Join-Path $desktop "Mode Jeu.lnk"
+    $k = $wsh.CreateShortcut($lnkKill)
+    $k.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+    $k.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$killStub`""
+    $k.WorkingDirectory = $FreshAppData
+    $k.Description = "Fresh Windows — fermer processus lourds (pas comm/gaming)"
+    if (Test-Path -LiteralPath $iconPath) { $k.IconLocation = "$iconPath,0" }
+    $k.Save()
+    Write-Host "→ Raccourci Bureau : Mode Jeu.lnk (sans admin)" -ForegroundColor Green
+
+    if ($IncludeWatchAgent) {
+        $startup = [Environment]::GetFolderPath('Startup')
+        $lnkWatch = Join-Path $startup "Fresh Windows Surveillance.lnk"
+        $w = $wsh.CreateShortcut($lnkWatch)
+        $w.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+        $w.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$watchStub`""
+        $w.WorkingDirectory = $FreshAppData
+        $w.Description = "Agent Fresh Windows (CPU/RAM/disque/hang + toggle auto)"
+        if (Test-Path -LiteralPath $iconPath) { $w.IconLocation = "$iconPath,0" }
+        $w.Save()
+        Write-Host "→ Démarrage Windows : Fresh Windows Surveillance.lnk" -ForegroundColor Green
+        Write-Host "  Toggle « Détection auto » dans le menu clic droit de l'icône." -ForegroundColor DarkGray
+    }
+
+    if (-not $NoPause) { Pause }
+    return $true
+}
+
+function Start-GameModeWatchAgent {
+    param([switch]$NoPause)
+
+    $ok = Install-GameModeShortcuts -NoPause -IncludeWatchAgent:$false
+    if (-not $ok) {
+        if (-not $NoPause) { Pause }
+        return $false
+    }
+    $stub = Join-Path $FreshAppData "Launch-GameModeWatch.ps1"
+    if (-not (Test-Path -LiteralPath $stub)) {
+        Write-Host "Stub agent introuvable." -ForegroundColor Red
+        if (-not $NoPause) { Pause }
+        return $false
+    }
+    Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
+        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$stub`"" `
+        -WorkingDirectory $FreshAppData
+    Write-Host "Agent barre des tâches lancé (icône près de l'horloge)." -ForegroundColor Green
+    if (-not $NoPause) { Pause }
+    return $true
 }
 
 function Invoke-SilentMode {
@@ -1293,6 +1384,12 @@ function Invoke-SilentMode {
             }
             "game-mode" {
                 $ok = [bool](Invoke-GameModeKill -NoPause)
+            }
+            "game-mode-shortcuts" {
+                $ok = [bool](Install-GameModeShortcuts -NoPause)
+            }
+            "game-mode-watch" {
+                $ok = [bool](Start-GameModeWatchAgent -NoPause)
             }
             "powertoys-profile" {
                 $ok = [bool](Apply-PowerToysProfile)
@@ -1425,6 +1522,18 @@ do {
             "8" { Open-ScheduledTasksMenu }
             "9" { Open-GpuMenu }
             "10" { Invoke-GameModeKill }
+            "11" {
+                Write-Host "`n1 = Raccourci Bureau « Mode Jeu » seulement" -ForegroundColor Cyan
+                Write-Host "2 = Raccourci + agent au démarrage Windows" -ForegroundColor Cyan
+                Write-Host "3 = Lancer l'agent maintenant (sans tâche démarrage)" -ForegroundColor Cyan
+                $sub = Read-Host "Choix"
+                switch ($sub) {
+                    "1" { Install-GameModeShortcuts | Out-Null }
+                    "2" { Install-GameModeShortcuts -IncludeWatchAgent | Out-Null }
+                    "3" { Start-GameModeWatchAgent | Out-Null }
+                    default { Write-Host "Annulé." -ForegroundColor Yellow; Pause }
+                }
+            }
             "0" { exit 0 }
             default {
                 Write-Host "Choix invalide" -ForegroundColor Red

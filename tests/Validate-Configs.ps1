@@ -31,6 +31,7 @@ $requiredJson = @(
     'extensions-firefox-based.json',
     'extensions-chrome-based.json',
     'game-mode-kill.json',
+    'game-mode-watch.json',
     'gpu.json',
     'powertoys-profile.json',
     'winutil-appx.json',
@@ -116,6 +117,38 @@ else {
         }
         else {
             Ok ("shutup10-recommended.cfg format CLI ({0} reglages)" -f $good)
+        }
+    }
+}
+
+$killPath = Join-Path $configs 'game-mode-kill.json'
+if (Test-Path -LiteralPath $killPath) {
+    $kill = Get-Content -LiteralPath $killPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not $kill.domains) {
+        Fail 'game-mode-kill.json : propriete domains manquante (liste generique)'
+    }
+    elseif (-not $kill.protect) {
+        Fail 'game-mode-kill.json : propriete protect (comm/gaming) manquante'
+    }
+    else {
+        $names = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($prop in $kill.domains.PSObject.Properties) {
+            foreach ($n in @($prop.Value)) {
+                if (-not [string]::IsNullOrWhiteSpace($n)) { [void]$names.Add($n.Trim()) }
+            }
+        }
+        $prot = 0
+        foreach ($prop in $kill.protect.PSObject.Properties) {
+            foreach ($n in @($prop.Value)) { if ($n) { $prot++ } }
+        }
+        if ($names.Count -lt 5) {
+            Fail ("game-mode-kill.json : trop peu de process dans domains ({0})" -f $names.Count)
+        }
+        elseif ($prot -lt 3) {
+            Fail 'game-mode-kill.json : liste protect trop courte'
+        }
+        else {
+            Ok ("game-mode-kill.json domains/protect ({0} kill, {1} protect)" -f $names.Count, $prot)
         }
     }
 }

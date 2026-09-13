@@ -1,0 +1,25 @@
+{
+  "pollIntervalSeconds": 12,
+  "cpuThresholdPercent": 28,
+  "cpuSustainedSeconds": 150,
+  "ramAlertMinMb": 6144,
+  "ramAlertPercentOfSystem": 18,
+  "diskBusyThresholdPercent": 92,
+  "diskBusySustainedSeconds": 120,
+  "diskAlertOnlyWhenNotGaming": true,
+  "gamingSessionHeuristic": {
+    "minProtectProcessCpuPercent": 8,
+    "minProtectProcessRamMb": 400
+  },
+  "cooldownBetweenSameAlertSeconds": 300,
+  "knownDiskHogs": [
+    "SearchIndexer",
+    "MsMpEng",
+    "MpDefenderCoreService",
+    "TiWorker",
+    "TrustedInstaller",
+    "wuauclt",
+    "USOClient",
+    "sedsvc"
+  ]
+}
