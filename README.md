@@ -40,13 +40,26 @@ Sans `FRESH_WIN_REF`, tout pointe sur `main` (dernière version).
 | 2 | Apps **Gaming** |
 | 3 | Apps **Dev** |
 | 4 | **Full** = Standard + Gaming + Dev |
-| 5 | Extensions navigateur (Firefox / Chrome-based) |
+| 5 | Navigateurs / extensions (Firefox, Chrome, Brave debloat, BetterZen) |
 | 6 | `winget upgrade --all` |
 | 7 | **WinUtil** — one-click (Standard + AppX + prefs + Ultimate Perf), presets, GUI |
 | 8 | Tâches planifiées (1 clic) : winget quotidien + maintenance hebdo |
 | 9 | Carte graphique AMD / NVIDIA (liens + guides) |
 | 10 | **Mode Jeu** — tue les process listés dans `game-mode-kill.json` |
 | 0 | Quitter |
+
+### Navigateurs (menu 5)
+
+1. **Extensions Firefox-based** — ouvre les pages AMO (`extensions-firefox-based.json`)
+2. **Extensions Chrome-based** — Web Store (`extensions-chrome-based.json`)
+3. **Brave — debloat (WinUtil)** — policies HKLM (Rewards, Wallet, VPN, Leo, News, Talk, Tor, télémétrie…) via `configs/winutil-brave-debloat.json`
+4. **Zen — BetterZen** — télécharge [Betterfox `zen/user.js`](https://github.com/yokoffing/Betterfox/blob/main/zen/user.js) dans le profil Zen par défaut (backup `user.js.bak-YYYYMMDD`). Relancer Zen après.
+
+Ne pas utiliser le `user.js` Firefox générique sur Zen : uniquement BetterZen.
+
+### Polices (Cascadia / JetBrains Mono)
+
+Pas dans les listes d’apps : Cascadia vient déjà avec Windows Terminal ; JetBrains Mono n’a d’intérêt que si tu la configures dans Cursor / Terminal. Installer « pour installer » ne sert à rien.
 
 ### One-click WinUtil (menu 7)
 
@@ -78,6 +91,8 @@ irm https://raw.githubusercontent.com/nico2511/fresh_windows/main/launcher.ps1 |
 | `maintenance` | Re-apply WinUtil + ShutUp10 (tâche hebdo) |
 | `winutil-standard` / `minimal` / `advanced` | Preset WinUtil seul |
 | `winutil-appx` | Debloat AppX seul |
+| `brave-debloat` | Policies Brave via WinUtil (`WPFTweaksBraveDebloat`) |
+| `betterzen` | Applique Betterfox `zen/user.js` au profil Zen |
 | `tasks` / `winget-task` / `winutil-task` | Crée les deux tâches planifiées |
 | `game-mode` | Kill process mode jeu |
 | `powertoys-profile` | Merge du profil PowerToys |
@@ -103,6 +118,7 @@ configs/
   apps-*.json                # listes winget (+ objets URL GitHub) — stack personnelle
   winutil-oneclick.json
   winutil-appx.json
+  winutil-brave-debloat.json # Brave Rewards/Wallet/VPN/Leo…
   powertoys-profile.json
   shutup10-recommended.cfg   # SettingID + TAB + +/-
   game-mode-kill.json

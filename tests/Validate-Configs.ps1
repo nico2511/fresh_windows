@@ -34,7 +34,8 @@ $requiredJson = @(
     'gpu.json',
     'powertoys-profile.json',
     'winutil-appx.json',
-    'winutil-oneclick.json'
+    'winutil-oneclick.json',
+    'winutil-brave-debloat.json'
 )
 
 foreach ($name in $requiredJson) {

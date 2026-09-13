@@ -8,7 +8,8 @@
 #    Apps : standard | gaming | dev | full
 #    WinUtil : winutil-oneclick | winutil-standard | winutil-minimal |
 #              winutil-advanced | winutil-appx | maintenance
-#    Autre : tasks | game-mode | powertoys-profile | shutup10
+#    Autre : tasks | game-mode | powertoys-profile | shutup10 |
+#            brave-debloat | betterzen
 #
 #  Pin de version (commit / tag / branche) :
 #    $env:FRESH_WIN_REF='abc1234'
@@ -155,10 +156,34 @@ function Install-GitHubDownload {
     return $true
 }
 
+function Test-WingetPackageInstalled {
+    param([Parameter(Mandatory)][string]$Id)
+
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = winget list -e --id $Id --disable-interactivity 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { return $false }
+        # Ligne de résultat contient l'ID (évite faux positifs sur l'en-tête)
+        return ($output -match [regex]::Escape($Id))
+    }
+    catch {
+        return $false
+    }
+    finally {
+        $ErrorActionPreference = $prevEap
+    }
+}
+
 function Install-AppEntry {
     param($App)
 
     if ($App -is [string]) {
+        if (Test-WingetPackageInstalled -Id $App) {
+            Write-Host "    déjà présent (winget) — skip" -ForegroundColor Green
+            return $true
+        }
+
         winget install -e --id $App --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
         # 0 = OK, -1978335189 (0x8A15002B) = déjà installé
         $ok = ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189)
@@ -435,49 +460,139 @@ function Install-FromJson {
     return ($failed.Count -eq 0)
 }
 
-function Open-Extensions {
-    Clear-Host
-    Write-Host "=== EXTENSIONS NAVIGATEUR ===" -ForegroundColor Cyan
-    Write-Host "1. Firefox-based (Zen, Firefox...) - Recommandé"
-    Write-Host "2. Chrome-based (Brave, Chrome, Edge...)"
-    Write-Host "3. Retour"
-    $c = Read-Host "Choix"
+function Get-ZenDefaultProfilePath {
+    $zenRoot = Join-Path $env:APPDATA 'zen'
+    $iniPath = Join-Path $zenRoot 'profiles.ini'
+    if (-not (Test-Path -LiteralPath $iniPath)) {
+        return $null
+    }
 
-    switch ($c) {
-        "1" {
-            $urls = Get-Config -FileName "extensions-firefox-based.json"
-            if (-not $urls) { Pause; return }
-            Write-Host "`nOuverture des extensions Firefox-based..." -ForegroundColor Yellow
-            foreach ($url in $urls) {
-                if ($url -notmatch '^https?://') {
-                    Write-Host "  URL ignorée (schéma non http/https) : $url" -ForegroundColor DarkYellow
-                    continue
-                }
-                Start-Process $url
-            }
-            Write-Host "Pages ouvertes (vrai uBlock Origin)." -ForegroundColor Green
-            Pause
+    $lines = Get-Content -LiteralPath $iniPath -Encoding UTF8
+    $sections = @()
+    $current = $null
+    foreach ($line in $lines) {
+        if ($line -match '^\[(.+)\]\s*$') {
+            if ($current) { $sections += $current }
+            $current = @{ Name = $Matches[1]; Props = @{} }
+            continue
         }
-        "2" {
-            $urls = Get-Config -FileName "extensions-chrome-based.json"
-            if (-not $urls) { Pause; return }
-            Write-Host "`nOuverture des extensions Chrome-based..." -ForegroundColor Yellow
-            foreach ($url in $urls) {
-                if ($url -notmatch '^https?://') {
-                    Write-Host "  URL ignorée (schéma non http/https) : $url" -ForegroundColor DarkYellow
-                    continue
-                }
-                Start-Process $url
-            }
-            Write-Host "Pages ouvertes." -ForegroundColor Green
-            Pause
-        }
-        "3" { return }
-        default {
-            Write-Host "Choix invalide" -ForegroundColor Red
-            Start-Sleep 1
+        if ($current -and $line -match '^([^=]+)=(.*)$') {
+            $current.Props[$Matches[1].Trim()] = $Matches[2].Trim()
         }
     }
+    if ($current) { $sections += $current }
+
+    $profileSections = @($sections | Where-Object { $_.Name -match '^Profile' })
+    if ($profileSections.Count -eq 0) { return $null }
+
+    $chosen = $profileSections | Where-Object { $_.Props['Default'] -eq '1' } | Select-Object -First 1
+    if (-not $chosen) { $chosen = $profileSections[0] }
+
+    $rel = $chosen.Props['Path']
+    if ([string]::IsNullOrWhiteSpace($rel)) { return $null }
+
+    $isRelative = ($chosen.Props['IsRelative'] -ne '0')
+    if ($isRelative) {
+        return (Join-Path $zenRoot ($rel -replace '/', '\'))
+    }
+    return $rel
+}
+
+function Invoke-BetterZen {
+    param([switch]$NoPause)
+
+    Write-Host "`n→ BetterZen (Betterfox zen/user.js)" -ForegroundColor Cyan
+    $profilePath = Get-ZenDefaultProfilePath
+    if (-not $profilePath -or -not (Test-Path -LiteralPath $profilePath)) {
+        Write-Host "  Profil Zen introuvable sous %APPDATA%\zen." -ForegroundColor Red
+        Write-Host "  Installe Zen et lance-le une fois pour créer un profil." -ForegroundColor DarkYellow
+        if (-not $NoPause) { Pause }
+        return $false
+    }
+
+    Write-Host "  Profil : $profilePath" -ForegroundColor DarkGray
+    $url = 'https://raw.githubusercontent.com/yokoffing/Betterfox/main/zen/user.js'
+    $dest = Join-Path $profilePath 'user.js'
+    $tmp = Join-Path $env:TEMP 'fresh_windows-betterzen-user.js'
+
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing -ErrorAction Stop
+        if (-not (Test-Path -LiteralPath $tmp) -or ((Get-Item $tmp).Length -lt 100)) {
+            throw 'Téléchargement BetterZen vide ou trop court.'
+        }
+
+        if (Test-Path -LiteralPath $dest) {
+            $bak = Join-Path $profilePath ("user.js.bak-{0}" -f (Get-Date -Format 'yyyyMMdd'))
+            Copy-Item -LiteralPath $dest -Destination $bak -Force
+            Write-Host "  Backup : $bak" -ForegroundColor DarkGray
+        }
+
+        Copy-Item -LiteralPath $tmp -Destination $dest -Force
+        Write-Host "  BetterZen écrit : $dest" -ForegroundColor Green
+        Write-Host "  Ferme / relance Zen pour appliquer les prefs." -ForegroundColor Yellow
+        if (-not $NoPause) { Pause }
+        return $true
+    }
+    catch {
+        Write-Host "  Échec BetterZen : $($_.Exception.Message)" -ForegroundColor Red
+        if (-not $NoPause) { Pause }
+        return $false
+    }
+}
+
+function Open-Extensions {
+    do {
+        Clear-Host
+        Write-Host "=== NAVIGATEURS / EXTENSIONS ===" -ForegroundColor Cyan
+        Write-Host "1. Extensions Firefox-based (Zen, Firefox...) - Recommandé" -ForegroundColor Green
+        Write-Host "2. Extensions Chrome-based (Brave, Chrome, Edge...)" -ForegroundColor Yellow
+        Write-Host "3. Brave — debloat (WinUtil)" -ForegroundColor Magenta
+        Write-Host "4. Zen — BetterZen (user.js)" -ForegroundColor Cyan
+        Write-Host "5. Retour" -ForegroundColor DarkGray
+        $c = Read-Host "Choix"
+
+        switch ($c) {
+            "1" {
+                $urls = Get-Config -FileName "extensions-firefox-based.json"
+                if (-not $urls) { Pause; continue }
+                Write-Host "`nOuverture des extensions Firefox-based..." -ForegroundColor Yellow
+                foreach ($url in $urls) {
+                    if ($url -notmatch '^https?://') {
+                        Write-Host "  URL ignorée (schéma non http/https) : $url" -ForegroundColor DarkYellow
+                        continue
+                    }
+                    Start-Process $url
+                }
+                Write-Host "Pages ouvertes (vrai uBlock Origin)." -ForegroundColor Green
+                Pause
+            }
+            "2" {
+                $urls = Get-Config -FileName "extensions-chrome-based.json"
+                if (-not $urls) { Pause; continue }
+                Write-Host "`nOuverture des extensions Chrome-based..." -ForegroundColor Yellow
+                foreach ($url in $urls) {
+                    if ($url -notmatch '^https?://') {
+                        Write-Host "  URL ignorée (schéma non http/https) : $url" -ForegroundColor DarkYellow
+                        continue
+                    }
+                    Start-Process $url
+                }
+                Write-Host "Pages ouvertes." -ForegroundColor Green
+                Pause
+            }
+            "3" {
+                Invoke-WinUtilConfig -ConfigUrl "$BaseUrl/winutil-brave-debloat.json" -Label "Brave debloat"
+            }
+            "4" {
+                Invoke-BetterZen | Out-Null
+            }
+            "5" { return }
+            default {
+                Write-Host "Choix invalide" -ForegroundColor Red
+                Start-Sleep 1
+            }
+        }
+    } while ($true)
 }
 
 function Set-RegistryDWord {
@@ -664,11 +779,46 @@ function Open-WinUtilMenu {
     } while ($true)
 }
 
+function Get-SystemProfileInfo {
+    if ($script:SystemProfileInfo) { return $script:SystemProfileInfo }
+
+    $user = [Environment]::UserName
+    $profilePath = $env:USERPROFILE
+    $edition = $null
+    $displayVersion = $null
+
+    try {
+        $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+        $edition = $os.Caption
+    } catch {
+        $edition = 'Windows'
+    }
+
+    try {
+        $cv = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction Stop
+        $displayVersion = if ($cv.DisplayVersion) { $cv.DisplayVersion } else { $cv.ReleaseId }
+    } catch {
+        $displayVersion = '?'
+    }
+
+    $script:SystemProfileInfo = [pscustomobject]@{
+        User           = $user
+        Edition        = $edition
+        DisplayVersion = $displayVersion
+        ProfilePath    = $profilePath
+    }
+    return $script:SystemProfileInfo
+}
+
 function Show-Menu {
     Clear-Host
+    $info = Get-SystemProfileInfo
     Write-Host "=======================================================" -ForegroundColor Cyan
     Write-Host "              FRESH WINDOWS (GitHub)" -ForegroundColor Cyan
     Write-Host "=======================================================" -ForegroundColor Cyan
+    Write-Host ("User    : {0}" -f $info.User) -ForegroundColor DarkGray
+    Write-Host ("Windows : {0} ({1})" -f $info.Edition, $info.DisplayVersion) -ForegroundColor DarkGray
+    Write-Host ("Profil  : {0}" -f $info.ProfilePath) -ForegroundColor DarkGray
     Write-Host "Ref     : $RepoRef" -ForegroundColor DarkGray
     Write-Host "Configs : $BaseUrl" -ForegroundColor DarkGray
     Write-Host ""
@@ -676,7 +826,7 @@ function Show-Menu {
     Write-Host "2. Installer Apps Gaming" -ForegroundColor Magenta
     Write-Host "3. Installer Apps Dev" -ForegroundColor Blue
     Write-Host "4. Full Setup (Standard + Gaming + Dev)" -ForegroundColor Cyan
-    Write-Host "5. Extensions Navigateur (Firefox / Chrome-based)" -ForegroundColor Yellow
+    Write-Host "5. Navigateurs / extensions (Brave, Zen...)" -ForegroundColor Yellow
     Write-Host "6. Mettre à jour toutes les apps (winget upgrade --all)" -ForegroundColor White
     Write-Host "7. WinUtil — one-click / presets / GUI" -ForegroundColor Gray
     Write-Host "8. Tâches planifiées (tout activer en 1 clic)" -ForegroundColor DarkCyan
@@ -1056,6 +1206,12 @@ function Invoke-SilentMode {
             }
             "winutil-appx" {
                 $ok = [bool](Invoke-WinUtilConfig -ConfigUrl "$BaseUrl/winutil-appx.json" -Label "AppX bloat" -NoPause)
+            }
+            "brave-debloat" {
+                $ok = [bool](Invoke-WinUtilConfig -ConfigUrl "$BaseUrl/winutil-brave-debloat.json" -Label "Brave debloat" -NoPause)
+            }
+            "betterzen" {
+                $ok = [bool](Invoke-BetterZen -NoPause)
             }
             "winget-task" {
                 $ok = [bool](Register-AllScheduledTasks -NoPause)
