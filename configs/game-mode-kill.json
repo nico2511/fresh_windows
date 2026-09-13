@@ -1,20 +1,96 @@
-[
-  "Cursor",
-  "Code",
-  "VSCodium",
-  "devenv",
-  "node",
-  "npm",
-  "python",
-  "pythonw",
-  "uv",
-  "ollama",
-  "Docker Desktop",
-  "com.docker.backend",
-  "GitHubDesktop",
-  "Postman",
-  "Fiddler",
-  "Wireshark",
-  "Notion",
-  "obsidian"
-]
+{
+  "comment": "Noms de process Windows (Gestionnaire des tâches). Indépendant des listes winget d'installation.",
+  "domains": {
+    "dev": [
+      "Cursor",
+      "Code",
+      "VSCodium",
+      "devenv",
+      "node",
+      "npm",
+      "pnpm",
+      "yarn",
+      "dotnet",
+      "MSBuild",
+      "GitHubDesktop",
+      "Postman",
+      "Fiddler",
+      "Wireshark",
+      "java",
+      "javaw"
+    ],
+    "containers": [
+      "Docker Desktop",
+      "com.docker.backend",
+      "com.docker.build"
+    ],
+    "ai_local": [
+      "ollama",
+      "LM Studio",
+      "python",
+      "pythonw",
+      "uv"
+    ],
+    "3d": [
+      "blender",
+      "UnrealEditor",
+      "Unity",
+      "maya",
+      "3dsmax",
+      "Houdini",
+      "CINEMA 4D"
+    ],
+    "video": [
+      "HandBrake",
+      "Resolve",
+      "obs64",
+      "AfterFX",
+      "Adobe Premiere Pro",
+      "ffmpeg",
+      "Adobe Media Encoder"
+    ],
+    "sync_and_io": [
+      "nextcloud",
+      "syncthing",
+      "Dropbox",
+      "OneDrive"
+    ],
+    "productivity_heavy": [
+      "Notion",
+      "obsidian",
+      "EXCEL",
+      "WINWORD",
+      "POWERPNT",
+      "Teams",
+      "ms-teams",
+      "ms-teamsupdate"
+    ]
+  },
+  "gaming_launchers": [
+    "steam",
+    "EpicGamesLauncher",
+    "GalaxyClient",
+    "GalaxyCommunication",
+    "EADesktop",
+    "eadesktop",
+    "Origin",
+    "Battle.net",
+    "UbisoftConnect",
+    "RiotClientServices",
+    "Overwolf",
+    "Playnite",
+    "XboxPcApp"
+  ],
+  "protect": {
+    "communication": [
+      "Discord",
+      "Legcord",
+      "Slack",
+      "slack",
+      "Zoom",
+      "Telegram",
+      "Signal",
+      "Skype"
+    ]
+  }
+}
