@@ -128,7 +128,10 @@ if (Test-Path -LiteralPath $killPath) {
         Fail 'game-mode-kill.json : propriete domains manquante (liste generique)'
     }
     elseif (-not $kill.protect) {
-        Fail 'game-mode-kill.json : propriete protect (comm/gaming) manquante'
+        Fail 'game-mode-kill.json : propriete protect manquante'
+    }
+    elseif (-not $kill.gaming_launchers) {
+        Fail 'game-mode-kill.json : gaming_launchers manquant'
     }
     else {
         $names = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -141,14 +144,18 @@ if (Test-Path -LiteralPath $killPath) {
         foreach ($prop in $kill.protect.PSObject.Properties) {
             foreach ($n in @($prop.Value)) { if ($n) { $prot++ } }
         }
+        $launchers = @($kill.gaming_launchers | Where-Object { $_ })
         if ($names.Count -lt 5) {
             Fail ("game-mode-kill.json : trop peu de process dans domains ({0})" -f $names.Count)
         }
         elseif ($prot -lt 3) {
-            Fail 'game-mode-kill.json : liste protect trop courte'
+            Fail 'game-mode-kill.json : protect.communication trop courte'
+        }
+        elseif ($launchers.Count -lt 3) {
+            Fail 'game-mode-kill.json : gaming_launchers trop courte'
         }
         else {
-            Ok ("game-mode-kill.json domains/protect ({0} kill, {1} protect)" -f $names.Count, $prot)
+            Ok ("game-mode-kill.json ({0} kill, {1} comm protect, {2} launchers)" -f $names.Count, $prot, $launchers.Count)
         }
     }
 }

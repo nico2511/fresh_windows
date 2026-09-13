@@ -81,26 +81,28 @@ $script:UserSettings = Get-WatchUserSettings
 $script:TotalRamMb = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1MB)
 
 function Test-GamingSessionActive {
-    param([string[]]$ProtectNames, $Rules)
+    param($GameModeCfg, $Rules)
+
+    if (-not $GameModeCfg) { return $false }
 
     $heur = $Rules.gamingSessionHeuristic
-    $minCpu = if ($heur.minProtectProcessCpuPercent) { [double]$heur.minProtectProcessCpuPercent } else { 8 }
     $minRam = if ($heur.minProtectProcessRamMb) { [double]$heur.minProtectProcessRamMb } else { 400 }
+    $heavyGameRamMb = 2048
 
-    $gamingOnly = @()
-    try {
-        $cfgObj = Invoke-RestMethod -Uri $script:GameModeConfigUrl -UseBasicParsing
-        if ($cfgObj.protect.gaming) { $gamingOnly = @($cfgObj.protect.gaming) }
-    } catch { }
-
-    if ($gamingOnly.Count -eq 0) { return $false }
-
-    foreach ($name in $gamingOnly) {
+    foreach ($name in @($GameModeCfg.GamingLauncherNames)) {
         $procs = Get-Process -Name $name -ErrorAction SilentlyContinue
         foreach ($p in $procs) {
-            $ramMb = $p.WorkingSet64 / 1MB
-            if ($ramMb -ge $minRam) { return $true }
+            if (($p.WorkingSet64 / 1MB) -ge $minRam) { return $true }
         }
+    }
+
+    $protect = @($GameModeCfg.ProtectNames)
+    foreach ($p in Get-Process) {
+        try {
+            if (Test-GameModeProtectedProcess -ProcessName $p.ProcessName -ProtectNames $protect) { continue }
+            if (($p.WorkingSet64 / 1MB) -ge $heavyGameRamMb) { return $true }
+        }
+        catch { }
     }
     return $false
 }
@@ -144,7 +146,7 @@ function Invoke-WatchTick {
     if ($cores -lt 1) { $cores = 1 }
 
     $now = Get-Date
-    $gaming = Test-GamingSessionActive -ProtectNames $protect -Rules $rules
+    $gaming = Test-GamingSessionActive -GameModeCfg $script:GameModeCfg -Rules $rules
 
     foreach ($p in Get-Process) {
         try {
@@ -251,11 +253,31 @@ function Invoke-GameModeKillNow {
     try {
         $cfg = Get-GameModeKillConfig
         $r = Stop-GameModeKillListProcesses -KillNames $cfg.KillNames -ProtectNames $cfg.ProtectNames
-        $n = $r.Killed.Count
-        Show-Balloon -Title 'Mode jeu' -Text ("$n processus fermés (liste générique).") -Icon Info
+        $idle = Stop-IdleGamingLaunchers -LauncherNames $cfg.GamingLauncherNames
+        $n = $r.Killed.Count + $idle.Killed.Count
+        $extra = if ($idle.Kept.Count) { " Launcher actif : $($idle.Kept[0])." } else { '' }
+        Show-Balloon -Title 'Mode jeu' -Text ("$n processus fermés (liste + launchers inactifs).$extra") -Icon Info
     }
     catch {
         Show-Balloon -Title 'Mode jeu' -Text $_.Exception.Message -Icon Error
+    }
+}
+
+function Invoke-IdleLaunchersOnly {
+    try {
+        $cfg = Get-GameModeKillConfig
+        $idle = Stop-IdleGamingLaunchers -LauncherNames $cfg.GamingLauncherNames
+        if ($idle.Killed.Count -eq 0) {
+            Show-Balloon -Title 'Launchers' -Text 'Aucun launcher gaming superflu ouvert.' -Icon Info
+        }
+        else {
+            Show-Balloon -Title 'Launchers' -Text (
+                "Fermés : $($idle.Killed.Count). Gardé : $($idle.Kept -join ', ')"
+            ) -Icon Info
+        }
+    }
+    catch {
+        Show-Balloon -Title 'Launchers' -Text $_.Exception.Message -Icon Error
     }
 }
 
@@ -285,8 +307,11 @@ $script:NotifyIcon.Text = 'Fresh Windows — surveillance'
 $script:NotifyIcon.Visible = $true
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
-$miKill = $menu.Items.Add('Mode jeu (kill liste)')
+$miKill = $menu.Items.Add('Mode jeu (liste + launchers inactifs)')
 $miKill.Add_Click({ Invoke-GameModeKillNow })
+
+$miLaunchers = $menu.Items.Add('Fermer launchers gaming inactifs')
+$miLaunchers.Add_Click({ Invoke-IdleLaunchersOnly })
 
 $miPending = $menu.Items.Add('Tuer suggestions en attente')
 $miPending.Add_Click({ Stop-PendingSuggestedProcesses })
@@ -308,6 +333,42 @@ $miMon.Add_Click({
     $script:UserSettings = $s
     $miMon.Text = if ($s.monitorEnabled) { 'Surveillance : ON' } else { 'Surveillance : OFF' }
 })
+
+$menu.Items.Add('-') | Out-Null
+
+$miFw = New-Object System.Windows.Forms.ToolStripMenuItem
+$miFw.Text = 'Fresh Windows (terminal admin)'
+$null = $menu.Items.Add($miFw)
+
+$miFwMenu = New-Object System.Windows.Forms.ToolStripMenuItem
+$miFwMenu.Text = 'Menu interactif (comme le raccourci Bureau)'
+$miFwMenu.Add_Click({
+    try { Start-FreshWindowsElevated -RepoRef $RepoRef } catch { Show-Balloon -Title 'Fresh Windows' -Text $_.Exception.Message -Icon Error }
+})
+$miFw.DropDownItems.Add($miFwMenu)
+
+$fwModes = @(
+    @{ Label = 'Maintenance (WinUtil + ShutUp10)'; Mode = 'maintenance' },
+    @{ Label = 'WinUtil one-click'; Mode = 'winutil-oneclick' },
+    @{ Label = 'Winget upgrade --all'; Mode = 'winget-upgrade' },
+    @{ Label = 'Mode jeu (via launcher admin)'; Mode = 'game-mode' }
+)
+foreach ($pair in $fwModes) {
+    $item = New-Object System.Windows.Forms.ToolStripMenuItem
+    $item.Text = $pair.Label
+    $item.Tag = $pair.Mode
+    $item.Add_Click({
+        param($sender, $e)
+        $m = $sender.Tag
+        try { Start-FreshWindowsElevated -SilentMode $m -RepoRef $RepoRef } catch { Show-Balloon -Title 'Fresh Windows' -Text $_.Exception.Message -Icon Error }
+    })
+    $miFw.DropDownItems.Add($item) | Out-Null
+}
+
+$miPs = New-Object System.Windows.Forms.ToolStripMenuItem
+$miPs.Text = 'Ouvrir PowerShell (sans admin)'
+$miPs.Add_Click({ Start-FreshWindowsPowerShell })
+$miFw.DropDownItems.Add($miPs) | Out-Null
 
 $menu.Items.Add('-') | Out-Null
 $miExit = $menu.Items.Add('Quitter')

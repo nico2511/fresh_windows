@@ -1180,6 +1180,27 @@ function Open-NvidiaGpuMenu {
     } while ($true)
 }
 
+function Get-FreshWindowsLaunchStubContent {
+    return @"
+#Requires -RunAsAdministrator
+param([string]`$SilentMode = '')
+`$ErrorActionPreference = 'Stop'
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+} catch {}
+`$env:FRESH_WIN_REF = '$RepoRef'
+if (`$SilentMode) { `$env:FRESH_WIN_MODE = `$SilentMode.Trim().ToLowerInvariant() }
+irm '$LauncherUrl' | iex
+"@
+}
+
+function Write-FreshWindowsLaunchStub {
+    New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null
+    $stubPath = Join-Path $FreshAppData "Launch-FreshWindows.ps1"
+    Set-Content -LiteralPath $stubPath -Value (Get-FreshWindowsLaunchStubContent) -Encoding UTF8
+    return $stubPath
+}
+
 function Import-GameModeCommon {
     $dest = Join-Path $FreshAppData "GameMode-Common.ps1"
     $url  = "$RepoRawRoot/scripts/GameMode-Common.ps1"
@@ -1207,6 +1228,7 @@ function Invoke-GameModeKill {
 
     $cfg = Get-GameModeKillConfig
     $result = Stop-GameModeKillListProcesses -KillNames $cfg.KillNames -ProtectNames $cfg.ProtectNames
+    $idle = Stop-IdleGamingLaunchers -LauncherNames $cfg.GamingLauncherNames
 
     if ($result.Killed.Count -gt 0) {
         Write-Host "`nFermés ($($result.Killed.Count)) :" -ForegroundColor Green
@@ -1218,6 +1240,13 @@ function Invoke-GameModeKill {
     if ($result.Skipped.Count -gt 0) {
         Write-Host "Ignorés / protégés :" -ForegroundColor DarkYellow
         $result.Skipped | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
+    }
+    if ($idle.Killed.Count -gt 0) {
+        Write-Host "`nLaunchers gaming inactifs fermés ($($idle.Killed.Count)) :" -ForegroundColor Green
+        $idle.Killed | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
+        if ($idle.Kept.Count -gt 0) {
+            Write-Host "Launcher conservé : $($idle.Kept -join ', ')" -ForegroundColor DarkCyan
+        }
     }
 
     Write-Host "`nAstuce : raccourci Bureau « Mode Jeu » ou agent barre des tâches (menu 11)." -ForegroundColor DarkCyan
@@ -1235,6 +1264,8 @@ function Install-GameModeShortcuts {
     if (-not (Test-Path -LiteralPath $iconPath)) {
         try { Invoke-WebRequest -Uri $IconUrl -OutFile $iconPath -UseBasicParsing } catch { }
     }
+
+    Write-FreshWindowsLaunchStub | Out-Null
 
     foreach ($scriptName in @('GameMode-Common.ps1', 'Invoke-GameModeKill.ps1', 'GameMode-WatchAgent.ps1')) {
         $dest = Join-Path $FreshAppData $scriptName
@@ -1397,6 +1428,12 @@ function Invoke-SilentMode {
             "shutup10" {
                 $ok = [bool](Invoke-ShutUp10Recommended -NoPause)
             }
+            "winget-upgrade" {
+                winget source update --disable-interactivity
+                if ($LASTEXITCODE -ne 0) { $ok = $false }
+                winget upgrade --all --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
+                if ($LASTEXITCODE -ne 0) { $ok = $false }
+            }
             default {
                 Write-Host "Mode inconnu : $InstallMode" -ForegroundColor Red
                 exit 1
@@ -1434,18 +1471,7 @@ function Install-FreshWindowsDesktopShortcut {
             Invoke-WebRequest -Uri $IconUrl -OutFile $iconPath -UseBasicParsing
         }
 
-        # Stub local : même ref GitHub que ce run, en admin
-        $stubPath = Join-Path $FreshAppData "Launch-FreshWindows.ps1"
-        $stub = @"
-#Requires -RunAsAdministrator
-`$ErrorActionPreference = 'Stop'
-try {
-    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-} catch {}
-`$env:FRESH_WIN_REF = '$RepoRef'
-irm '$LauncherUrl' | iex
-"@
-        Set-Content -LiteralPath $stubPath -Value $stub -Encoding UTF8
+        $stubPath = Write-FreshWindowsLaunchStub
 
         $desktop = [Environment]::GetFolderPath('Desktop')
         $lnkPath = Join-Path $desktop "Fresh Windows.lnk"

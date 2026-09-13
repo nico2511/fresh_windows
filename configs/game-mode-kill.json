@@ -63,6 +63,21 @@
       "POWERPNT"
     ]
   },
+  "gaming_launchers": [
+    "steam",
+    "EpicGamesLauncher",
+    "GalaxyClient",
+    "GalaxyCommunication",
+    "EADesktop",
+    "eadesktop",
+    "Origin",
+    "Battle.net",
+    "UbisoftConnect",
+    "RiotClientServices",
+    "Overwolf",
+    "Playnite",
+    "XboxPcApp"
+  ],
   "protect": {
     "communication": [
       "Discord",
@@ -75,22 +90,6 @@
       "Telegram",
       "Signal",
       "Skype"
-    ],
-    "gaming": [
-      "steam",
-      "steamwebhelper",
-      "EpicGamesLauncher",
-      "GalaxyClient",
-      "GalaxyCommunication",
-      "EADesktop",
-      "Origin",
-      "Battle.net",
-      "UbisoftConnect",
-      "RiotClientServices",
-      "Overwolf",
-      "Playnite",
-      "XboxPcApp",
-      "eadesktop"
     ]
   }
 }

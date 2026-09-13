@@ -52,7 +52,8 @@ Sans `FRESH_WIN_REF`, tout pointe sur `main` (dernière version).
 ### Mode Jeu (liste générique + agent)
 
 - **`game-mode-kill.json`** : domaines `dev`, `containers`, `ai_local`, `3d`, `video`, `sync_and_io`, `productivity_heavy`. **Pas** calqué sur les listes winget d’installation.
-- **`protect`** : process **communication** (Discord, Legcord, Teams…) et **gaming** (Steam, Epic, etc.) — **jamais** tués par le mode jeu.
+- **`protect.communication`** : Discord, Legcord, Teams… — **jamais** tués.
+- **`gaming_launchers`** : Steam, Epic, GOG… — si **plusieurs** sont ouverts, le mode jeu **garde le plus actif** et ferme les autres (pas de blocage global « tout protéger »).
 - **Lancer le kill** :
   - Menu **10**, ou raccourci Bureau **Mode Jeu** (menu **11**, sans admin),
   - ou `$env:FRESH_WIN_MODE='game-mode'`.
@@ -112,6 +113,7 @@ irm https://raw.githubusercontent.com/nico2511/fresh_windows/main/launcher.ps1 |
 | `game-mode` | Fermeture process liste générique (respecte `protect`) |
 | `game-mode-shortcuts` | Raccourci Bureau Mode Jeu + scripts locaux |
 | `game-mode-watch` | Lance l’agent barre des tâches |
+| `winget-upgrade` | `winget upgrade --all` (admin via stub) |
 | `powertoys-profile` | Merge du profil PowerToys |
 | `shutup10` | Applique le cfg recommandé (quiet) |
 

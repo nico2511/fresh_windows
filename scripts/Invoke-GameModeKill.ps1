@@ -29,6 +29,7 @@ Write-Host "(Liste générique : dev / IA / 3D / vidéo / sync — pas comm ni g
 
 $cfg = Get-GameModeKillConfig
 $result = Stop-GameModeKillListProcesses -KillNames $cfg.KillNames -ProtectNames $cfg.ProtectNames
+$idle = Stop-IdleGamingLaunchers -LauncherNames $cfg.GamingLauncherNames
 
 if ($result.Killed.Count -gt 0) {
     Write-Host "`nFermés ($($result.Killed.Count)) :" -ForegroundColor Green
@@ -40,6 +41,13 @@ else {
 if ($result.Skipped.Count -gt 0) {
     Write-Host "Ignorés :" -ForegroundColor DarkYellow
     $result.Skipped | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
+}
+if ($idle.Killed.Count -gt 0) {
+    Write-Host "`nLaunchers gaming inactifs fermés ($($idle.Killed.Count)) :" -ForegroundColor Green
+    $idle.Killed | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
+    if ($idle.Kept.Count -gt 0) {
+        Write-Host "Launcher conservé : $($idle.Kept -join ', ')" -ForegroundColor DarkCyan
+    }
 }
 
 if ($env:FRESH_WIN_NO_PAUSE -ne '1') {
