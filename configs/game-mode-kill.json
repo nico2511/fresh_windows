@@ -60,7 +60,10 @@
       "obsidian",
       "EXCEL",
       "WINWORD",
-      "POWERPNT"
+      "POWERPNT",
+      "Teams",
+      "ms-teams",
+      "ms-teamsupdate"
     ]
   },
   "gaming_launchers": [
@@ -84,8 +87,6 @@
       "Legcord",
       "Slack",
       "slack",
-      "Teams",
-      "ms-teams",
       "Zoom",
       "Telegram",
       "Signal",
