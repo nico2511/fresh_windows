@@ -52,7 +52,7 @@ Sans `FRESH_WIN_REF`, tout pointe sur `main` (dernière version).
 ### Mode Jeu (liste générique + agent)
 
 - **`game-mode-kill.json`** : domaines `dev`, `containers`, `ai_local`, `3d`, `video`, `sync_and_io`, `productivity_heavy`. **Pas** calqué sur les listes winget d’installation.
-- **`protect.communication`** : Discord, Legcord, Teams… — **jamais** tués.
+- **`protect.communication`** : Discord, Legcord, etc. — **jamais** tués (Teams / `ms-teams` sont dans la liste kill).
 - **`gaming_launchers`** : Steam, Epic, GOG… — si **plusieurs** sont ouverts, le mode jeu **garde le plus actif** et ferme les autres (pas de blocage global « tout protéger »).
 - **Lancer le kill** :
   - Menu **10**, ou raccourci Bureau **Mode Jeu** (menu **11**, sans admin),
