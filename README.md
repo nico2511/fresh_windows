@@ -125,6 +125,8 @@ Smoke tests des configs (JSON + format ShutUp10 CLI) :
 
 ```powershell
 powershell -NoProfile -File .\tests\Validate-Configs.ps1
+# ou configs + Pester (si module Pester installé) :
+powershell -NoProfile -File .\tests\Run-AllTests.ps1
 ```
 
 À lancer avant un push si tu touches `configs/`.
@@ -146,6 +148,8 @@ scripts/
   lib/
     Import-CachedScript.ps1   # cache GitHub → %LOCALAPPDATA%\FreshWindows
     Launcher-Core.ps1         # Wait-ForUser, winget, stubs, sync mode jeu
+    Launcher-Tasks.ps1        # tâches planifiées winget + maintenance
+    Launcher-GpuMenus.ps1     # menus AMD / NVIDIA
   GameMode-Common.ps1
   Invoke-GameModeKill.ps1
   GameMode-WatchAgent.ps1
