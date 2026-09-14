@@ -1,6 +1,6 @@
 #Requires -RunAsAdministrator
 # ============================================================
-#  Fresh Windows — toolbox reinstall / maintenance
+#  Fresh Windows - toolbox reinstall / maintenance
 #  Configs lues depuis GitHub (édition à distance)
 #
 #  Modes non interactifs :
@@ -16,7 +16,7 @@
 #    irm https://raw.githubusercontent.com/nico2511/fresh_windows/$env:FRESH_WIN_REF/launcher.ps1 | iex
 # ============================================================
 
-# Via env (compatible irm | iex) — pas de param() qui casse le pipe
+# Via env (compatible irm | iex) - pas de param() qui casse le pipe
 $Mode = if ($env:FRESH_WIN_MODE) { $env:FRESH_WIN_MODE.Trim().ToLowerInvariant() } else { 'menu' }
 $RepoRef = if ($env:FRESH_WIN_REF -and $env:FRESH_WIN_REF.Trim()) {
     $env:FRESH_WIN_REF.Trim()
@@ -44,6 +44,18 @@ $IconUrl = "$RepoRawRoot/assets/fresh-windows.ico"
 $FreshAppData = Join-Path $env:LOCALAPPDATA "FreshWindows"
 $script:FreshBrand = "Fresh Windows"
 
+function ConvertTo-Utf8BomFile {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        return
+    }
+    $utf8Bom = New-Object System.Text.UTF8Encoding $true
+    $text = [Text.Encoding]::UTF8.GetString($bytes)
+    [IO.File]::WriteAllText($Path, $text, $utf8Bom)
+}
+
 function Get-FreshWindowsBootstrapScriptPath {
     param(
         [Parameter(Mandatory)][string]$CacheFileName,
@@ -69,6 +81,7 @@ function Get-FreshWindowsBootstrapScriptPath {
         Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
         Set-Content -LiteralPath $meta -Value $RepoRef -Encoding UTF8 -NoNewline
     }
+    ConvertTo-Utf8BomFile -Path $dest
     return $dest
 }
 
@@ -81,7 +94,7 @@ function Import-FreshWindowsLibraries {
         'Launcher-GpuMenus.ps1'
     )
 
-    # irm | iex : $PSScriptRoot est vide — Join-Path échoue si on l'appelle quand même
+    # irm | iex : $PSScriptRoot est vide - Join-Path échoue si on l'appelle quand même
     $libRoot = $null
     $useLocal = $false
     if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
@@ -116,6 +129,7 @@ function Import-FreshWindowsLibraries {
                 -RepoRawRoot $RepoRawRoot `
                 -RepoRef $RepoRef `
                 -FreshAppData $FreshAppData
+            ConvertTo-Utf8BomFile -Path $libPath
             . $libPath
         }
         return $true
@@ -194,9 +208,9 @@ function Show-InstallProgress {
     $filled = [math]::Round(($pct / 100) * $width)
     $bar    = ('#' * $filled) + ('-' * ($width - $filled))
 
-    Write-Progress -Activity "Installation : $Category" -Status "$Current / $Total — $App" -PercentComplete $pct
+    Write-Progress -Activity "Installation : $Category" -Status "$Current / $Total - $App" -PercentComplete $pct
     Write-Host ("  [{0}] {1,3}%  ({2}/{3})  {4}" -f $bar, $pct, $Current, $Total, $App) -ForegroundColor DarkCyan
-    try { $Host.UI.RawUI.WindowTitle = "Fresh Windows [$Current/$Total] $Category — $App" } catch { }
+    try { $Host.UI.RawUI.WindowTitle = "Fresh Windows [$Current/$Total] $Category - $App" } catch { }
 }
 
 function Get-AppLabel {
@@ -284,7 +298,7 @@ function Install-AppEntry {
 
     if ($App -is [string]) {
         if (Test-WingetPackageInstalled -Id $App) {
-            Write-Host "    déjà présent (winget) — skip" -ForegroundColor Green
+            Write-Host "    déjà présent (winget) - skip" -ForegroundColor Green
             return $true
         }
 
@@ -413,7 +427,7 @@ function Install-FromJson {
 
     if ($failed.Count -gt 0) {
         Write-Host "`nÉchecs ($Category) : $($failed -join ', ')" -ForegroundColor Red
-        Write-Host "  ($($failed.Count)/$total en échec — codes winget / réseau non ignorés)" -ForegroundColor DarkYellow
+        Write-Host "  ($($failed.Count)/$total en échec - codes winget / réseau non ignorés)" -ForegroundColor DarkYellow
     }
     else {
         Write-Host "`nCatégorie $Category terminée. [$total/$total]" -ForegroundColor Green
@@ -509,8 +523,8 @@ function Open-Extensions {
         Write-Host "=== NAVIGATEURS / EXTENSIONS ===" -ForegroundColor Cyan
         Write-Host "1. Extensions Firefox-based (Zen, Firefox...) - Recommandé" -ForegroundColor Green
         Write-Host "2. Extensions Chrome-based (Brave, Chrome, Edge...)" -ForegroundColor Yellow
-        Write-Host "3. Brave — debloat (WinUtil)" -ForegroundColor Magenta
-        Write-Host "4. Zen — BetterZen (user.js)" -ForegroundColor Cyan
+        Write-Host "3. Brave - debloat (WinUtil)" -ForegroundColor Magenta
+        Write-Host "4. Zen - BetterZen (user.js)" -ForegroundColor Cyan
         Write-Host "5. Retour" -ForegroundColor DarkGray
         $c = Read-Host "Choix"
 
@@ -612,8 +626,8 @@ function Show-Menu {
     Write-Host "8. Tâches planifiées (+ maintenance dimanche)" -ForegroundColor DarkCyan
     Write-Host "9. GPU AMD / NVIDIA" -ForegroundColor DarkYellow
     Write-Host "--- Session jeu ---" -ForegroundColor DarkCyan
-    Write-Host "10. Mode jeu — exécuter maintenant" -ForegroundColor Red
-    Write-Host "11. Mode jeu — raccourci & agent (sous-menu)" -ForegroundColor DarkRed
+    Write-Host "10. Mode jeu - exécuter maintenant" -ForegroundColor Red
+    Write-Host "11. Mode jeu - raccourci & agent (sous-menu)" -ForegroundColor DarkRed
     Write-Host "0. Quitter" -ForegroundColor DarkGray
     Write-Host ""
 }
@@ -638,7 +652,7 @@ function Import-GameModeCommon {
 function Invoke-GameModeKill {
     param([switch]$NoPause)
 
-    Write-Host "`n=== MODE JEU — fermeture processus lourds ===" -ForegroundColor Red
+    Write-Host "`n=== MODE JEU - fermeture processus lourds ===" -ForegroundColor Red
     Write-Host "Liste générique (dev / IA / 3D / vidéo / sync). Comm protégée ; launchers inactifs fermés." -ForegroundColor DarkGray
 
     if (-not (Import-GameModeCommon)) {
@@ -669,7 +683,7 @@ function Invoke-GameModeKill {
         }
     }
 
-    Write-Host "`nAstuce : raccourci Bureau « Mode Jeu » ou agent barre des tâches (menu 11)." -ForegroundColor DarkCyan
+    Write-Host "`nAstuce : raccourci Bureau " Mode Jeu " ou agent barre des tâches (menu 11)." -ForegroundColor DarkCyan
     Write-Host "Plan Ultimate Performance : menu WinUtil one-click." -ForegroundColor DarkCyan
     if (-not $NoPause) { Wait-ForUser }
     return ($result.Skipped.Count -eq 0)
@@ -706,7 +720,7 @@ function Install-GameModeShortcuts {
     $k.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
     $k.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$killStub`""
     $k.WorkingDirectory = $FreshAppData
-    $k.Description = "Fresh Windows — mode jeu (liste générique)"
+    $k.Description = "Fresh Windows - mode jeu (liste générique)"
     if (Test-Path -LiteralPath $iconPath) { $k.IconLocation = "$iconPath,0" }
     $k.Save()
     Write-Host "→ Raccourci Bureau : Mode Jeu.lnk (sans admin)" -ForegroundColor Green
@@ -722,7 +736,7 @@ function Install-GameModeShortcuts {
         if (Test-Path -LiteralPath $iconPath) { $w.IconLocation = "$iconPath,0" }
         $w.Save()
         Write-Host "→ Démarrage Windows : Fresh Windows Surveillance.lnk" -ForegroundColor Green
-        Write-Host "  Toggle « Détection auto » dans le menu clic droit de l'icône." -ForegroundColor DarkGray
+        Write-Host "  Toggle " Détection auto " dans le menu clic droit de l'icône." -ForegroundColor DarkGray
     }
 
     if (-not $NoPause) { Wait-ForUser }
@@ -732,10 +746,10 @@ function Install-GameModeShortcuts {
 function Open-GameModeSetupMenu {
     do {
         Clear-Host
-        Write-Host "=== MODE JEU — raccourci & agent ===" -ForegroundColor Red
+        Write-Host "=== MODE JEU - raccourci & agent ===" -ForegroundColor Red
         Write-Host "Scripts copiés dans %LOCALAPPDATA%\FreshWindows (ref $RepoRef)." -ForegroundColor DarkGray
         Write-Host ""
-        Write-Host "1. Raccourci Bureau « Mode Jeu » (sans admin)" -ForegroundColor Green
+        Write-Host "1. Raccourci Bureau " Mode Jeu " (sans admin)" -ForegroundColor Green
         Write-Host "2. Raccourci + agent au démarrage Windows" -ForegroundColor Cyan
         Write-Host "3. Lancer l'agent maintenant" -ForegroundColor Yellow
         Write-Host "4. Retour" -ForegroundColor DarkGray
@@ -859,10 +873,10 @@ function Invoke-SilentMode {
     }
 
     if (-not $ok) {
-        Write-Host "`nÉchec — exit 1 (voir messages ci-dessus)." -ForegroundColor Red
+        Write-Host "`nÉchec - exit 1 (voir messages ci-dessus)." -ForegroundColor Red
         exit 1
     }
-    Write-Host "`nOK — exit 0" -ForegroundColor Green
+    Write-Host "`nOK - exit 0" -ForegroundColor Green
     exit 0
 }
 
@@ -890,7 +904,7 @@ function Install-FreshWindowsDesktopShortcut {
         $lnk.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$stubPath`""
         $lnk.WorkingDirectory = $FreshAppData
         $lnk.WindowStyle = 1
-        $lnk.Description = "Fresh Windows (GitHub) — admin"
+        $lnk.Description = "Fresh Windows (GitHub) - admin"
         if (Test-Path -LiteralPath $iconPath) {
             $lnk.IconLocation = "$iconPath,0"
         }

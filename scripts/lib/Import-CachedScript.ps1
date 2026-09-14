@@ -1,8 +1,20 @@
 #Requires -Version 5.1
 <#
-  Télécharge un script GitHub dans %LOCALAPPDATA%\FreshWindows si ref change ou fichier absent.
+  Telecharge un script GitHub dans %LOCALAPPDATA%\FreshWindows si ref change ou fichier absent.
   Retourne le chemin local (sans dot-source).
 #>
+function ConvertTo-Utf8BomFile {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        return
+    }
+    $utf8Bom = New-Object System.Text.UTF8Encoding $true
+    $text = [Text.Encoding]::UTF8.GetString($bytes)
+    [IO.File]::WriteAllText($Path, $text, $utf8Bom)
+}
+
 function Get-FreshWindowsCachedScriptPath {
     param(
         [Parameter(Mandatory)][string]$CacheFileName,
@@ -35,5 +47,6 @@ function Get-FreshWindowsCachedScriptPath {
         Set-Content -LiteralPath $meta -Value $RepoRef -Encoding UTF8 -NoNewline
     }
 
+    ConvertTo-Utf8BomFile -Path $dest
     return $dest
 }

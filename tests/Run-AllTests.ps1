@@ -21,7 +21,7 @@ if (Get-Module -ListAvailable -Name Pester) {
     if ($result.FailedCount -gt 0) { $failed++ }
 }
 else {
-    Write-Host "`nPester non installé — tests Launcher-Core ignorés (winget install Pester.Pester)." -ForegroundColor DarkYellow
+    Write-Host "`nPester non installé - tests Launcher-Core ignorés (winget install Pester.Pester)." -ForegroundColor DarkYellow
 }
 
 if ($failed -gt 0) {

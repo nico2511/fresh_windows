@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Agent barre des tâches Fresh Windows — surveillance légère (10–15 s) + toggle détection auto.
+  Agent barre des tâches Fresh Windows - surveillance légère (10-15 s) + toggle détection auto.
 .NOTES
   Pas d'élévation requise. Paramètres utilisateur : %LOCALAPPDATA%\FreshWindows\watch-agent-user.json
 #>
@@ -180,7 +180,7 @@ function Invoke-WatchTick {
                     if ($script:UserSettings.autoSuggestKill -and (Test-AlertCooldown -Key $key -CooldownSec $cooldown)) {
                         $script:PendingKill[$id] = $name
                         Show-Balloon -Title 'CPU élevé (hors jeu/comm)' -Text (
-                            "$name utilise ~$([math]::Round($pct))% CPU depuis $([math]::Round($cpuSec/60)) min.`nClic droit → « Tuer suggestion » ou « Mode jeu »."
+                            "$name utilise ~$([math]::Round($pct))% CPU depuis $([math]::Round($cpuSec/60)) min.`nClic droit → " Tuer suggestion " ou " Mode jeu "."
                         ) -Icon Warning
                         Mark-Alert -Key $key
                         $highSince = $null
@@ -207,7 +207,7 @@ function Invoke-WatchTick {
                 $key = "hang:$id"
                 if ($script:UserSettings.autoSuggestKill -and (Test-AlertCooldown -Key $key -CooldownSec $cooldown)) {
                     $script:PendingKill[$id] = $name
-                    Show-Balloon -Title 'Processus ne répond pas' -Text ("$name — proposition de fermeture via le menu de l'icône.") -Icon Error
+                    Show-Balloon -Title 'Processus ne répond pas' -Text ("$name - proposition de fermeture via le menu de l'icône.") -Icon Error
                     Mark-Alert -Key $key
                 }
             }
@@ -334,7 +334,7 @@ if (Test-Path -LiteralPath $iconPath) {
 else {
     $script:NotifyIcon.Icon = [System.SystemIcons]::Application
 }
-$script:NotifyIcon.Text = 'Fresh Windows — surveillance'
+$script:NotifyIcon.Text = 'Fresh Windows - surveillance'
 $script:NotifyIcon.Visible = $true
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip

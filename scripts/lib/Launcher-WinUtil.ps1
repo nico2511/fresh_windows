@@ -47,7 +47,7 @@ function Get-ShutUp10Exe {
     $destDir = Join-Path $env:LOCALAPPDATA "winutil"
     $dest = Join-Path $destDir "ooshutup10.exe"
     New-Item -ItemType Directory -Path $destDir -Force | Out-Null
-    Write-Host "  → Téléchargement O&O ShutUp10 (portable)..." -ForegroundColor Gray
+    Write-Host "  -> Telechargement OO ShutUp10 (portable)..." -ForegroundColor Gray
     try {
         # URL winget / package O&O (version flottante via page produit si besoin)
         $url = "https://dl5.oo-software.com/files/ooshutup10/OOSU10.exe"
@@ -66,7 +66,7 @@ function Invoke-ShutUp10Recommended {
         [switch]$NoPause
     )
 
-    Write-Host "`n→ O&O ShutUp10++" -ForegroundColor Cyan
+    Write-Host "`n-> OO ShutUp10++" -ForegroundColor Cyan
     $exe = Get-ShutUp10Exe
     if (-not $exe) {
         Write-Host "  ShutUp10 introuvable. Installe OO-Software.ShutUp10 (apps standard) d'abord." -ForegroundColor Red
@@ -111,10 +111,10 @@ function Invoke-ShutUp10Recommended {
     elseif (-not $cfgOk) {
         if ($NoPause) {
             if ($cfgDownloaded) {
-                Write-Host "  Mode silencieux : import échoué — ShutUp10 non appliqué (pas de GUI)." -ForegroundColor DarkYellow
+                Write-Host "  Mode silencieux : import échoué - ShutUp10 non appliqué (pas de GUI)." -ForegroundColor DarkYellow
             }
             else {
-                Write-Host "  Mode silencieux : cfg GitHub absent — ShutUp10 ignoré." -ForegroundColor DarkYellow
+                Write-Host "  Mode silencieux : cfg GitHub absent - ShutUp10 ignoré." -ForegroundColor DarkYellow
             }
         }
         else {
@@ -145,7 +145,7 @@ function Write-FreshStep {
     if ($Detail) {
         Write-Host ("         {0}" -f $Detail) -ForegroundColor DarkGray
     }
-    try { $Host.UI.RawUI.WindowTitle = "Fresh Windows — $Title" } catch { }
+    try { $Host.UI.RawUI.WindowTitle = "Fresh Windows - $Title" } catch { }
 }
 
 function Invoke-MaintenanceReapply {
@@ -158,7 +158,7 @@ function Invoke-MaintenanceReapply {
     } catch { }
 
     Write-Host "=======================================================" -ForegroundColor Cyan
-    Write-Host "       FRESH WINDOWS — MAINTENANCE HEBDO" -ForegroundColor Cyan
+    Write-Host "       FRESH WINDOWS - MAINTENANCE HEBDO" -ForegroundColor Cyan
     Write-Host "=======================================================" -ForegroundColor Cyan
     Write-Host "Étapes : 1) WinUtil one-click  2) ShutUp10 quiet" -ForegroundColor DarkGray
     if ($logPath) {
@@ -169,29 +169,29 @@ function Invoke-MaintenanceReapply {
     Write-FreshStep -Title "[1/2] WinUtil one-click" -Detail "Standard + AppX + prefs + Ultimate Performance (peut prendre plusieurs minutes)" -Color Yellow
     $wuOk = Invoke-WinUtilOneClick -NoPause
     if ($wuOk) {
-        Write-FreshStep -Title "[1/2] WinUtil — OK" -Color Green
+        Write-FreshStep -Title "[1/2] WinUtil - OK" -Color Green
     }
     else {
-        Write-FreshStep -Title "[1/2] WinUtil — ÉCHEC" -Color Red
+        Write-FreshStep -Title "[1/2] WinUtil - ÉCHEC" -Color Red
     }
 
     Write-FreshStep -Title "[2/2] ShutUp10 quiet" -Detail "Import du cfg GitHub (sans GUI)" -Color Yellow
     $suOk = Invoke-ShutUp10Recommended -NoPause
     if ($suOk) {
-        Write-FreshStep -Title "[2/2] ShutUp10 — OK" -Color Green
+        Write-FreshStep -Title "[2/2] ShutUp10 - OK" -Color Green
     }
     else {
-        Write-FreshStep -Title "[2/2] ShutUp10 — ÉCHEC" -Color Red
+        Write-FreshStep -Title "[2/2] ShutUp10 - ÉCHEC" -Color Red
     }
 
     $ok = [bool]$wuOk -and [bool]$suOk
     Write-Host ""
     Write-Host "=======================================================" -ForegroundColor Cyan
     if ($ok) {
-        Write-Host "  MAINTENANCE TERMINÉE — OK" -ForegroundColor Green
+        Write-Host "  MAINTENANCE TERMINÉE - OK" -ForegroundColor Green
     }
     else {
-        Write-Host "  MAINTENANCE TERMINÉE — AVEC ERREURS" -ForegroundColor Red
+        Write-Host "  MAINTENANCE TERMINÉE - AVEC ERREURS" -ForegroundColor Red
         Write-Host ("  WinUtil={0}  ShutUp10={1}" -f $wuOk, $suOk) -ForegroundColor DarkYellow
     }
     if ($logPath) {
@@ -367,8 +367,8 @@ function Open-WinUtilMenu {
         Write-Host "2. Preset Standard (WinUtil)" -ForegroundColor Yellow
         Write-Host "3. Preset Minimal (WinUtil)" -ForegroundColor Yellow
         Write-Host "4. Preset Advanced (WinUtil)" -ForegroundColor Magenta
-        Write-Host "5. AppX bloat — retire les apps safe (via -Config)" -ForegroundColor DarkYellow
-        Write-Host "6. O&O ShutUp10 — profil recommandé (GUI / cfg)" -ForegroundColor White
+        Write-Host "5. AppX bloat - retire les apps safe (via -Config)" -ForegroundColor DarkYellow
+        Write-Host "6. OO ShutUp10 - profil recommande (GUI / cfg)" -ForegroundColor White
         Write-Host "7. Ouvrir WinUtil (interface graphique)" -ForegroundColor Gray
         Write-Host "8. Retour" -ForegroundColor DarkGray
         Write-Host ""
