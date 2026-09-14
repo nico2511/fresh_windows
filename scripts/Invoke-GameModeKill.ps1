@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Ferme les processus « mode jeu » (liste générique GitHub). Pas besoin d'admin pour tes propres apps.
+  Ferme les processus " mode jeu " (liste générique GitHub). Pas besoin d'admin pour tes propres apps.
 .EXAMPLE
   irm https://raw.githubusercontent.com/nico2511/fresh_windows/main/scripts/Invoke-GameModeKill.ps1 | iex
 #>
@@ -27,8 +27,8 @@ else {
     . $tmp
 }
 
-Write-Host "`n=== MODE JEU — fermeture processus lourds ===" -ForegroundColor Red
-Write-Host "(Liste générique : dev / IA / 3D / vidéo / sync — comm protégée)" -ForegroundColor DarkGray
+Write-Host "`n=== MODE JEU - fermeture processus lourds ===" -ForegroundColor Red
+Write-Host "(Liste générique : dev / IA / 3D / vidéo / sync - comm protégée)" -ForegroundColor DarkGray
 
 $cfg = Get-GameModeKillConfig
 $result = Stop-GameModeKillListProcesses -KillNames $cfg.KillNames -ProtectNames $cfg.ProtectNames

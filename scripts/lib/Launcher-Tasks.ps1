@@ -54,7 +54,7 @@ function Register-AllScheduledTasks {
             -Description "Fresh Windows: winget source update + upgrade --all (StartWhenAvailable)." `
             -Force -ErrorAction Stop | Out-Null
 
-        Write-Host "  [OK] $script:WingetUpgradeTaskName — tous les jours 12:00 (+ rattrapage)" -ForegroundColor Green
+        Write-Host "  [OK] $script:WingetUpgradeTaskName - tous les jours 12:00 (+ rattrapage)" -ForegroundColor Green
     }
     catch {
         Write-Host "  [KO] Winget : $($_.Exception.Message)" -ForegroundColor Red
@@ -76,7 +76,7 @@ function Register-AllScheduledTasks {
             -Description "Fresh Windows: WinUtil + ShutUp10. Fenêtre visible + log dans %LOCALAPPDATA%\FreshWindows\logs." `
             -Force -ErrorAction Stop | Out-Null
 
-        Write-Host "  [OK] $script:WinUtilReapplyTaskName — dimanche 12:00 (+ rattrapage)" -ForegroundColor Green
+        Write-Host "  [OK] $script:WinUtilReapplyTaskName - dimanche 12:00 (+ rattrapage)" -ForegroundColor Green
         Write-Host "       Fenêtre PowerShell visible + log FreshWindows\logs" -ForegroundColor DarkGray
     }
     catch {
@@ -136,7 +136,7 @@ function Open-ScheduledTasksMenu {
         Write-Host "Maintenance = fenêtre visible + log dans %LOCALAPPDATA%\FreshWindows\logs" -ForegroundColor DarkGray
         Write-Host ""
         if (-not (Test-IsAdmin)) {
-            Write-Host "⚠️  Pas en admin — l'activation échouera (Accès refusé)." -ForegroundColor Red
+            Write-Host "⚠️  Pas en admin - l'activation échouera (Accès refusé)." -ForegroundColor Red
             Write-Host ""
         }
         Show-NamedTaskStatus -TaskName $script:WingetUpgradeTaskName -Label "Winget (quotidien 12:00)"

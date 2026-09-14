@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
   Fonctions partagées Fresh Windows (launcher irm, clone local, tâches planifiées).
-  Dot-sourcé depuis launcher.ps1 — utilise $RepoRef, $RepoRawRoot, $LauncherUrl, $FreshAppData du parent.
+  Dot-sourcé depuis launcher.ps1 - utilise $RepoRef, $RepoRawRoot, $LauncherUrl, $FreshAppData du parent.
 #>
 
 function Wait-ForUser {
@@ -86,7 +86,10 @@ function Sync-GameModeLocalScripts {
         $dest = Join-Path $FreshAppData $scriptName
         $url  = "$RepoRawRoot/scripts/$scriptName"
         Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
-        Write-Host "→ $scriptName" -ForegroundColor DarkGray
+        if (Get-Command ConvertTo-Utf8BomFile -ErrorAction SilentlyContinue) {
+            ConvertTo-Utf8BomFile -Path $dest
+        }
+        Write-Host "-> $scriptName" -ForegroundColor DarkGray
     }
 
     Set-Content -LiteralPath (Join-Path $FreshAppData 'scripts.ref') -Value $Ref -Encoding UTF8 -NoNewline
