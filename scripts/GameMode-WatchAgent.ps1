@@ -21,8 +21,11 @@ $FreshAppData = Join-Path $env:LOCALAPPDATA 'FreshWindows'
 $UserSettingsPath = Join-Path $FreshAppData 'watch-agent-user.json'
 $WatchConfigUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/configs/game-mode-watch.json"
 
-$commonPath = Join-Path $PSScriptRoot 'GameMode-Common.ps1'
-if (Test-Path -LiteralPath $commonPath) { . $commonPath }
+$commonPath = $null
+if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+    $commonPath = Join-Path $PSScriptRoot 'GameMode-Common.ps1'
+}
+if ($commonPath -and (Test-Path -LiteralPath $commonPath)) { . $commonPath }
 else {
     $commonUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/scripts/GameMode-Common.ps1"
     $tmp = Join-Path $env:TEMP 'GameMode-Common.ps1'

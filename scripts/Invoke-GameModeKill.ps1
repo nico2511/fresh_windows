@@ -12,8 +12,11 @@ try {
         [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 } catch { }
 
-$commonPath = Join-Path $PSScriptRoot 'GameMode-Common.ps1'
-if (Test-Path -LiteralPath $commonPath) {
+$commonPath = $null
+if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+    $commonPath = Join-Path $PSScriptRoot 'GameMode-Common.ps1'
+}
+if ($commonPath -and (Test-Path -LiteralPath $commonPath)) {
     . $commonPath
 }
 else {
