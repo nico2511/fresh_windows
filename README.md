@@ -1,164 +1,169 @@
 # Fresh Windows
 
-Toolbox PowerShell pour **réinstaller / reconfigurer un PC Windows** après formatage (ou en maintenance), avec listes d’apps et profils éditables à distance sur GitHub.
+Toolbox PowerShell pour remettre **ton** Windows d’aplomb après formatage ou en entretien. Les listes d’apps et les réglages vivent sur GitHub : tu modifies les JSON, tu relances le script.
 
-## Projet personnel — pas un pack générique
+> **Projet perso** — pas un pack « pour tout le monde ». Si tu forks, édite les JSON avant d’installer.
 
-Les listes d’apps et réglages reflètent **ma** machine (imprimante Brother, Nextcloud, CyberScribe, stack gaming/dev, etc.).  
-Si tu forks : **édite les JSON** avant de tout installer, sinon tu vas te retrouver avec des apps qui ne te servent à rien.
+---
 
-Ce n’est **pas** un produit multi-utilisateur ni un « Windows ideal pour tout le monde ».
+## Guide simple
 
-## Lancer
+### Démarrer (une fois)
 
-Ouvre **PowerShell en Administrateur** :
+1. Ouvre **PowerShell en administrateur**.
+2. Colle :
 
 ```powershell
 irm https://raw.githubusercontent.com/nico2511/fresh_windows/main/launcher.ps1 | iex
 ```
 
-Au premier lancement menu, un raccourci **Fresh Windows** est créé sur le Bureau (élévation admin + même ref GitHub).
+3. Un raccourci **Fresh Windows** apparaît sur le Bureau au premier menu.
 
-> Les configs sont lues depuis GitHub (`FRESH_WIN_REF`, défaut `main`). Modifier un JSON local dans le clone ne change rien tant que ce n’est pas pushé.
+Tout est téléchargé depuis GitHub (`main` par défaut). Pas besoin de cloner le repo pour l’usage courant.
 
-### Pin de version (commit / tag / branche)
+### Après un formatage — ordre conseillé
 
-Pour figer launcher **et** configs sur une révision précise :
+| Étape | Menu | En bref |
+|-------|------|---------|
+| 1 | **4** Full | Installe tes apps (standard + gaming + dev) |
+| 2 | **7** WinUtil | Profil **one-click** (tweaks + debloat + perfs) |
+| 3 | **8** → 1 | Active les **tâches planifiées** (mises à jour + maintenance dimanche) |
+| 4 | **11** → 1 ou 2 | Raccourci **Mode jeu** + option agent barre des tâches |
+| 5 | **5** | Extensions navigateurs / Brave debloat / Zen si besoin |
+
+### Menu — l’essentiel
+
+| # | Tu veux… |
+|---|----------|
+| 1–4 | Installer des apps (winget) |
+| 5 | Navigateurs & extensions |
+| 6 | Mettre à jour toutes les apps (`winget upgrade`) |
+| 7 | Tweaks Windows (WinUtil + ShutUp10) |
+| 8 | Automatiser updates + maintenance hebdo |
+| 9 | Liens / guides GPU AMD ou NVIDIA |
+| 10 | **Mode jeu** : fermer apps lourdes tout de suite |
+| 11 | Installer raccourci Mode jeu + **agent** (icône près de l’horloge) |
+| 0 | Quitter |
+
+**Mode jeu** : ferme dev, IA, 3D, vidéo, sync… **sans** toucher Legcord/Discord. Si plusieurs launchers (Steam, Epic…) sont ouverts, seul le plus actif reste. Teams est fermé.
+
+**Agent** (menu 11) : alertes légères (CPU, RAM, disque) et accès rapide au menu Fresh Windows. Toggle « Détection auto » dans le clic droit sur l’icône.
+
+### Sans le menu (raccourci script)
 
 ```powershell
-$env:FRESH_WIN_REF = 'abc1234'   # SHA, tag ou branche
+$env:FRESH_WIN_MODE = 'full'    # ou : standard | gaming | dev | maintenance | game-mode | …
+irm https://raw.githubusercontent.com/nico2511/fresh_windows/main/launcher.ps1 | iex
+```
+
+`exit 0` = OK, `exit 1` = une étape a échoué.
+
+### Figer une version (optionnel)
+
+```powershell
+$env:FRESH_WIN_REF = 'abc1234'   # commit, tag ou branche
 irm "https://raw.githubusercontent.com/nico2511/fresh_windows/$env:FRESH_WIN_REF/launcher.ps1" | iex
 ```
 
-Sans `FRESH_WIN_REF`, tout pointe sur `main` (dernière version).
+---
 
-## Menu
+## Documentation technique
+
+### Architecture
+
+- **`launcher.ps1`** — point d’entrée (`irm | iex`), menu, installs winget, modes silencieux.
+- **`scripts/lib/`** — modules dot-sourcés (clone local ou cache `%LOCALAPPDATA%\FreshWindows` si lancement distant) :
+  - `Import-CachedScript.ps1` — téléchargement par `FRESH_WIN_REF`
+  - `Launcher-Core.ps1` — pause, winget upgrade, stubs, sync scripts mode jeu
+  - `Launcher-WinUtil.ps1` — Chris Titus WinUtil, O&O ShutUp10, maintenance hebdo
+  - `Launcher-Tasks.ps1` — tâches planifiées
+  - `Launcher-GpuMenus.ps1` — menus AMD / NVIDIA
+- **`scripts/GameMode-*.ps1`** — kill liste + agent systray (copiés en local via menu 11).
+- **`configs/*.json`** — listes winget, presets WinUtil, mode jeu, extensions, GPU.
+
+Ordre de chargement des libs : `Import-CachedScript` → `Core` → `WinUtil` → `Tasks` → `GpuMenus`.
+
+### Menu détaillé
 
 | # | Action |
 |---|--------|
-| 1 | Apps **Standard** (`configs/apps-standard.json`) |
-| 2 | Apps **Gaming** |
-| 3 | Apps **Dev** |
-| 4 | **Full** = Standard + Gaming + Dev |
-| 5 | Navigateurs / extensions (Firefox, Chrome, Brave debloat, BetterZen) |
-| 6 | `winget upgrade --all` |
-| 7 | **WinUtil** — one-click (Standard + AppX + prefs + Ultimate Perf), presets, GUI |
-| 8 | Tâches planifiées (1 clic) : winget quotidien + maintenance hebdo |
-| 9 | Carte graphique AMD / NVIDIA (liens + guides) |
-| 10 | **Mode jeu** — exécuter la liste générique maintenant |
-| 11 | **Mode jeu** — raccourci Bureau, agent systray (sous-menu) |
+| 1 | `apps-standard.json` |
+| 2 | `apps-gaming.json` |
+| 3 | `apps-dev.json` |
+| 4 | Full = 1 + 2 + 3 |
+| 5 | Sous-menu extensions / Brave debloat / BetterZen |
+| 6 | `Invoke-WingetUpgradeAll` |
+| 7 | Sous-menu WinUtil (one-click, presets, AppX, ShutUp10 GUI, WinUtil GUI) |
+| 8 | Sous-menu tâches + maintenance immédiate |
+| 9 | `gpu.json` + guides |
+| 10 | `Invoke-GameModeKill` (admin, recharge `GameMode-Common` si ref change) |
+| 11 | `Open-GameModeSetupMenu` — raccourci, startup agent, lancer agent |
 | 0 | Quitter |
 
-### Mode Jeu (liste générique + agent)
+#### Menu 5 — navigateurs
 
-- **`game-mode-kill.json`** : domaines `dev`, `containers`, `ai_local`, `3d`, `video`, `sync_and_io`, `productivity_heavy`. **Pas** calqué sur les listes winget d’installation.
-- **`protect.communication`** : Discord, Legcord, etc. — **jamais** tués (Teams / `ms-teams` sont dans la liste kill).
-- **`gaming_launchers`** : Steam, Epic, GOG… — si **plusieurs** sont ouverts, le mode jeu **garde le plus actif** et ferme les autres (pas de blocage global « tout protéger »).
-- **Lancer le kill** :
-  - Menu **10**, ou raccourci Bureau **Mode Jeu** (menu **11**, sans admin),
-  - ou `$env:FRESH_WIN_MODE='game-mode'`.
-- **Agent** (`scripts/GameMode-WatchAgent.ps1`) : icône barre des tâches, poll ~12 s (`game-mode-watch.json`). Toggle **Détection auto** dans `%LOCALAPPDATA%\FreshWindows\watch-agent-user.json` :
-  - CPU hors protégés > ~28 % pendant ~2,5 min → notification + suggestion de kill ;
-  - RAM anormale → alerte ;
-  - disque saturé longtemps **hors session jeu** → alerte (+ noms type Search/Defender/Update) ;
-  - process **Not Responding** → suggestion de kill.
-- Modes silencieux : `game-mode-shortcuts`, `game-mode-watch`.
+1. Extensions Firefox (`extensions-firefox-based.json`)
+2. Extensions Chrome (`extensions-chrome-based.json`)
+3. Brave debloat → `winutil-brave-debloat.json`
+4. BetterZen → [Betterfox `zen/user.js`](https://github.com/yokoffing/Betterfox/blob/main/zen/user.js) (pas le `user.js` Firefox générique)
 
-### Navigateurs (menu 5)
+#### Menu 7 — WinUtil one-click
 
-1. **Extensions Firefox-based** — ouvre les pages AMO (`extensions-firefox-based.json`)
-2. **Extensions Chrome-based** — Web Store (`extensions-chrome-based.json`)
-3. **Brave — debloat (WinUtil)** — policies HKLM (Rewards, Wallet, VPN, Leo, News, Talk, Tor, télémétrie…) via `configs/winutil-brave-debloat.json`
-4. **Zen — BetterZen** — télécharge [Betterfox `zen/user.js`](https://github.com/yokoffing/Betterfox/blob/main/zen/user.js) dans le profil Zen par défaut (backup `user.js.bak-YYYYMMDD`). Relancer Zen après.
+1. WinUtil `-Config` → `winutil-oneclick.json` (Standard + AppX + Hyper-V…)
+2. `Invoke-WinUtilPreferences` (dark, game mode, fichiers, Bing…)
+3. `Enable-UltimatePerformance`
 
-Ne pas utiliser le `user.js` Firefox générique sur Zen : uniquement BetterZen.
+### Mode jeu
 
-### Polices (Cascadia / JetBrains Mono)
+**`configs/game-mode-kill.json`**
 
-Pas dans les listes d’apps : Cascadia vient déjà avec Windows Terminal ; JetBrains Mono n’a d’intérêt que si tu la configures dans Cursor / Terminal. Installer « pour installer » ne sert à rien.
+- **`domains`** : `dev`, `containers`, `ai_local`, `3d`, `video`, `sync_and_io`, `productivity_heavy` (noms de process Windows, indépendants des listes winget).
+- **`protect.communication`** : Discord, Legcord, etc. — jamais tués.
+- **`gaming_launchers`** : si plusieurs launchers ouverts, `Stop-IdleGamingLaunchers` garde le plus actif (RAM/CPU).
+- Kill : Teams / `ms-teams` dans `productivity_heavy`.
 
-### One-click WinUtil (menu 7)
+**`configs/game-mode-watch.json`** — seuils agent (poll ~12 s).
 
-1. Tweaks **Standard** Chris Titus (+ Hyper-V via config)
-2. Debloat **AppX** sûr (`winutil-appx.json` — pas de Calculator / Snipping Tool)
-3. Préférences registry (ex. dark mode, game mode)
-4. Plan d’alimentation **Ultimate Performance**
+**Paramètres utilisateur** : `%LOCALAPPDATA%\FreshWindows\watch-agent-user.json` (`autoSuggestKill`, `monitorEnabled`).
 
-### Tâches planifiées (menu 8)
+**Scripts locaux** : `%LOCALAPPDATA%\FreshWindows\` + `scripts.ref` (ref GitHub). Menu 11 ou agent → « Mettre à jour scripts locaux ».
 
-| Tâche | Quand | Effet |
-|-------|--------|--------|
-| `FreshWindows-WingetUpgrade` | tous les jours 12:00 | `winget upgrade --all` (+ rattrapage si PC éteint) |
-| `FreshWindows-WinUtilReapply` | dimanche | WinUtil + ShutUp10 — **fenêtre PowerShell visible** + log `%LOCALAPPDATA%\FreshWindows\logs` |
+### Tâches planifiées
 
-Les tâches enregistrent la **ref** courante (`FRESH_WIN_REF`) pour rester cohérentes.
+| Tâche | Planification | Commande |
+|-------|----------------|----------|
+| `FreshWindows-WingetUpgrade` | Quotidien 12:00 | `Get-WingetUpgradePowerShellCommand` |
+| `FreshWindows-WinUtilReapply` | Dimanche 12:00 | `FRESH_WIN_MODE=maintenance` via `irm` launcher |
 
-## Modes silencieux (sans menu)
+La ref `FRESH_WIN_REF` est figée dans l’action de la tâche au moment de l’enregistrement. Logs maintenance : `%LOCALAPPDATA%\FreshWindows\logs\maintenance-*.log`.
 
-```powershell
-$env:FRESH_WIN_MODE = 'full'   # ou standard | gaming | dev | …
-irm https://raw.githubusercontent.com/nico2511/fresh_windows/main/launcher.ps1 | iex
-```
+### Modes silencieux (`FRESH_WIN_MODE`)
 
 | Mode | Rôle |
 |------|------|
-| `standard` / `gaming` / `dev` / `full` | Installs winget (+ téléchargements GitHub si objet JSON) |
-| `winutil-oneclick` | Profil one-click complet |
-| `maintenance` | Re-apply WinUtil + ShutUp10 (tâche hebdo) |
-| `winutil-standard` / `minimal` / `advanced` | Preset WinUtil seul |
-| `winutil-appx` | Debloat AppX seul |
-| `brave-debloat` | Policies Brave via WinUtil (`WPFTweaksBraveDebloat`) |
-| `betterzen` | Applique Betterfox `zen/user.js` au profil Zen |
-| `tasks` | Crée les deux tâches planifiées (`winget-task` / `winutil-task` = alias, message d’avertissement) |
-| `game-mode` | Fermeture process liste générique (respecte `protect`) |
-| `game-mode-shortcuts` | Raccourci Bureau Mode Jeu + scripts locaux |
-| `game-mode-watch` | Lance l’agent barre des tâches |
-| `winget-upgrade` | `winget upgrade --all` (admin via stub) |
-| `powertoys-profile` | Merge du profil PowerToys |
-| `shutup10` | Applique le cfg recommandé (quiet) |
+| `standard` / `gaming` / `dev` / `full` | Installs winget (+ objets URL GitHub) |
+| `winutil-oneclick` | Profil one-click |
+| `maintenance` | WinUtil one-click + ShutUp10 quiet |
+| `winutil-standard` / `minimal` / `advanced` | Presets WinUtil |
+| `winutil-appx` | Debloat AppX (`winutil-appx.json`) |
+| `brave-debloat` | `winutil-brave-debloat.json` |
+| `betterzen` | Betterfox Zen `user.js` |
+| `tasks` | Crée les deux tâches (`winget-task` / `winutil-task` → alias) |
+| `game-mode` | Kill liste + launchers inactifs |
+| `game-mode-shortcuts` | Sync scripts + raccourci Bureau |
+| `game-mode-watch` | Lance l’agent systray |
+| `winget-upgrade` | `winget upgrade --all` |
+| `powertoys-profile` | Merge `powertoys-profile.json` |
+| `shutup10` | `shutup10-recommended.cfg` quiet |
 
-En mode silencieux : **exit 0** si tout est OK, **exit 1** si un échec (install, WinUtil, ShutUp10, tâches, etc.). Les erreurs ne sont plus avalées silencieusement (`$ErrorActionPreference = Stop` + bilan explicite).
+### ShutUp10
 
-## Tests
+- Le `OOSU10.cfg` UI **n’est pas** importable en CLI.
+- Profil CLI : `configs/shutup10-recommended.cfg` (`SettingID` + TAB + `+`/`-`).
+- Commande : `ooshutup10.exe <cfg> /quiet /nosrp /lang:fr`
+- Version gratuite : Windows Update peut réécrire des réglages → tâche hebdo.
 
-Smoke tests des configs (JSON + format ShutUp10 CLI) :
-
-```powershell
-powershell -NoProfile -File .\tests\Validate-Configs.ps1
-# ou configs + Pester (si module Pester installé) :
-powershell -NoProfile -File .\tests\Run-AllTests.ps1
-```
-
-À lancer avant un push si tu touches `configs/`.
-
-## Contenu du dépôt
-
-```
-launcher.ps1                 # menu + modes silencieux
-configs/
-  apps-*.json                # listes winget (+ objets URL GitHub) — stack personnelle
-  winutil-oneclick.json
-  winutil-appx.json
-  winutil-brave-debloat.json # Brave Rewards/Wallet/VPN/Leo…
-  powertoys-profile.json
-  shutup10-recommended.cfg   # SettingID + TAB + +/-
-  game-mode-kill.json        # domaines + protect comm/gaming
-  game-mode-watch.json       # seuils agent surveillance
-scripts/
-  lib/
-    Import-CachedScript.ps1   # cache GitHub → %LOCALAPPDATA%\FreshWindows
-    Launcher-Core.ps1         # Wait-ForUser, winget, stubs, sync mode jeu
-    Launcher-Tasks.ps1        # tâches planifiées winget + maintenance
-    Launcher-GpuMenus.ps1     # menus AMD / NVIDIA
-  GameMode-Common.ps1
-  Invoke-GameModeKill.ps1
-  GameMode-WatchAgent.ps1
-  gpu.json
-  extensions-*.json
-guides/                      # AMD, NVIDIA, ShutUp10
-tests/Validate-Configs.ps1
-assets/fresh-windows.ico
-```
+Voir [guides/shutup10.md](guides/shutup10.md).
 
 ### Apps hors winget
 
@@ -172,29 +177,58 @@ assets/fresh-windows.ico
 }
 ```
 
-### ShutUp10
+### Arborescence
 
-- Le fichier UI `%LOCALAPPDATA%\OO Software\OO ShutUp10\OOSU10.cfg` **n’est pas** importable en CLI.
-- Le profil applyable est `configs/shutup10-recommended.cfg` (lignes `SettingID` + tab + `+`/`-`).
-- CLI : `ooshutup10.exe <cfg> /quiet /nosrp /lang:fr`
-- Version **gratuite** : Windows Update peut réécrire des réglages → la tâche hebdo les re-applique.
+```
+launcher.ps1
+configs/
+  apps-*.json
+  winutil-*.json
+  game-mode-kill.json
+  game-mode-watch.json
+  powertoys-profile.json
+  shutup10-recommended.cfg
+  gpu.json
+  extensions-*.json
+scripts/
+  lib/                    # voir Architecture
+  GameMode-Common.ps1
+  Invoke-GameModeKill.ps1
+  GameMode-WatchAgent.ps1
+guides/
+tests/
+  Validate-Configs.ps1
+  Run-AllTests.ps1
+  Launcher-Core.Tests.ps1
+assets/fresh-windows.ico
+```
 
-Détails : [guides/shutup10.md](guides/shutup10.md).
+### Tests
 
-## Modifier les listes
+```powershell
+powershell -NoProfile -File .\tests\Validate-Configs.ps1
+powershell -NoProfile -File .\tests\Run-AllTests.ps1   # + Pester si installé
+```
 
-1. Éditer les JSON / cfg dans ce repo
-2. Lancer `tests\Validate-Configs.ps1`
-3. Commit + push sur `main` (ou un tag / commit pour pin)
-4. Relancer le launcher
+### Workflow Git
 
-## Prérequis / limites
+1. Éditer JSON / cfg
+2. `tests\Validate-Configs.ps1` (ou `Run-AllTests.ps1`)
+3. Commit + push
+4. Relancer le launcher (ou menu 11 / sync agent pour scripts locaux)
 
-- Windows 10/11, **PowerShell admin**, **winget**, réseau
-- Confiance requise : scripts téléchargés (`launcher` + WinUtil depuis christitus.com)
-- Pas de mode hors-ligne
-- Stack **personnelle** — adapte avant d’installer
+### Prérequis et limites
+
+- Windows 10/11, PowerShell **admin**, winget, réseau
+- Scripts tiers : WinUtil (`christitus.com/win`), ShutUp10 (O&O)
+- Pas de mode hors-ligne pour le launcher `irm`
+- Listes = stack personnelle (Brother, Nextcloud, CyberScribe, etc.)
+
+### Notes diverses
+
+- Polices : Cascadia = Windows Terminal ; JetBrains Mono seulement si configurée dans l’éditeur.
+- Pas de Microsoft PC Manager dans les listes par défaut (optionnel via winget `Microsoft.PCManager`).
 
 ## Licence
 
-Usage perso. Fork / copie / adaptation libre pour ta machine.
+Usage perso. Fork et adaptation libres pour ta machine.

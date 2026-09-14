@@ -4,6 +4,21 @@ BeforeAll {
     . (Join-Path $root 'scripts/lib/Launcher-Core.ps1')
 }
 
+Describe 'Launcher-WinUtil' {
+    BeforeAll {
+        $root = Split-Path (Split-Path $PSCommandPath -Parent) -Parent
+        $FreshAppData = Join-Path $env:TEMP 'FreshWindows-Test'
+        . (Join-Path $root 'scripts/lib/Launcher-WinUtil.ps1')
+    }
+
+    It 'Get-FreshWindowsLogDir crée le dossier logs sous FreshAppData' {
+        $dir = Get-FreshWindowsLogDir
+        $dir | Should -Match 'FreshWindows-Test'
+        $dir | Should -Match 'logs$'
+        Test-Path -LiteralPath $dir | Should -Be $true
+    }
+}
+
 Describe 'Launcher-Core' {
     It 'Get-WingetUpgradePowerShellCommand inclut source update et upgrade' {
         $cmd = Get-WingetUpgradePowerShellCommand
