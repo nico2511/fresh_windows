@@ -66,10 +66,6 @@ function Write-FreshWindowsLaunchStub {
 }
 
 function Start-FreshWindowsUnelevated {
-    <#
-      Drop l'elevation (NotifyIcon admin = invisible). runas /trustlevel:0x20000
-      puis raccourci via explorer si besoin.
-    #>
     param(
         [Parameter(Mandatory)][string]$FilePath,
         [string]$WorkingDirectory = ''
@@ -80,35 +76,26 @@ function Start-FreshWindowsUnelevated {
     }
 
     Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -match 'powershell' -and $_.CommandLine -match 'GameMode-WatchAgent|Launch-GameModeWatch' } |
+        Where-Object { $_.Name -match 'powershell' -and $_.CommandLine -match 'GameMode-WatchAgent|Launch-GameModeWatch|Start-WatchAgent' } |
         ForEach-Object {
             try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch { }
         }
 
-    $psExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-    $arg = "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$FilePath`""
+    $cmdPath = Join-Path $WorkingDirectory 'Start-WatchAgent.cmd'
+    if (-not (Test-Path -LiteralPath $cmdPath)) {
+        throw "Start-WatchAgent.cmd introuvable (menu 11 d'abord)."
+    }
 
-    $lnk = Join-Path $WorkingDirectory 'Start-WatchAgent.lnk'
-    $wsh = New-Object -ComObject WScript.Shell
-    $sc = $wsh.CreateShortcut($lnk)
-    $sc.TargetPath = $psExe
-    $sc.Arguments = $arg
-    $sc.WorkingDirectory = $WorkingDirectory
-    $sc.WindowStyle = 7
-    $sc.Description = 'Fresh Windows watch agent'
-    $sc.Save()
-
-    $inner = "$psExe $arg"
+    # Un seul argument : le .cmd (pas de quotes PowerShell imbriquees)
     Start-Process -FilePath "$env:SystemRoot\System32\runas.exe" `
-        -ArgumentList "/trustlevel:0x20000 `"$inner`"" `
-        -WorkingDirectory $WorkingDirectory `
-        -WindowStyle Hidden
+        -ArgumentList "/trustlevel:0x20000 `"$cmdPath`"" `
+        -WorkingDirectory $WorkingDirectory
     Start-Sleep -Seconds 1
 
     $alive = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -match 'Launch-GameModeWatch|GameMode-WatchAgent' }
+        Where-Object { $_.CommandLine -match 'Launch-GameModeWatch|GameMode-WatchAgent|Start-WatchAgent' }
     if (-not $alive) {
-        Start-Process -FilePath "$env:SystemRoot\explorer.exe" -ArgumentList "`"$lnk`""
+        Start-Process -FilePath "$env:SystemRoot\explorer.exe" -ArgumentList "`"$cmdPath`""
     }
 }
 
@@ -152,9 +139,30 @@ function Sync-GameModeLocalScripts {
     $watchStub = Join-Path $FreshAppData "Launch-GameModeWatch.ps1"
     @"
 #Requires -Version 5.1
+`$ErrorActionPreference = 'Stop'
 `$env:FRESH_WIN_REF = '$Ref'
-& '$FreshAppData\GameMode-WatchAgent.ps1'
+`$log = Join-Path `$PSScriptRoot 'watch-agent.log'
+Set-Content -LiteralPath `$log -Value ((Get-Date -Format o) + ' stub start') -Encoding UTF8
+try {
+    & (Join-Path `$PSScriptRoot 'GameMode-WatchAgent.ps1')
+}
+catch {
+    Add-Content -LiteralPath `$log -Value (`$_ | Out-String) -Encoding UTF8
+    Write-Host (`$_ | Out-String) -ForegroundColor Red
+    Read-Host 'Erreur agent - Entree pour fermer (voir watch-agent.log)'
+    throw
+}
 "@ | Set-Content -LiteralPath $watchStub -Encoding UTF8
+
+    $cmdPath = Join-Path $FreshAppData 'Start-WatchAgent.cmd'
+    @"
+@echo off
+cd /d "%~dp0"
+echo %DATE% %TIME% cmd start>> "%~dp0watch-agent.log"
+title Fresh Windows Watch
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -STA -ExecutionPolicy Bypass -File "%~dp0Launch-GameModeWatch.ps1"
+if errorlevel 1 pause
+"@ | Set-Content -LiteralPath $cmdPath -Encoding ASCII
 
     return $true
 }
