@@ -117,10 +117,10 @@ Ordre de chargement des libs : `Import-CachedScript` → `Core` → `WinUtil` �
 
 **`configs/game-mode-kill.json`**
 
-- **`domains`** : `dev`, `containers`, `ai_local`, `3d`, `video`, `sync_and_io`, `productivity_heavy` (noms de process Windows, indépendants des listes winget).
-- **`protect.communication`** : Discord, Legcord, etc. — jamais tués.
+- **`domains`** : `dev`, `containers`, `ai_local`, `3d`, `video`, `sync_and_io`, `productivity_heavy`, `messaging`, `ai_agents` (noms de process Windows, indépendants des listes winget).
+- **`protect.communication`** : Discord, Legcord, Slack, Zoom — jamais tués.
 - **`gaming_launchers`** : si plusieurs launchers ouverts, `Stop-IdleGamingLaunchers` garde le plus actif (RAM/CPU).
-- Kill : Teams / `ms-teams` dans `productivity_heavy`.
+- Kill : Teams (`productivity_heavy`) ; Signal, WhatsApp, Telegram, Skype (`messaging`) ; Codex, Claude Code, Hermes, OpenClaw (ex-Clawdbot), DeepSeek Harness (`ai_agents`).
 
 **`configs/game-mode-watch.json`** — seuils agent (poll ~12 s).
 
