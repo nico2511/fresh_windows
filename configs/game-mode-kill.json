@@ -72,6 +72,23 @@
       "Skype",
       "SkypeApp",
       "SkypeBackgroundHost"
+    ],
+    "ai_agents": [
+      "codex",
+      "codex-windows-sandbox-setup",
+      "codex-command-runner",
+      "claude",
+      "hermes",
+      "hermes-acp",
+      "openclaw",
+      "OpenClaw.Tray.WinUI",
+      "OpenClaw.Tray",
+      "clawdbot",
+      "moltbot",
+      "dsh",
+      "DeepSeek-Harness",
+      "DeepSeekHarnessTray",
+      "DeepSeekHarness"
     ]
   },
   "gaming_launchers": [
