@@ -7,13 +7,13 @@ BeforeAll {
 Describe 'Launcher-WinUtil' {
     BeforeAll {
         $root = Split-Path (Split-Path $PSCommandPath -Parent) -Parent
+        $FreshAppData = Join-Path $env:TEMP 'FreshWindows-Test'
         . (Join-Path $root 'scripts/lib/Launcher-WinUtil.ps1')
-        $script:FreshAppData = Join-Path $env:TEMP 'FreshWindows-Test'
     }
 
     It 'Get-FreshWindowsLogDir crée le dossier logs sous FreshAppData' {
         $dir = Get-FreshWindowsLogDir
-        $dir | Should -Match ([regex]::Escape('FreshWindows-Test'))
+        $dir | Should -Match 'FreshWindows-Test'
         $dir | Should -Match 'logs$'
         Test-Path -LiteralPath $dir | Should -Be $true
     }
