@@ -64,6 +64,14 @@
       "Teams",
       "ms-teams",
       "ms-teamsupdate"
+    ],
+    "messaging": [
+      "Signal",
+      "WhatsApp",
+      "Telegram",
+      "Skype",
+      "SkypeApp",
+      "SkypeBackgroundHost"
     ]
   },
   "gaming_launchers": [
@@ -87,10 +95,7 @@
       "Legcord",
       "Slack",
       "slack",
-      "Zoom",
-      "Telegram",
-      "Signal",
-      "Skype"
+      "Zoom"
     ]
   }
 }
