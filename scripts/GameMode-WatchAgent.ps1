@@ -16,6 +16,7 @@ try {
 } catch { }
 
 $RepoRef = if ($env:FRESH_WIN_REF) { $env:FRESH_WIN_REF.Trim() } else { 'main' }
+$RepoRawRoot = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef"
 $FreshAppData = Join-Path $env:LOCALAPPDATA 'FreshWindows'
 $UserSettingsPath = Join-Path $FreshAppData 'watch-agent-user.json'
 $WatchConfigUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/configs/game-mode-watch.json"
@@ -281,6 +282,33 @@ function Invoke-IdleLaunchersOnly {
     }
 }
 
+function Test-LocalScriptsStale {
+    $refFile = Join-Path $FreshAppData 'scripts.ref'
+    if (-not (Test-Path -LiteralPath $refFile)) { return $true }
+    try {
+        return ((Get-Content -LiteralPath $refFile -Raw -Encoding UTF8).Trim() -ne $RepoRef)
+    }
+    catch { return $true }
+}
+
+function Invoke-SyncLocalScripts {
+    try {
+        $corePath = Join-Path $FreshAppData 'Launcher-Core.ps1'
+        $coreUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/scripts/lib/Launcher-Core.ps1"
+        Invoke-WebRequest -Uri $coreUrl -OutFile $corePath -UseBasicParsing
+        Set-Content -LiteralPath (Join-Path $FreshAppData 'Launcher-Core.ps1.ref') -Value $RepoRef -Encoding UTF8 -NoNewline
+        . $corePath
+        $launcherUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/launcher.ps1"
+        $iconUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/assets/fresh-windows.ico"
+        Write-FreshWindowsLaunchStub -FreshAppData $FreshAppData -Ref $RepoRef -LauncherUrl $launcherUrl | Out-Null
+        Sync-GameModeLocalScripts -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $iconUrl | Out-Null
+        Show-Balloon -Title 'Scripts locaux' -Text "Mis à jour (ref $RepoRef). Redémarre l'agent si besoin." -Icon Info
+    }
+    catch {
+        Show-Balloon -Title 'Scripts locaux' -Text $_.Exception.Message -Icon Error
+    }
+}
+
 function Stop-PendingSuggestedProcesses {
     $n = 0
     foreach ($entry in @($script:PendingKill.GetEnumerator())) {
@@ -370,6 +398,11 @@ $miPs.Text = 'Ouvrir PowerShell (sans admin)'
 $miPs.Add_Click({ Start-FreshWindowsPowerShell })
 $miFw.DropDownItems.Add($miPs) | Out-Null
 
+$miSync = New-Object System.Windows.Forms.ToolStripMenuItem
+$miSync.Text = 'Mettre à jour scripts locaux (ref GitHub)'
+$miSync.Add_Click({ Invoke-SyncLocalScripts })
+$miFw.DropDownItems.Add($miSync) | Out-Null
+
 $menu.Items.Add('-') | Out-Null
 $miExit = $menu.Items.Add('Quitter')
 $miExit.Add_Click({
@@ -387,6 +420,12 @@ $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = $pollMs
 $timer.Add_Tick({ Invoke-WatchTick })
 $timer.Start()
+
+if (Test-LocalScriptsStale) {
+    Show-Balloon -Title 'Fresh Windows' -Text (
+        "Scripts locaux obsolètes ou absents (ref attendue : $RepoRef). Menu → Mettre à jour scripts locaux."
+    ) -Icon Warning
+}
 
 Invoke-WatchTick
 [System.Windows.Forms.Application]::Run()

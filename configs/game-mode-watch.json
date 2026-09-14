@@ -8,7 +8,6 @@
   "diskBusySustainedSeconds": 120,
   "diskAlertOnlyWhenNotGaming": true,
   "gamingSessionHeuristic": {
-    "minProtectProcessCpuPercent": 8,
     "minProtectProcessRamMb": 400
   },
   "cooldownBetweenSameAlertSeconds": 300,

@@ -45,8 +45,8 @@ Sans `FRESH_WIN_REF`, tout pointe sur `main` (dernière version).
 | 7 | **WinUtil** — one-click (Standard + AppX + prefs + Ultimate Perf), presets, GUI |
 | 8 | Tâches planifiées (1 clic) : winget quotidien + maintenance hebdo |
 | 9 | Carte graphique AMD / NVIDIA (liens + guides) |
-| 10 | **Mode Jeu** — ferme les process de la liste **générique** (`game-mode-kill.json`, par domaine) |
-| 11 | Raccourci Bureau **Mode Jeu** + agent barre des tâches (option démarrage) |
+| 10 | **Mode jeu** — exécuter la liste générique maintenant |
+| 11 | **Mode jeu** — raccourci Bureau, agent systray (sous-menu) |
 | 0 | Quitter |
 
 ### Mode Jeu (liste générique + agent)
@@ -109,7 +109,7 @@ irm https://raw.githubusercontent.com/nico2511/fresh_windows/main/launcher.ps1 |
 | `winutil-appx` | Debloat AppX seul |
 | `brave-debloat` | Policies Brave via WinUtil (`WPFTweaksBraveDebloat`) |
 | `betterzen` | Applique Betterfox `zen/user.js` au profil Zen |
-| `tasks` / `winget-task` / `winutil-task` | Crée les deux tâches planifiées |
+| `tasks` | Crée les deux tâches planifiées (`winget-task` / `winutil-task` = alias, message d’avertissement) |
 | `game-mode` | Fermeture process liste générique (respecte `protect`) |
 | `game-mode-shortcuts` | Raccourci Bureau Mode Jeu + scripts locaux |
 | `game-mode-watch` | Lance l’agent barre des tâches |
@@ -125,6 +125,8 @@ Smoke tests des configs (JSON + format ShutUp10 CLI) :
 
 ```powershell
 powershell -NoProfile -File .\tests\Validate-Configs.ps1
+# ou configs + Pester (si module Pester installé) :
+powershell -NoProfile -File .\tests\Run-AllTests.ps1
 ```
 
 À lancer avant un push si tu touches `configs/`.
@@ -143,6 +145,11 @@ configs/
   game-mode-kill.json        # domaines + protect comm/gaming
   game-mode-watch.json       # seuils agent surveillance
 scripts/
+  lib/
+    Import-CachedScript.ps1   # cache GitHub → %LOCALAPPDATA%\FreshWindows
+    Launcher-Core.ps1         # Wait-ForUser, winget, stubs, sync mode jeu
+    Launcher-Tasks.ps1        # tâches planifiées winget + maintenance
+    Launcher-GpuMenus.ps1     # menus AMD / NVIDIA
   GameMode-Common.ps1
   Invoke-GameModeKill.ps1
   GameMode-WatchAgent.ps1

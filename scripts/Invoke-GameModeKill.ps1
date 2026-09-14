@@ -25,7 +25,7 @@ else {
 }
 
 Write-Host "`n=== MODE JEU — fermeture processus lourds ===" -ForegroundColor Red
-Write-Host "(Liste générique : dev / IA / 3D / vidéo / sync — pas comm ni gaming)" -ForegroundColor DarkGray
+Write-Host "(Liste générique : dev / IA / 3D / vidéo / sync — comm protégée)" -ForegroundColor DarkGray
 
 $cfg = Get-GameModeKillConfig
 $result = Stop-GameModeKillListProcesses -KillNames $cfg.KillNames -ProtectNames $cfg.ProtectNames
