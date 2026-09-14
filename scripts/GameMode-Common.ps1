@@ -127,10 +127,12 @@ function Stop-IdleGamingLaunchers {
         return @{ Killed = @(); Kept = $kept; Skipped = @() }
     }
 
-    $scored = foreach ($p in $running) {
-        $score = [double]$p.WorkingSet64 + ([double]$p.CPU * 2MB)
-        [pscustomobject]@{ Proc = $p; Score = $score }
-    } | Sort-Object Score -Descending
+    $scored = @(
+        $running | ForEach-Object {
+            $score = [double]$_.WorkingSet64 + ([double]$_.CPU * 2MB)
+            [pscustomobject]@{ Proc = $_; Score = $score }
+        } | Sort-Object Score -Descending
+    )
 
     $keep = $scored[0].Proc
     $kept = @("$($keep.ProcessName) ($($keep.Id)) [actif]")
