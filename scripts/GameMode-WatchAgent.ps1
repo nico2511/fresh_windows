@@ -18,12 +18,29 @@ function Write-WatchLog {
     } catch { }
 }
 
+function Test-WatchIsElevated {
+    try {
+        $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $pr = New-Object Security.Principal.WindowsPrincipal $id
+        return $pr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch { return $false }
+}
+
+$selfScript = $PSCommandPath
+if (-not $selfScript) { $selfScript = $MyInvocation.MyCommand.Path }
+$psExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+$psArg = "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$selfScript`""
+
+if ($selfScript -and (Test-WatchIsElevated)) {
+    Write-WatchLog 'Eleve: relance runas trustlevel 0x20000'
+    $inner = "$psExe $psArg"
+    Start-Process -FilePath "$env:SystemRoot\System32\runas.exe" -ArgumentList "/trustlevel:0x20000 `"$inner`""
+    exit 0
+}
+
 if ([Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
     Write-WatchLog 'Relance en STA'
-    $self = $PSCommandPath
-    if (-not $self) { $self = $MyInvocation.MyCommand.Path }
-    $ps = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-    Start-Process -FilePath $ps -ArgumentList "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$self`""
+    Start-Process -FilePath $psExe -ArgumentList $psArg
     exit 0
 }
 
@@ -346,7 +363,24 @@ function Stop-PendingSuggestedProcesses {
     Show-Balloon -Title 'Suggestions' -Text ("$n processus fermés.") -Icon Info
 }
 
-# --- UI ---
+# --- UI (formulaire cache obligatoire pour le message loop WinForms) ---
+$ErrorActionPreference = 'Continue'
+Write-WatchLog 'Init UI'
+
+$script:HiddenForm = New-Object System.Windows.Forms.Form
+$script:HiddenForm.Text = 'Fresh Windows Watch'
+$script:HiddenForm.WindowState = 'Minimized'
+$script:HiddenForm.ShowInTaskbar = $false
+$script:HiddenForm.FormBorderStyle = 'FixedToolWindow'
+$script:HiddenForm.Size = New-Object System.Drawing.Size(1, 1)
+$script:HiddenForm.Opacity = 0
+$script:HiddenForm.Add_FormClosed({
+    if ($script:NotifyIcon) {
+        $script:NotifyIcon.Visible = $false
+        $script:NotifyIcon.Dispose()
+    }
+})
+
 $script:NotifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $iconPath = Join-Path $FreshAppData 'fresh-windows.ico'
 try {
@@ -438,6 +472,7 @@ $menu.Items.Add('-') | Out-Null
 $miExit = $menu.Items.Add('Quitter')
 $miExit.Add_Click({
     $script:NotifyIcon.Visible = $false
+    if ($script:HiddenForm) { $script:HiddenForm.Close() }
     [System.Windows.Forms.Application]::Exit()
 })
 
@@ -452,18 +487,18 @@ $timer.Interval = $pollMs
 $timer.Add_Tick({ Invoke-WatchTick })
 $timer.Start()
 
-if (Test-LocalScriptsStale) {
-    Show-Balloon -Title 'Fresh Windows' -Text (
-        "Scripts locaux obsolètes ou absents (ref attendue : $RepoRef). Menu → Mettre à jour scripts locaux."
-    ) -Icon Warning
-}
+Show-Balloon -Title 'Fresh Windows' -Text 'Agent actif. Clic droit sur l icone (fleche ^ si cachee).' -Icon Info
 
-Invoke-WatchTick
-Write-WatchLog 'Application.Run'
+Write-WatchLog 'Application.Run(form)'
 try {
-    [System.Windows.Forms.Application]::Run()
+    [void]$script:HiddenForm.Show()
+    $script:HiddenForm.Hide()
+    [System.Windows.Forms.Application]::Run($script:HiddenForm)
 }
 catch {
     Write-WatchLog ("Run: {0}" -f $_.Exception.Message)
+    try {
+        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Fresh Windows agent')
+    } catch { }
     throw
 }
