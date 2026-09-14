@@ -1,14 +1,35 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Agent barre des tâches Fresh Windows - surveillance légère (10-15 s) + toggle détection auto.
+  Agent barre des taches Fresh Windows.
 .NOTES
-  Pas d'élévation requise. Paramètres utilisateur : %LOCALAPPDATA%\FreshWindows\watch-agent-user.json
+  Prefs: %LOCALAPPDATA%\FreshWindows\watch-agent-user.json
+  Lancer avec powershell.exe -STA (sinon l'icone n'apparait pas).
 #>
+$ErrorActionPreference = 'Stop'
+$WatchLog = Join-Path $env:LOCALAPPDATA 'FreshWindows\watch-agent.log'
+
+function Write-WatchLog {
+    param([string]$Message)
+    try {
+        $dir = Split-Path $WatchLog
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        Add-Content -LiteralPath $WatchLog -Value ('{0} {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message) -Encoding UTF8
+    } catch { }
+}
+
+if ([Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
+    Write-WatchLog 'Relance en STA'
+    $self = $PSCommandPath
+    if (-not $self) { $self = $MyInvocation.MyCommand.Path }
+    $ps = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+    Start-Process -FilePath $ps -ArgumentList "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$self`""
+    exit 0
+}
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-
-$ErrorActionPreference = 'SilentlyContinue'
+[System.Windows.Forms.Application]::EnableVisualStyles()
 
 try {
     [Net.ServicePointManager]::SecurityProtocol = `
@@ -328,14 +349,21 @@ function Stop-PendingSuggestedProcesses {
 # --- UI ---
 $script:NotifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $iconPath = Join-Path $FreshAppData 'fresh-windows.ico'
-if (Test-Path -LiteralPath $iconPath) {
-    $script:NotifyIcon.Icon = [System.Drawing.Icon]::new($iconPath)
+try {
+    if (Test-Path -LiteralPath $iconPath) {
+        $script:NotifyIcon.Icon = New-Object System.Drawing.Icon($iconPath)
+    }
+    else {
+        $script:NotifyIcon.Icon = [System.Drawing.SystemIcons]::Application
+    }
 }
-else {
-    $script:NotifyIcon.Icon = [System.SystemIcons]::Application
+catch {
+    Write-WatchLog ("Icone: {0}" -f $_.Exception.Message)
+    $script:NotifyIcon.Icon = [System.Drawing.SystemIcons]::Application
 }
-$script:NotifyIcon.Text = 'Fresh Windows - surveillance'
+$script:NotifyIcon.Text = 'Fresh Windows'
 $script:NotifyIcon.Visible = $true
+Write-WatchLog 'NotifyIcon visible'
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $miKill = $menu.Items.Add('Mode jeu (liste + launchers inactifs)')
@@ -431,4 +459,11 @@ if (Test-LocalScriptsStale) {
 }
 
 Invoke-WatchTick
-[System.Windows.Forms.Application]::Run()
+Write-WatchLog 'Application.Run'
+try {
+    [System.Windows.Forms.Application]::Run()
+}
+catch {
+    Write-WatchLog ("Run: {0}" -f $_.Exception.Message)
+    throw
+}

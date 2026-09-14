@@ -65,6 +65,50 @@ function Write-FreshWindowsLaunchStub {
     return $stubPath
 }
 
+function Start-FreshWindowsUnelevated {
+    <#
+      Le launcher tourne en admin : un NotifyIcon eleve n'apparait pas dans la barre des taches.
+      On lance via tache planifiee RunLevel Limited (integrite moyenne).
+    #>
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [string]$WorkingDirectory = '',
+        [string]$TaskName = 'FreshWindows-WatchAgent'
+    )
+
+    if ([string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+        $WorkingDirectory = Split-Path -Parent $FilePath
+    }
+
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match 'powershell' -and $_.CommandLine -match 'GameMode-WatchAgent|Launch-GameModeWatch' } |
+        ForEach-Object {
+            try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch { }
+        }
+
+    $psExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+    $arg = "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$FilePath`""
+
+    $action = New-ScheduledTaskAction -Execute $psExe -Argument $arg -WorkingDirectory $WorkingDirectory
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+    $settings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -DontStopOnIdleEnd `
+        -ExecutionTimeLimit (New-TimeSpan -Days 365) `
+        -MultipleInstances IgnoreNew
+
+    Register-ScheduledTask `
+        -TaskName $TaskName `
+        -Action $action `
+        -Principal $principal `
+        -Settings $settings `
+        -Description 'Fresh Windows - agent barre des taches (non eleve)' `
+        -Force | Out-Null
+
+    Start-ScheduledTask -TaskName $TaskName
+}
+
 function Sync-GameModeLocalScripts {
     param(
         [string]$FreshAppData,
