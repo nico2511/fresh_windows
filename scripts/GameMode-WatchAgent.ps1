@@ -18,30 +18,34 @@ function Write-WatchLog {
     } catch { }
 }
 
-function Test-WatchIsElevated {
-    try {
-        $id = [Security.Principal.WindowsIdentity]::GetCurrent()
-        $pr = New-Object Security.Principal.WindowsPrincipal $id
-        return $pr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-    } catch { return $false }
-}
+Write-WatchLog 'WatchAgent start'
 
 $selfScript = $PSCommandPath
 if (-not $selfScript) { $selfScript = $MyInvocation.MyCommand.Path }
 $psExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-$psArg = "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$selfScript`""
-
-if ($selfScript -and (Test-WatchIsElevated)) {
-    Write-WatchLog 'Eleve: relance runas trustlevel 0x20000'
-    $inner = "$psExe $psArg"
-    Start-Process -FilePath "$env:SystemRoot\System32\runas.exe" -ArgumentList "/trustlevel:0x20000 `"$inner`""
-    exit 0
-}
+$psArg = "-NoProfile -STA -ExecutionPolicy Bypass -File `"$selfScript`""
 
 if ([Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
     Write-WatchLog 'Relance en STA'
     Start-Process -FilePath $psExe -ArgumentList $psArg
     exit 0
+}
+
+function Hide-WatchConsole {
+    try {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class FreshWinNative {
+    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}
+'@
+        $hwnd = [FreshWinNative]::GetConsoleWindow()
+        if ($hwnd -and $hwnd -ne [IntPtr]::Zero) {
+            [void][FreshWinNative]::ShowWindow($hwnd, 0)
+        }
+    } catch { }
 }
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -218,7 +222,7 @@ function Invoke-WatchTick {
                     if ($script:UserSettings.autoSuggestKill -and (Test-AlertCooldown -Key $key -CooldownSec $cooldown)) {
                         $script:PendingKill[$id] = $name
                         Show-Balloon -Title 'CPU élevé (hors jeu/comm)' -Text (
-                            "$name utilise ~$([math]::Round($pct))% CPU depuis $([math]::Round($cpuSec/60)) min.`nClic droit → " Tuer suggestion " ou " Mode jeu "."
+                            "$name CPU eleve. Clic droit: Tuer suggestion ou Mode jeu."
                         ) -Icon Warning
                         Mark-Alert -Key $key
                         $highSince = $null
@@ -398,6 +402,7 @@ catch {
 $script:NotifyIcon.Text = 'Fresh Windows'
 $script:NotifyIcon.Visible = $true
 Write-WatchLog 'NotifyIcon visible'
+Hide-WatchConsole
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $miKill = $menu.Items.Add('Mode jeu (liste + launchers inactifs)')

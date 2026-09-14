@@ -679,7 +679,7 @@ function Invoke-GameModeKill {
         }
     }
 
-    Write-Host "`nAstuce : raccourci Bureau " Mode Jeu " ou agent barre des tâches (menu 11)." -ForegroundColor DarkCyan
+    Write-Host "`nAstuce : raccourci Bureau Mode Jeu ou agent barre des taches (menu 11)." -ForegroundColor DarkCyan
     Write-Host "Plan Ultimate Performance : menu WinUtil one-click." -ForegroundColor DarkCyan
     if (-not $NoPause) { Wait-ForUser }
     return ($result.Skipped.Count -eq 0)
@@ -725,8 +725,9 @@ function Install-GameModeShortcuts {
         $startup = [Environment]::GetFolderPath('Startup')
         $lnkWatch = Join-Path $startup "Fresh Windows Surveillance.lnk"
         $w = $wsh.CreateShortcut($lnkWatch)
-        $w.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-        $w.Arguments = "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$watchStub`""
+        $cmdWatch = Join-Path $FreshAppData 'Start-WatchAgent.cmd'
+        $w.TargetPath = $cmdWatch
+        $w.Arguments = ''
         $w.WorkingDirectory = $FreshAppData
         $w.Description = "Agent Fresh Windows (CPU/RAM/disque/hang + toggle auto)"
         if (Test-Path -LiteralPath $iconPath) { $w.IconLocation = "$iconPath,0" }
@@ -752,7 +753,7 @@ function Open-GameModeSetupMenu {
         Write-Host "=== MODE JEU - raccourci & agent ===" -ForegroundColor Red
         Write-Host "Scripts copiés dans %LOCALAPPDATA%\FreshWindows (ref $RepoRef)." -ForegroundColor DarkGray
         Write-Host ""
-        Write-Host "1. Raccourci Bureau " Mode Jeu " (sans admin)" -ForegroundColor Green
+        Write-Host "1. Raccourci Bureau Mode Jeu (sans admin)" -ForegroundColor Green
         Write-Host "2. Raccourci + agent au démarrage Windows" -ForegroundColor Cyan
         Write-Host "3. Lancer l'agent maintenant" -ForegroundColor Yellow
         Write-Host "4. Retour" -ForegroundColor DarkGray
