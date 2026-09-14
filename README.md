@@ -148,6 +148,7 @@ scripts/
   lib/
     Import-CachedScript.ps1   # cache GitHub → %LOCALAPPDATA%\FreshWindows
     Launcher-Core.ps1         # Wait-ForUser, winget, stubs, sync mode jeu
+    Launcher-WinUtil.ps1      # WinUtil, ShutUp10, maintenance hebdo
     Launcher-Tasks.ps1        # tâches planifiées winget + maintenance
     Launcher-GpuMenus.ps1     # menus AMD / NVIDIA
   GameMode-Common.ps1
