@@ -44,6 +44,50 @@ $IconUrl = "$RepoRawRoot/assets/fresh-windows.ico"
 $FreshAppData = Join-Path $env:LOCALAPPDATA "FreshWindows"
 $script:FreshBrand = "Fresh Windows"
 
+function Wait-ForUser {
+    if ($Host.Name -eq 'ConsoleHost') {
+        Read-Host "`nEntrée pour continuer"
+    }
+}
+
+function Invoke-WingetUpgradeAll {
+    param([switch]$NoPause)
+
+    $ok = $true
+    winget source update --disable-interactivity
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Échec winget source update (code $LASTEXITCODE)" -ForegroundColor Red
+        $ok = $false
+    }
+    winget upgrade --all --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Échec / partiel winget upgrade (code $LASTEXITCODE)" -ForegroundColor Red
+        $ok = $false
+    }
+    elseif ($ok) {
+        Write-Host "winget upgrade terminé." -ForegroundColor Green
+    }
+    if (-not $NoPause) { Wait-ForUser }
+    return $ok
+}
+
+function Install-FullSetup {
+    param([switch]$NoPause)
+
+    $a = [bool](Install-FromJson -FileName "apps-standard.json" -Category "Standard" -NoPause)
+    $b = [bool](Install-FromJson -FileName "apps-gaming.json" -Category "Gaming" -NoPause)
+    $c = [bool](Install-FromJson -FileName "apps-dev.json" -Category "Dev" -NoPause)
+    $ok = $a -and $b -and $c
+    if ($ok) {
+        Write-Host "`nFull Setup terminé !" -ForegroundColor Green
+    }
+    else {
+        Write-Host "`nFull Setup terminé avec des échecs (détail ci-dessus)." -ForegroundColor Red
+    }
+    if (-not $NoPause) { Wait-ForUser }
+    return $ok
+}
+
 function Get-Config {
     param([string]$FileName)
     try {
@@ -337,7 +381,7 @@ function Invoke-ShutUp10Recommended {
     $exe = Get-ShutUp10Exe
     if (-not $exe) {
         Write-Host "  ShutUp10 introuvable. Installe OO-Software.ShutUp10 (apps standard) d'abord." -ForegroundColor Red
-        if (-not $NoPause) { Pause }
+        if (-not $NoPause) { Wait-ForUser }
         return $false
     }
 
@@ -390,8 +434,8 @@ function Invoke-ShutUp10Recommended {
         }
     }
 
-    if (-not $NoPause) { Pause }
-    return ($cfgOk -or $LaunchGui -or -not $NoPause)
+    if (-not $NoPause) { Wait-ForUser }
+    return ($cfgOk -or $LaunchGui)
 }
 
 function Get-FreshWindowsLogDir {
@@ -473,7 +517,7 @@ function Invoke-MaintenanceReapply {
         Start-Sleep -Seconds 20
     }
     else {
-        Pause
+        Wait-ForUser
     }
     return $ok
 }
@@ -486,7 +530,7 @@ function Install-FromJson {
     )
     $apps = Get-Config -FileName $FileName
     if (-not $apps) {
-        if (-not $NoPause) { Pause }
+        if (-not $NoPause) { Wait-ForUser }
         return $false
     }
 
@@ -523,7 +567,7 @@ function Install-FromJson {
         Write-Host "`nCatégorie $Category terminée. [$total/$total]" -ForegroundColor Green
     }
 
-    if (-not $NoPause) { Pause }
+    if (-not $NoPause) { Wait-ForUser }
     return ($failed.Count -eq 0)
 }
 
@@ -573,7 +617,7 @@ function Invoke-BetterZen {
     if (-not $profilePath -or -not (Test-Path -LiteralPath $profilePath)) {
         Write-Host "  Profil Zen introuvable sous %APPDATA%\zen." -ForegroundColor Red
         Write-Host "  Installe Zen et lance-le une fois pour créer un profil." -ForegroundColor DarkYellow
-        if (-not $NoPause) { Pause }
+        if (-not $NoPause) { Wait-ForUser }
         return $false
     }
 
@@ -597,12 +641,12 @@ function Invoke-BetterZen {
         Copy-Item -LiteralPath $tmp -Destination $dest -Force
         Write-Host "  BetterZen écrit : $dest" -ForegroundColor Green
         Write-Host "  Ferme / relance Zen pour appliquer les prefs." -ForegroundColor Yellow
-        if (-not $NoPause) { Pause }
+        if (-not $NoPause) { Wait-ForUser }
         return $true
     }
     catch {
         Write-Host "  Échec BetterZen : $($_.Exception.Message)" -ForegroundColor Red
-        if (-not $NoPause) { Pause }
+        if (-not $NoPause) { Wait-ForUser }
         return $false
     }
 }
@@ -621,7 +665,7 @@ function Open-Extensions {
         switch ($c) {
             "1" {
                 $urls = Get-Config -FileName "extensions-firefox-based.json"
-                if (-not $urls) { Pause; continue }
+                if (-not $urls) { Wait-ForUser; continue }
                 Write-Host "`nOuverture des extensions Firefox-based..." -ForegroundColor Yellow
                 foreach ($url in $urls) {
                     if ($url -notmatch '^https?://') {
@@ -631,11 +675,11 @@ function Open-Extensions {
                     Start-Process $url
                 }
                 Write-Host "Pages ouvertes (vrai uBlock Origin)." -ForegroundColor Green
-                Pause
+                Wait-ForUser
             }
             "2" {
                 $urls = Get-Config -FileName "extensions-chrome-based.json"
-                if (-not $urls) { Pause; continue }
+                if (-not $urls) { Wait-ForUser; continue }
                 Write-Host "`nOuverture des extensions Chrome-based..." -ForegroundColor Yellow
                 foreach ($url in $urls) {
                     if ($url -notmatch '^https?://') {
@@ -645,7 +689,7 @@ function Open-Extensions {
                     Start-Process $url
                 }
                 Write-Host "Pages ouvertes." -ForegroundColor Green
-                Pause
+                Wait-ForUser
             }
             "3" {
                 Invoke-WinUtilConfig -ConfigUrl "$BaseUrl/winutil-brave-debloat.json" -Label "Brave debloat"
@@ -753,7 +797,7 @@ function Invoke-WinUtilOneClick {
         $ok = $false
     }
 
-    if (-not $NoPause) { Pause }
+    if (-not $NoPause) { Wait-ForUser }
     return $ok
 }
 
@@ -778,7 +822,7 @@ function Invoke-WinUtilConfig {
         Write-Host $_.Exception.Message -ForegroundColor DarkRed
         $ok = $false
     }
-    if (-not $NoPause) { Pause }
+    if (-not $NoPause) { Wait-ForUser }
     return $ok
 }
 
@@ -803,7 +847,7 @@ function Invoke-WinUtilPreset {
         Write-Host $_.Exception.Message -ForegroundColor DarkRed
         $ok = $false
     }
-    if (-not $NoPause) { Pause }
+    if (-not $NoPause) { Wait-ForUser }
     return $ok
 }
 
@@ -886,20 +930,22 @@ function Show-Menu {
     Write-Host ("User    : {0}" -f $info.User) -ForegroundColor DarkGray
     Write-Host ("Windows : {0} ({1})" -f $info.Edition, $info.DisplayVersion) -ForegroundColor DarkGray
     Write-Host ("Profil  : {0}" -f $info.ProfilePath) -ForegroundColor DarkGray
-    Write-Host "Ref     : $RepoRef" -ForegroundColor DarkGray
-    Write-Host "Configs : $BaseUrl" -ForegroundColor DarkGray
+    Write-Host "Ref GitHub : $RepoRef" -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "1. Installer Apps Standard" -ForegroundColor Green
-    Write-Host "2. Installer Apps Gaming" -ForegroundColor Magenta
-    Write-Host "3. Installer Apps Dev" -ForegroundColor Blue
-    Write-Host "4. Full Setup (Standard + Gaming + Dev)" -ForegroundColor Cyan
-    Write-Host "5. Navigateurs / extensions (Brave, Zen...)" -ForegroundColor Yellow
-    Write-Host "6. Mettre à jour toutes les apps (winget upgrade --all)" -ForegroundColor White
-    Write-Host "7. WinUtil — one-click / presets / GUI" -ForegroundColor Gray
-    Write-Host "8. Tâches planifiées (tout activer en 1 clic)" -ForegroundColor DarkCyan
-    Write-Host "9. Carte graphique (AMD / NVIDIA)" -ForegroundColor DarkYellow
-    Write-Host "10. Mode Jeu — kill liste générique (pas comm/gaming)" -ForegroundColor Red
-    Write-Host "11. Mode Jeu — raccourci Bureau + agent surveillance (option)" -ForegroundColor DarkRed
+    Write-Host "--- Install ---" -ForegroundColor DarkCyan
+    Write-Host "1. Apps Standard" -ForegroundColor Green
+    Write-Host "2. Apps Gaming" -ForegroundColor Magenta
+    Write-Host "3. Apps Dev" -ForegroundColor Blue
+    Write-Host "4. Full (1+2+3)" -ForegroundColor Cyan
+    Write-Host "--- Maintien ---" -ForegroundColor DarkCyan
+    Write-Host "5. Navigateurs / extensions" -ForegroundColor Yellow
+    Write-Host "6. Winget upgrade --all" -ForegroundColor White
+    Write-Host "7. WinUtil / ShutUp10" -ForegroundColor Gray
+    Write-Host "8. Tâches planifiées (+ maintenance dimanche)" -ForegroundColor DarkCyan
+    Write-Host "9. GPU AMD / NVIDIA" -ForegroundColor DarkYellow
+    Write-Host "--- Session jeu ---" -ForegroundColor DarkCyan
+    Write-Host "10. Mode jeu — exécuter maintenant" -ForegroundColor Red
+    Write-Host "11. Mode jeu — raccourci & agent (sous-menu)" -ForegroundColor DarkRed
     Write-Host "0. Quitter" -ForegroundColor DarkGray
     Write-Host ""
 }
@@ -932,7 +978,7 @@ function Register-AllScheduledTasks {
     if (-not (Test-IsAdmin)) {
         Write-Host "`nAccès refusé : relance le script en PowerShell Administrateur." -ForegroundColor Red
         Write-Host "  Clic droit → Exécuter en tant qu'administrateur" -ForegroundColor Yellow
-        if (-not $NoPause) { Pause }
+        if (-not $NoPause) { Wait-ForUser }
         return $false
     }
 
@@ -997,7 +1043,7 @@ function Register-AllScheduledTasks {
         Write-Host "`nCertaines tâches ont échoué (souvent: pas admin)." -ForegroundColor Yellow
     }
 
-    if (-not $NoPause) { Pause }
+    if (-not $NoPause) { Wait-ForUser }
     return $ok
 }
 
@@ -1019,7 +1065,7 @@ function Unregister-AllScheduledTasks {
             Write-Host "  [KO] $name : $($_.Exception.Message)" -ForegroundColor Red
         }
     }
-    if (-not $NoPause) { Pause }
+    if (-not $NoPause) { Wait-ForUser }
 }
 
 function Show-NamedTaskStatus {
@@ -1122,7 +1168,7 @@ function Open-AmdGpuMenu {
                     $page = if ($GpuConfig) { $GpuConfig.amd.driversPage } else { "https://www.amd.com/en/support/download/drivers.html" }
                     Start-Process $page
                 }
-                Pause
+                Wait-ForUser
             }
             "2" {
                 $page = if ($GpuConfig) { $GpuConfig.amd.driversPage } else { "https://www.amd.com/en/support/download/drivers.html" }
@@ -1169,7 +1215,7 @@ function Open-NvidiaGpuMenu {
             }
             "4" {
                 winget install -e --id TechPowerUp.NVCleanstall --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
-                Pause
+                Wait-ForUser
             }
             "5" { return }
             default {
@@ -1203,9 +1249,26 @@ function Write-FreshWindowsLaunchStub {
 
 function Import-GameModeCommon {
     $dest = Join-Path $FreshAppData "GameMode-Common.ps1"
+    $meta = Join-Path $FreshAppData "GameMode-Common.ref"
     $url  = "$RepoRawRoot/scripts/GameMode-Common.ps1"
+    $needFetch = -not (Test-Path -LiteralPath $dest)
+    if (-not $needFetch -and (Test-Path -LiteralPath $meta)) {
+        try {
+            $savedRef = (Get-Content -LiteralPath $meta -Raw -Encoding UTF8).Trim()
+            if ($savedRef -ne $RepoRef) { $needFetch = $true }
+        }
+        catch { $needFetch = $true }
+    }
+    elseif (-not (Test-Path -LiteralPath $meta)) {
+        $needFetch = $true
+    }
+
     try {
-        Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+        if ($needFetch) {
+            New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null
+            Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+            Set-Content -LiteralPath $meta -Value $RepoRef -Encoding UTF8 -NoNewline
+        }
         . $dest -RepoRef $RepoRef
         return $true
     }
@@ -1219,10 +1282,10 @@ function Invoke-GameModeKill {
     param([switch]$NoPause)
 
     Write-Host "`n=== MODE JEU — fermeture processus lourds ===" -ForegroundColor Red
-    Write-Host "Liste générique (dev / IA / 3D / vidéo / sync). Jamais comm ni gaming." -ForegroundColor DarkGray
+    Write-Host "Liste générique (dev / IA / 3D / vidéo / sync). Comm protégée ; launchers inactifs fermés." -ForegroundColor DarkGray
 
     if (-not (Import-GameModeCommon)) {
-        if (-not $NoPause) { Pause }
+        if (-not $NoPause) { Wait-ForUser }
         return $false
     }
 
@@ -1251,7 +1314,7 @@ function Invoke-GameModeKill {
 
     Write-Host "`nAstuce : raccourci Bureau « Mode Jeu » ou agent barre des tâches (menu 11)." -ForegroundColor DarkCyan
     Write-Host "Plan Ultimate Performance : menu WinUtil one-click." -ForegroundColor DarkCyan
-    if (-not $NoPause) { Pause }
+    if (-not $NoPause) { Wait-ForUser }
     return ($result.Skipped.Count -eq 0)
 }
 
@@ -1266,6 +1329,7 @@ function Install-GameModeShortcuts {
     }
 
     Write-FreshWindowsLaunchStub | Out-Null
+    Set-Content -LiteralPath (Join-Path $FreshAppData 'scripts.ref') -Value $RepoRef -Encoding UTF8 -NoNewline
 
     foreach ($scriptName in @('GameMode-Common.ps1', 'Invoke-GameModeKill.ps1', 'GameMode-WatchAgent.ps1')) {
         $dest = Join-Path $FreshAppData $scriptName
@@ -1276,7 +1340,7 @@ function Install-GameModeShortcuts {
         }
         catch {
             Write-Host "Échec téléchargement $scriptName : $($_.Exception.Message)" -ForegroundColor Red
-            if (-not $NoPause) { Pause }
+            if (-not $NoPause) { Wait-ForUser }
             return $false
         }
     }
@@ -1306,7 +1370,7 @@ function Install-GameModeShortcuts {
     $k.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
     $k.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$killStub`""
     $k.WorkingDirectory = $FreshAppData
-    $k.Description = "Fresh Windows — fermer processus lourds (pas comm/gaming)"
+    $k.Description = "Fresh Windows — mode jeu (liste générique)"
     if (Test-Path -LiteralPath $iconPath) { $k.IconLocation = "$iconPath,0" }
     $k.Save()
     Write-Host "→ Raccourci Bureau : Mode Jeu.lnk (sans admin)" -ForegroundColor Green
@@ -1325,8 +1389,33 @@ function Install-GameModeShortcuts {
         Write-Host "  Toggle « Détection auto » dans le menu clic droit de l'icône." -ForegroundColor DarkGray
     }
 
-    if (-not $NoPause) { Pause }
+    if (-not $NoPause) { Wait-ForUser }
     return $true
+}
+
+function Open-GameModeSetupMenu {
+    do {
+        Clear-Host
+        Write-Host "=== MODE JEU — raccourci & agent ===" -ForegroundColor Red
+        Write-Host "Scripts copiés dans %LOCALAPPDATA%\FreshWindows (ref $RepoRef)." -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "1. Raccourci Bureau « Mode Jeu » (sans admin)" -ForegroundColor Green
+        Write-Host "2. Raccourci + agent au démarrage Windows" -ForegroundColor Cyan
+        Write-Host "3. Lancer l'agent maintenant" -ForegroundColor Yellow
+        Write-Host "4. Retour" -ForegroundColor DarkGray
+        Write-Host ""
+        $sub = Read-Host "Choix"
+        switch ($sub) {
+            "1" { Install-GameModeShortcuts | Out-Null }
+            "2" { Install-GameModeShortcuts -IncludeWatchAgent | Out-Null }
+            "3" { Start-GameModeWatchAgent | Out-Null }
+            "4" { return }
+            default {
+                Write-Host "Choix invalide" -ForegroundColor Red
+                Start-Sleep 1
+            }
+        }
+    } while ($true)
 }
 
 function Start-GameModeWatchAgent {
@@ -1334,25 +1423,31 @@ function Start-GameModeWatchAgent {
 
     $ok = Install-GameModeShortcuts -NoPause -IncludeWatchAgent:$false
     if (-not $ok) {
-        if (-not $NoPause) { Pause }
+        if (-not $NoPause) { Wait-ForUser }
         return $false
     }
     $stub = Join-Path $FreshAppData "Launch-GameModeWatch.ps1"
     if (-not (Test-Path -LiteralPath $stub)) {
         Write-Host "Stub agent introuvable." -ForegroundColor Red
-        if (-not $NoPause) { Pause }
+        if (-not $NoPause) { Wait-ForUser }
         return $false
     }
     Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
         -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$stub`"" `
         -WorkingDirectory $FreshAppData
     Write-Host "Agent barre des tâches lancé (icône près de l'horloge)." -ForegroundColor Green
-    if (-not $NoPause) { Pause }
+    if (-not $NoPause) { Wait-ForUser }
     return $true
 }
 
 function Invoke-SilentMode {
     param([string]$InstallMode)
+
+    $InstallMode = $InstallMode.Trim().ToLowerInvariant()
+    if ($InstallMode -in @('winget-task', 'winutil-task')) {
+        Write-Host "Alias '$InstallMode' → mode 'tasks'." -ForegroundColor DarkGray
+        $InstallMode = 'tasks'
+    }
 
     Write-Host "Mode silencieux : $InstallMode (ref=$RepoRef)" -ForegroundColor Cyan
     $ok = $true
@@ -1369,16 +1464,7 @@ function Invoke-SilentMode {
                 $ok = [bool](Install-FromJson -FileName "apps-dev.json" -Category "Dev" -NoPause)
             }
             "full" {
-                $a = [bool](Install-FromJson -FileName "apps-standard.json" -Category "Standard" -NoPause)
-                $b = [bool](Install-FromJson -FileName "apps-gaming.json" -Category "Gaming" -NoPause)
-                $c = [bool](Install-FromJson -FileName "apps-dev.json" -Category "Dev" -NoPause)
-                $ok = $a -and $b -and $c
-                if ($ok) {
-                    Write-Host "`nFull Setup terminé !" -ForegroundColor Green
-                }
-                else {
-                    Write-Host "`nFull Setup terminé avec des échecs." -ForegroundColor Red
-                }
+                $ok = [bool](Install-FullSetup -NoPause)
             }
             "winutil-oneclick" {
                 $ok = [bool](Invoke-WinUtilOneClick -NoPause)
@@ -1404,12 +1490,6 @@ function Invoke-SilentMode {
             "betterzen" {
                 $ok = [bool](Invoke-BetterZen -NoPause)
             }
-            "winget-task" {
-                $ok = [bool](Register-AllScheduledTasks -NoPause)
-            }
-            "winutil-task" {
-                $ok = [bool](Register-AllScheduledTasks -NoPause)
-            }
             "tasks" {
                 $ok = [bool](Register-AllScheduledTasks -NoPause)
             }
@@ -1429,10 +1509,7 @@ function Invoke-SilentMode {
                 $ok = [bool](Invoke-ShutUp10Recommended -NoPause)
             }
             "winget-upgrade" {
-                winget source update --disable-interactivity
-                if ($LASTEXITCODE -ne 0) { $ok = $false }
-                winget upgrade --all --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
-                if ($LASTEXITCODE -ne 0) { $ok = $false }
+                $ok = [bool](Invoke-WingetUpgradeAll -NoPause)
             }
             default {
                 Write-Host "Mode inconnu : $InstallMode" -ForegroundColor Red
@@ -1451,11 +1528,6 @@ function Invoke-SilentMode {
     }
     Write-Host "`nOK — exit 0" -ForegroundColor Green
     exit 0
-}
-
-# ========== ENTRÉE ==========
-if ($Mode -ne 'menu') {
-    Invoke-SilentMode -InstallMode $Mode
 }
 
 function Install-FreshWindowsDesktopShortcut {
@@ -1506,6 +1578,12 @@ function Install-FreshWindowsDesktopShortcut {
     }
 }
 
+# ========== ENTRÉE ==========
+if ($Mode -ne 'menu') {
+    Invoke-SilentMode -InstallMode $Mode
+    exit
+}
+
 Install-FreshWindowsDesktopShortcut
 
 do {
@@ -1517,49 +1595,14 @@ do {
             "1" { Install-FromJson -FileName "apps-standard.json" -Category "Standard" | Out-Null }
             "2" { Install-FromJson -FileName "apps-gaming.json" -Category "Gaming" | Out-Null }
             "3" { Install-FromJson -FileName "apps-dev.json" -Category "Dev" | Out-Null }
-            "4" {
-                $a = [bool](Install-FromJson -FileName "apps-standard.json" -Category "Standard" -NoPause)
-                $b = [bool](Install-FromJson -FileName "apps-gaming.json" -Category "Gaming" -NoPause)
-                $c = [bool](Install-FromJson -FileName "apps-dev.json" -Category "Dev" -NoPause)
-                if ($a -and $b -and $c) {
-                    Write-Host "`nFull Setup terminé !" -ForegroundColor Green
-                }
-                else {
-                    Write-Host "`nFull Setup terminé avec des échecs (détail ci-dessus)." -ForegroundColor Red
-                }
-                Pause
-            }
+            "4" { Install-FullSetup | Out-Null }
             "5" { Open-Extensions }
-            "6" {
-                winget source update --disable-interactivity
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Host "Échec winget source update (code $LASTEXITCODE)" -ForegroundColor Red
-                }
-                winget upgrade --all --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Host "Échec / partiel winget upgrade (code $LASTEXITCODE)" -ForegroundColor Red
-                }
-                else {
-                    Write-Host "winget upgrade terminé." -ForegroundColor Green
-                }
-                Pause
-            }
+            "6" { Invoke-WingetUpgradeAll | Out-Null }
             "7" { Open-WinUtilMenu }
             "8" { Open-ScheduledTasksMenu }
             "9" { Open-GpuMenu }
             "10" { Invoke-GameModeKill }
-            "11" {
-                Write-Host "`n1 = Raccourci Bureau « Mode Jeu » seulement" -ForegroundColor Cyan
-                Write-Host "2 = Raccourci + agent au démarrage Windows" -ForegroundColor Cyan
-                Write-Host "3 = Lancer l'agent maintenant (sans tâche démarrage)" -ForegroundColor Cyan
-                $sub = Read-Host "Choix"
-                switch ($sub) {
-                    "1" { Install-GameModeShortcuts | Out-Null }
-                    "2" { Install-GameModeShortcuts -IncludeWatchAgent | Out-Null }
-                    "3" { Start-GameModeWatchAgent | Out-Null }
-                    default { Write-Host "Annulé." -ForegroundColor Yellow; Pause }
-                }
-            }
+            "11" { Open-GameModeSetupMenu }
             "0" { exit 0 }
             default {
                 Write-Host "Choix invalide" -ForegroundColor Red
@@ -1569,6 +1612,6 @@ do {
     }
     catch {
         Write-Host "`nErreur : $($_.Exception.Message)" -ForegroundColor Red
-        Pause
+        Wait-ForUser
     }
 } while ($true)
