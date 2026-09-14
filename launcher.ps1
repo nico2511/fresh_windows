@@ -85,7 +85,7 @@ function Get-FreshWindowsBootstrapScriptPath {
     return $dest
 }
 
-function Import-FreshWindowsLibraries {
+function Get-FreshWindowsLibraryPaths {
     $script:FreshWindowsLibFiles = @(
         'Import-CachedScript.ps1',
         'Launcher-Core.ps1',
@@ -94,54 +94,59 @@ function Import-FreshWindowsLibraries {
         'Launcher-GpuMenus.ps1'
     )
 
-    # irm | iex : $PSScriptRoot est vide - Join-Path échoue si on l'appelle quand même
-    $libRoot = $null
-    $useLocal = $false
+    # irm | iex : $PSScriptRoot est vide - Join-Path echoue si on l'appelle quand meme
     if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
         $libRoot = Join-Path $PSScriptRoot 'scripts/lib'
-        $useLocal = $true
+        $allLocal = $true
+        $local = @()
         foreach ($name in $script:FreshWindowsLibFiles) {
-            if (-not (Test-Path -LiteralPath (Join-Path $libRoot $name))) {
-                $useLocal = $false
+            $p = Join-Path $libRoot $name
+            if (-not (Test-Path -LiteralPath $p)) {
+                $allLocal = $false
                 break
             }
+            $local += $p
         }
+        if ($allLocal) { return $local }
     }
 
-    try {
-        if ($useLocal) {
-            foreach ($name in $script:FreshWindowsLibFiles) {
-                . (Join-Path $libRoot $name)
-            }
-            return $true
-        }
-
-        $importPath = Get-FreshWindowsBootstrapScriptPath `
-            -CacheFileName 'Import-CachedScript.ps1' `
-            -RemotePath 'scripts/lib/Import-CachedScript.ps1'
-        . $importPath
-
-        foreach ($name in $script:FreshWindowsLibFiles) {
-            if ($name -eq 'Import-CachedScript.ps1') { continue }
-            $libPath = Get-FreshWindowsCachedScriptPath `
-                -CacheFileName $name `
-                -RemotePath "scripts/lib/$name" `
-                -RepoRawRoot $RepoRawRoot `
-                -RepoRef $RepoRef `
-                -FreshAppData $FreshAppData
-            ConvertTo-Utf8BomFile -Path $libPath
-            . $libPath
-        }
-        return $true
+    $paths = @()
+    foreach ($name in $script:FreshWindowsLibFiles) {
+        $p = Get-FreshWindowsBootstrapScriptPath `
+            -CacheFileName $name `
+            -RemotePath "scripts/lib/$name"
+        ConvertTo-Utf8BomFile -Path $p
+        $paths += $p
     }
-    catch {
-        Write-Host "Bibliothèques Fresh Windows indisponibles : $($_.Exception.Message)" -ForegroundColor Red
-        return $false
-    }
+    return $paths
 }
 
-if (-not (Import-FreshWindowsLibraries)) {
-    Write-Host "Impossible de charger scripts/lib (réseau ou repo). Arrêt." -ForegroundColor Red
+# Dot-source AU NIVEAU SCRIPT (pas dans une fonction) sinon Wait-ForUser etc. disparaissent au return.
+try {
+    $libPaths = @(Get-FreshWindowsLibraryPaths)
+    if ($libPaths.Count -lt 1) { throw 'Liste de bibliotheques vide.' }
+    foreach ($libPath in $libPaths) {
+        ConvertTo-Utf8BomFile -Path $libPath
+        . $libPath
+    }
+
+    $gmRel = 'scripts/GameMode-Common.ps1'
+    $gmPath = $null
+    if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        $candidate = Join-Path $PSScriptRoot $gmRel
+        if (Test-Path -LiteralPath $candidate) { $gmPath = $candidate }
+    }
+    if (-not $gmPath) {
+        $gmPath = Get-FreshWindowsBootstrapScriptPath `
+            -CacheFileName 'GameMode-Common.ps1' `
+            -RemotePath $gmRel
+        ConvertTo-Utf8BomFile -Path $gmPath
+    }
+    . $gmPath -RepoRef $RepoRef
+}
+catch {
+    Write-Host "Bibliotheques Fresh Windows indisponibles : $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Impossible de charger scripts/lib (reseau ou repo). Arret." -ForegroundColor Red
     exit 1
 }
 
@@ -633,20 +638,11 @@ function Show-Menu {
 }
 
 function Import-GameModeCommon {
-    try {
-        $path = Get-FreshWindowsCachedScriptPath `
-            -CacheFileName 'GameMode-Common.ps1' `
-            -RemotePath 'scripts/GameMode-Common.ps1' `
-            -RepoRawRoot $RepoRawRoot `
-            -RepoRef $RepoRef `
-            -FreshAppData $FreshAppData
-        . $path -RepoRef $RepoRef
+    if (Get-Command Get-GameModeKillConfig -ErrorAction SilentlyContinue) {
         return $true
     }
-    catch {
-        Write-Host "Impossible de charger GameMode-Common.ps1 : $($_.Exception.Message)" -ForegroundColor Red
-        return $false
-    }
+    Write-Host "GameMode-Common.ps1 n'est pas charge (biblio). Relance le launcher." -ForegroundColor Red
+    return $false
 }
 
 function Invoke-GameModeKill {
