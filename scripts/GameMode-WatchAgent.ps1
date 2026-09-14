@@ -295,9 +295,8 @@ function Invoke-SyncLocalScripts {
     try {
         $corePath = Join-Path $FreshAppData 'Launcher-Core.ps1'
         $coreUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/scripts/lib/Launcher-Core.ps1"
-        if (-not (Test-Path -LiteralPath $corePath)) {
-            Invoke-WebRequest -Uri $coreUrl -OutFile $corePath -UseBasicParsing
-        }
+        Invoke-WebRequest -Uri $coreUrl -OutFile $corePath -UseBasicParsing
+        Set-Content -LiteralPath (Join-Path $FreshAppData 'Launcher-Core.ps1.ref') -Value $RepoRef -Encoding UTF8 -NoNewline
         . $corePath
         $launcherUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/launcher.ps1"
         $iconUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/assets/fresh-windows.ico"
