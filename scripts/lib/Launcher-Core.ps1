@@ -67,13 +67,12 @@ function Write-FreshWindowsLaunchStub {
 
 function Start-FreshWindowsUnelevated {
     <#
-      Le launcher tourne en admin : un NotifyIcon eleve n'apparait pas dans la barre des taches.
-      On lance via tache planifiee RunLevel Limited (integrite moyenne).
+      Drop l'elevation (NotifyIcon admin = invisible). runas /trustlevel:0x20000
+      puis raccourci via explorer si besoin.
     #>
     param(
         [Parameter(Mandatory)][string]$FilePath,
-        [string]$WorkingDirectory = '',
-        [string]$TaskName = 'FreshWindows-WatchAgent'
+        [string]$WorkingDirectory = ''
     )
 
     if ([string]::IsNullOrWhiteSpace($WorkingDirectory)) {
@@ -89,24 +88,28 @@ function Start-FreshWindowsUnelevated {
     $psExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
     $arg = "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$FilePath`""
 
-    $action = New-ScheduledTaskAction -Execute $psExe -Argument $arg -WorkingDirectory $WorkingDirectory
-    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-    $settings = New-ScheduledTaskSettingsSet `
-        -AllowStartIfOnBatteries `
-        -DontStopIfGoingOnBatteries `
-        -DontStopOnIdleEnd `
-        -ExecutionTimeLimit (New-TimeSpan -Days 365) `
-        -MultipleInstances IgnoreNew
+    $lnk = Join-Path $WorkingDirectory 'Start-WatchAgent.lnk'
+    $wsh = New-Object -ComObject WScript.Shell
+    $sc = $wsh.CreateShortcut($lnk)
+    $sc.TargetPath = $psExe
+    $sc.Arguments = $arg
+    $sc.WorkingDirectory = $WorkingDirectory
+    $sc.WindowStyle = 7
+    $sc.Description = 'Fresh Windows watch agent'
+    $sc.Save()
 
-    Register-ScheduledTask `
-        -TaskName $TaskName `
-        -Action $action `
-        -Principal $principal `
-        -Settings $settings `
-        -Description 'Fresh Windows - agent barre des taches (non eleve)' `
-        -Force | Out-Null
+    $inner = "$psExe $arg"
+    Start-Process -FilePath "$env:SystemRoot\System32\runas.exe" `
+        -ArgumentList "/trustlevel:0x20000 `"$inner`"" `
+        -WorkingDirectory $WorkingDirectory `
+        -WindowStyle Hidden
+    Start-Sleep -Seconds 1
 
-    Start-ScheduledTask -TaskName $TaskName
+    $alive = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match 'Launch-GameModeWatch|GameMode-WatchAgent' }
+    if (-not $alive) {
+        Start-Process -FilePath "$env:SystemRoot\explorer.exe" -ArgumentList "`"$lnk`""
+    }
 }
 
 function Sync-GameModeLocalScripts {
