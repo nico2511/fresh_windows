@@ -714,7 +714,7 @@ function Install-GameModeShortcuts {
     $lnkKill = Join-Path $desktop "Mode Jeu.lnk"
     $k = $wsh.CreateShortcut($lnkKill)
     $k.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-    $k.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$killStub`""
+    $k.Arguments = "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$killStub`""
     $k.WorkingDirectory = $FreshAppData
     $k.Description = "Fresh Windows - mode jeu (liste générique)"
     if (Test-Path -LiteralPath $iconPath) { $k.IconLocation = "$iconPath,0" }
@@ -726,13 +726,20 @@ function Install-GameModeShortcuts {
         $lnkWatch = Join-Path $startup "Fresh Windows Surveillance.lnk"
         $w = $wsh.CreateShortcut($lnkWatch)
         $w.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-        $w.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$watchStub`""
+        $w.Arguments = "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$watchStub`""
         $w.WorkingDirectory = $FreshAppData
         $w.Description = "Agent Fresh Windows (CPU/RAM/disque/hang + toggle auto)"
         if (Test-Path -LiteralPath $iconPath) { $w.IconLocation = "$iconPath,0" }
         $w.Save()
-        Write-Host "→ Démarrage Windows : Fresh Windows Surveillance.lnk" -ForegroundColor Green
-        Write-Host "  Toggle " Détection auto " dans le menu clic droit de l'icône." -ForegroundColor DarkGray
+        Write-Host "-> Demarrage Windows : Fresh Windows Surveillance.lnk" -ForegroundColor Green
+        Write-Host "  Clic droit sur l'icone pour Detection auto." -ForegroundColor DarkGray
+        try {
+            Start-FreshWindowsUnelevated -FilePath $watchStub -WorkingDirectory $FreshAppData
+            Write-Host "Agent lance maintenant (sans elevation). Fleche ^ si icone cachee." -ForegroundColor DarkCyan
+        }
+        catch {
+            Write-Host "Raccourci OK, mais lancement immediat echoue : $($_.Exception.Message)" -ForegroundColor DarkYellow
+        }
     }
 
     if (-not $NoPause) { Wait-ForUser }
@@ -778,10 +785,16 @@ function Start-GameModeWatchAgent {
         if (-not $NoPause) { Wait-ForUser }
         return $false
     }
-    Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
-        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$stub`"" `
-        -WorkingDirectory $FreshAppData
-    Write-Host "Agent barre des tâches lancé (icône près de l'horloge)." -ForegroundColor Green
+    try {
+        Start-FreshWindowsUnelevated -FilePath $stub -WorkingDirectory $FreshAppData
+        Write-Host "Agent lance (sans elevation admin)." -ForegroundColor Green
+        Write-Host "Regarde pres de l'horloge ; si rien, clique la fleche ^ des icones cachees." -ForegroundColor DarkCyan
+    }
+    catch {
+        Write-Host "Echec lancement agent : $($_.Exception.Message)" -ForegroundColor Red
+        if (-not $NoPause) { Wait-ForUser }
+        return $false
+    }
     if (-not $NoPause) { Wait-ForUser }
     return $true
 }
