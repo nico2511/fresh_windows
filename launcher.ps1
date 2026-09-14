@@ -81,9 +81,11 @@ function Import-FreshWindowsLibraries {
         'Launcher-GpuMenus.ps1'
     )
 
-    $libRoot = Join-Path $PSScriptRoot 'scripts/lib'
+    # irm | iex : $PSScriptRoot est vide — Join-Path échoue si on l'appelle quand même
+    $libRoot = $null
     $useLocal = $false
-    if ($PSScriptRoot) {
+    if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        $libRoot = Join-Path $PSScriptRoot 'scripts/lib'
         $useLocal = $true
         foreach ($name in $script:FreshWindowsLibFiles) {
             if (-not (Test-Path -LiteralPath (Join-Path $libRoot $name))) {
