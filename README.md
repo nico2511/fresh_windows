@@ -143,6 +143,9 @@ configs/
   game-mode-kill.json        # domaines + protect comm/gaming
   game-mode-watch.json       # seuils agent surveillance
 scripts/
+  lib/
+    Import-CachedScript.ps1   # cache GitHub → %LOCALAPPDATA%\FreshWindows
+    Launcher-Core.ps1         # Wait-ForUser, winget, stubs, sync mode jeu
   GameMode-Common.ps1
   Invoke-GameModeKill.ps1
   GameMode-WatchAgent.ps1

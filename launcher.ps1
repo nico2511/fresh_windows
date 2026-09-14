@@ -44,31 +44,69 @@ $IconUrl = "$RepoRawRoot/assets/fresh-windows.ico"
 $FreshAppData = Join-Path $env:LOCALAPPDATA "FreshWindows"
 $script:FreshBrand = "Fresh Windows"
 
-function Wait-ForUser {
-    if ($Host.Name -eq 'ConsoleHost') {
-        Read-Host "`nEntrée pour continuer"
+function Get-FreshWindowsBootstrapScriptPath {
+    param(
+        [Parameter(Mandatory)][string]$CacheFileName,
+        [Parameter(Mandatory)][string]$RemotePath
+    )
+
+    New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null
+    $dest = Join-Path $FreshAppData $CacheFileName
+    $meta = Join-Path $FreshAppData "$CacheFileName.ref"
+    $url  = "$RepoRawRoot/$RemotePath"
+    $needFetch = -not (Test-Path -LiteralPath $dest)
+    if (-not $needFetch -and (Test-Path -LiteralPath $meta)) {
+        try {
+            if ((Get-Content -LiteralPath $meta -Raw -Encoding UTF8).Trim() -ne $RepoRef) {
+                $needFetch = $true
+            }
+        }
+        catch { $needFetch = $true }
+    }
+    elseif (-not (Test-Path -LiteralPath $meta)) { $needFetch = $true }
+
+    if ($needFetch) {
+        Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+        Set-Content -LiteralPath $meta -Value $RepoRef -Encoding UTF8 -NoNewline
+    }
+    return $dest
+}
+
+function Import-FreshWindowsLibraries {
+    $libRoot = Join-Path $PSScriptRoot 'scripts/lib'
+    $localImport = Join-Path $libRoot 'Import-CachedScript.ps1'
+    $localCore   = Join-Path $libRoot 'Launcher-Core.ps1'
+
+    if ($PSScriptRoot -and (Test-Path -LiteralPath $localImport) -and (Test-Path -LiteralPath $localCore)) {
+        . $localImport
+        . $localCore
+        return $true
+    }
+
+    try {
+        $importPath = Get-FreshWindowsBootstrapScriptPath `
+            -CacheFileName 'Import-CachedScript.ps1' `
+            -RemotePath 'scripts/lib/Import-CachedScript.ps1'
+        . $importPath
+
+        $corePath = Get-FreshWindowsCachedScriptPath `
+            -CacheFileName 'Launcher-Core.ps1' `
+            -RemotePath 'scripts/lib/Launcher-Core.ps1' `
+            -RepoRawRoot $RepoRawRoot `
+            -RepoRef $RepoRef `
+            -FreshAppData $FreshAppData
+        . $corePath
+        return $true
+    }
+    catch {
+        Write-Host "Bibliothèques Fresh Windows indisponibles : $($_.Exception.Message)" -ForegroundColor Red
+        return $false
     }
 }
 
-function Invoke-WingetUpgradeAll {
-    param([switch]$NoPause)
-
-    $ok = $true
-    winget source update --disable-interactivity
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Échec winget source update (code $LASTEXITCODE)" -ForegroundColor Red
-        $ok = $false
-    }
-    winget upgrade --all --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Échec / partiel winget upgrade (code $LASTEXITCODE)" -ForegroundColor Red
-        $ok = $false
-    }
-    elseif ($ok) {
-        Write-Host "winget upgrade terminé." -ForegroundColor Green
-    }
-    if (-not $NoPause) { Wait-ForUser }
-    return $ok
+if (-not (Import-FreshWindowsLibraries)) {
+    Write-Host "Impossible de charger scripts/lib (réseau ou repo). Arrêt." -ForegroundColor Red
+    exit 1
 }
 
 function Install-FullSetup {
@@ -990,7 +1028,7 @@ function Register-AllScheduledTasks {
 
     # 1) Winget quotidien 12:00 + rattrapage
     try {
-        $wingetCmd = 'winget source update --disable-interactivity; winget upgrade --all --accept-package-agreements --accept-source-agreements --silent --disable-interactivity'
+        $wingetCmd = Get-WingetUpgradePowerShellCommand
         $wingetArg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$wingetCmd`""
         $wingetAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $wingetArg
         $wingetTrigger = New-ScheduledTaskTrigger -Daily -At "12:00"
@@ -1226,50 +1264,15 @@ function Open-NvidiaGpuMenu {
     } while ($true)
 }
 
-function Get-FreshWindowsLaunchStubContent {
-    return @"
-#Requires -RunAsAdministrator
-param([string]`$SilentMode = '')
-`$ErrorActionPreference = 'Stop'
-try {
-    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-} catch {}
-`$env:FRESH_WIN_REF = '$RepoRef'
-if (`$SilentMode) { `$env:FRESH_WIN_MODE = `$SilentMode.Trim().ToLowerInvariant() }
-irm '$LauncherUrl' | iex
-"@
-}
-
-function Write-FreshWindowsLaunchStub {
-    New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null
-    $stubPath = Join-Path $FreshAppData "Launch-FreshWindows.ps1"
-    Set-Content -LiteralPath $stubPath -Value (Get-FreshWindowsLaunchStubContent) -Encoding UTF8
-    return $stubPath
-}
-
 function Import-GameModeCommon {
-    $dest = Join-Path $FreshAppData "GameMode-Common.ps1"
-    $meta = Join-Path $FreshAppData "GameMode-Common.ref"
-    $url  = "$RepoRawRoot/scripts/GameMode-Common.ps1"
-    $needFetch = -not (Test-Path -LiteralPath $dest)
-    if (-not $needFetch -and (Test-Path -LiteralPath $meta)) {
-        try {
-            $savedRef = (Get-Content -LiteralPath $meta -Raw -Encoding UTF8).Trim()
-            if ($savedRef -ne $RepoRef) { $needFetch = $true }
-        }
-        catch { $needFetch = $true }
-    }
-    elseif (-not (Test-Path -LiteralPath $meta)) {
-        $needFetch = $true
-    }
-
     try {
-        if ($needFetch) {
-            New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null
-            Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
-            Set-Content -LiteralPath $meta -Value $RepoRef -Encoding UTF8 -NoNewline
-        }
-        . $dest -RepoRef $RepoRef
+        $path = Get-FreshWindowsCachedScriptPath `
+            -CacheFileName 'GameMode-Common.ps1' `
+            -RemotePath 'scripts/GameMode-Common.ps1' `
+            -RepoRawRoot $RepoRawRoot `
+            -RepoRef $RepoRef `
+            -FreshAppData $FreshAppData
+        . $path -RepoRef $RepoRef
         return $true
     }
     catch {
@@ -1328,39 +1331,18 @@ function Install-GameModeShortcuts {
         try { Invoke-WebRequest -Uri $IconUrl -OutFile $iconPath -UseBasicParsing } catch { }
     }
 
-    Write-FreshWindowsLaunchStub | Out-Null
-    Set-Content -LiteralPath (Join-Path $FreshAppData 'scripts.ref') -Value $RepoRef -Encoding UTF8 -NoNewline
-
-    foreach ($scriptName in @('GameMode-Common.ps1', 'Invoke-GameModeKill.ps1', 'GameMode-WatchAgent.ps1')) {
-        $dest = Join-Path $FreshAppData $scriptName
-        $url  = "$RepoRawRoot/scripts/$scriptName"
-        try {
-            Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
-            Write-Host "→ $scriptName" -ForegroundColor DarkGray
-        }
-        catch {
-            Write-Host "Échec téléchargement $scriptName : $($_.Exception.Message)" -ForegroundColor Red
-            if (-not $NoPause) { Wait-ForUser }
-            return $false
-        }
+    try {
+        Write-FreshWindowsLaunchStub -FreshAppData $FreshAppData -Ref $RepoRef -LauncherUrl $LauncherUrl | Out-Null
+        Sync-GameModeLocalScripts -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl | Out-Null
+    }
+    catch {
+        Write-Host "Échec sync scripts locaux : $($_.Exception.Message)" -ForegroundColor Red
+        if (-not $NoPause) { Wait-ForUser }
+        return $false
     }
 
     $killStub = Join-Path $FreshAppData "Launch-GameModeKill.ps1"
-    $killStubContent = @"
-#Requires -Version 5.1
-`$env:FRESH_WIN_REF = '$RepoRef'
-`$env:FRESH_WIN_NO_PAUSE = '1'
-& '$FreshAppData\Invoke-GameModeKill.ps1'
-"@
-    Set-Content -LiteralPath $killStub -Value $killStubContent -Encoding UTF8
-
     $watchStub = Join-Path $FreshAppData "Launch-GameModeWatch.ps1"
-    $watchStubContent = @"
-#Requires -Version 5.1
-`$env:FRESH_WIN_REF = '$RepoRef'
-& '$FreshAppData\GameMode-WatchAgent.ps1'
-"@
-    Set-Content -LiteralPath $watchStub -Value $watchStubContent -Encoding UTF8
 
     $wsh = New-Object -ComObject WScript.Shell
     $desktop = [Environment]::GetFolderPath('Desktop')
@@ -1543,7 +1525,7 @@ function Install-FreshWindowsDesktopShortcut {
             Invoke-WebRequest -Uri $IconUrl -OutFile $iconPath -UseBasicParsing
         }
 
-        $stubPath = Write-FreshWindowsLaunchStub
+        $stubPath = Write-FreshWindowsLaunchStub -FreshAppData $FreshAppData -Ref $RepoRef -LauncherUrl $LauncherUrl
 
         $desktop = [Environment]::GetFolderPath('Desktop')
         $lnkPath = Join-Path $desktop "Fresh Windows.lnk"
