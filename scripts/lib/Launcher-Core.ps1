@@ -99,6 +99,48 @@ function Start-FreshWindowsUnelevated {
     }
 }
 
+function Register-FreshWindowsWatchAgentLogon {
+    <#
+      Tache AtLogOn Limited (pas Highest) + delai : Startup .lnk seul etait fragile
+      (scripts disparus => cmd start sans agent). Limited = icone tray visible.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$FreshAppData
+    )
+
+    $taskName = 'FreshWindows-WatchAgent'
+    $cmdPath = Join-Path $FreshAppData 'Start-WatchAgent.cmd'
+    if (-not (Test-Path -LiteralPath $cmdPath)) {
+        throw "Start-WatchAgent.cmd introuvable."
+    }
+
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+
+    $action = New-ScheduledTaskAction -Execute $cmdPath -WorkingDirectory $FreshAppData
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+    # Reseau OK pour re-telecharger les .ps1 si absents
+    $trigger.Delay = 'PT45S'
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+    $settings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -StartWhenAvailable `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) `
+        -MultipleInstances IgnoreNew `
+        -DontStopOnIdleEnd
+
+    Register-ScheduledTask `
+        -TaskName $taskName `
+        -Action $action `
+        -Trigger $trigger `
+        -Principal $principal `
+        -Settings $settings `
+        -Description 'Fresh Windows agent tray (mode jeu). Limited + delai 45s.' `
+        -Force -ErrorAction Stop | Out-Null
+
+    return $taskName
+}
+
 function Sync-GameModeLocalScripts {
     param(
         [string]$FreshAppData,
@@ -131,37 +173,67 @@ function Sync-GameModeLocalScripts {
     $killStub = Join-Path $FreshAppData "Launch-GameModeKill.ps1"
     @"
 #Requires -Version 5.1
-`$env:FRESH_WIN_REF = '$Ref'
+`$ErrorActionPreference = 'Stop'
+`$dir = if (`$PSScriptRoot) { `$PSScriptRoot } else { Split-Path -Parent `$MyInvocation.MyCommand.Path }
+`$refFile = Join-Path `$dir 'scripts.ref'
+`$ref = if (`$env:FRESH_WIN_REF) { `$env:FRESH_WIN_REF.Trim() } elseif (Test-Path -LiteralPath `$refFile) { (Get-Content -LiteralPath `$refFile -Raw).Trim() } else { 'main' }
+`$env:FRESH_WIN_REF = `$ref
 `$env:FRESH_WIN_NO_PAUSE = '1'
-& '$FreshAppData\Invoke-GameModeKill.ps1'
+`$need = @('GameMode-Common.ps1', 'Invoke-GameModeKill.ps1')
+foreach (`$n in `$need) {
+    `$p = Join-Path `$dir `$n
+    if (-not (Test-Path -LiteralPath `$p) -or ((Get-Item -LiteralPath `$p).Length -lt 80)) {
+        Invoke-WebRequest -Uri ("https://raw.githubusercontent.com/nico2511/fresh_windows/`$ref/scripts/`$n") -OutFile `$p -UseBasicParsing
+    }
+}
+& (Join-Path `$dir 'Invoke-GameModeKill.ps1')
 "@ | Set-Content -LiteralPath $killStub -Encoding UTF8
 
     $watchStub = Join-Path $FreshAppData "Launch-GameModeWatch.ps1"
     @"
 #Requires -Version 5.1
 `$ErrorActionPreference = 'Stop'
-`$env:FRESH_WIN_REF = '$Ref'
-`$log = Join-Path `$PSScriptRoot 'watch-agent.log'
-Set-Content -LiteralPath `$log -Value ((Get-Date -Format o) + ' stub start') -Encoding UTF8
+`$dir = if (`$PSScriptRoot) { `$PSScriptRoot } else { Split-Path -Parent `$MyInvocation.MyCommand.Path }
+`$log = Join-Path `$dir 'watch-agent.log'
+function Write-WatchBootLog([string]`$Message) {
+    try { Add-Content -LiteralPath `$log -Value ((Get-Date -Format o) + ' ' + `$Message) -Encoding UTF8 } catch { }
+}
+Write-WatchBootLog 'stub start'
 try {
-    & (Join-Path `$PSScriptRoot 'GameMode-WatchAgent.ps1')
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+} catch { }
+`$refFile = Join-Path `$dir 'scripts.ref'
+`$ref = if (`$env:FRESH_WIN_REF) { `$env:FRESH_WIN_REF.Trim() } elseif (Test-Path -LiteralPath `$refFile) { (Get-Content -LiteralPath `$refFile -Raw).Trim() } else { 'main' }
+`$env:FRESH_WIN_REF = `$ref
+`$need = @('GameMode-Common.ps1', 'GameMode-WatchAgent.ps1')
+foreach (`$n in `$need) {
+    `$p = Join-Path `$dir `$n
+    if (-not (Test-Path -LiteralPath `$p) -or ((Get-Item -LiteralPath `$p).Length -lt 80)) {
+        Write-WatchBootLog ("re-download `$n (ref `$ref)")
+        Invoke-WebRequest -Uri ("https://raw.githubusercontent.com/nico2511/fresh_windows/`$ref/scripts/`$n") -OutFile `$p -UseBasicParsing
+    }
+}
+try {
+    & (Join-Path `$dir 'GameMode-WatchAgent.ps1')
 }
 catch {
-    Add-Content -LiteralPath `$log -Value (`$_ | Out-String) -Encoding UTF8
-    Write-Host (`$_ | Out-String) -ForegroundColor Red
-    Read-Host 'Erreur agent - Entree pour fermer (voir watch-agent.log)'
+    Write-WatchBootLog (`$_ | Out-String)
     throw
 }
 "@ | Set-Content -LiteralPath $watchStub -Encoding UTF8
 
+    # start /min : le dossier Startup ne reste pas bloque sur Application.Run
     $cmdPath = Join-Path $FreshAppData 'Start-WatchAgent.cmd'
     @"
 @echo off
 cd /d "%~dp0"
 echo %DATE% %TIME% cmd start>> "%~dp0watch-agent.log"
-title Fresh Windows Watch
-"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -STA -ExecutionPolicy Bypass -File "%~dp0Launch-GameModeWatch.ps1"
-if errorlevel 1 pause
+if not exist "%~dp0Launch-GameModeWatch.ps1" (
+  echo %DATE% %TIME% missing stub - abort>> "%~dp0watch-agent.log"
+  exit /b 1
+)
+start "FreshWindowsWatch" /MIN "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0Launch-GameModeWatch.ps1"
+exit /b 0
 "@ | Set-Content -LiteralPath $cmdPath -Encoding ASCII
 
     return $true
