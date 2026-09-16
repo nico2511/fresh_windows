@@ -729,10 +729,21 @@ function Install-GameModeShortcuts {
         $w.TargetPath = $cmdWatch
         $w.Arguments = ''
         $w.WorkingDirectory = $FreshAppData
+        $w.WindowStyle = 7
         $w.Description = "Agent Fresh Windows (CPU/RAM/disque/hang + toggle auto)"
         if (Test-Path -LiteralPath $iconPath) { $w.IconLocation = "$iconPath,0" }
         $w.Save()
         Write-Host "-> Demarrage Windows : Fresh Windows Surveillance.lnk" -ForegroundColor Green
+
+        try {
+            $taskName = Register-FreshWindowsWatchAgentLogon -FreshAppData $FreshAppData
+            Write-Host "-> Tache planifiee : $taskName (AtLogOn Limited, delai 45s)" -ForegroundColor Green
+        }
+        catch {
+            Write-Host "Tache planifiee non creee : $($_.Exception.Message)" -ForegroundColor DarkYellow
+            Write-Host "  Le raccourci Startup reste en place." -ForegroundColor DarkGray
+        }
+
         Write-Host "  Clic droit sur l'icone pour Detection auto." -ForegroundColor DarkGray
         try {
             Start-FreshWindowsUnelevated -FilePath $watchStub -WorkingDirectory $FreshAppData
@@ -775,24 +786,9 @@ function Open-GameModeSetupMenu {
 function Start-GameModeWatchAgent {
     param([switch]$NoPause)
 
-    $ok = Install-GameModeShortcuts -NoPause -IncludeWatchAgent:$false
+    # Reinstalle aussi Startup + tache logon (repare un agent qui ne repart plus au boot)
+    $ok = Install-GameModeShortcuts -NoPause -IncludeWatchAgent
     if (-not $ok) {
-        if (-not $NoPause) { Wait-ForUser }
-        return $false
-    }
-    $stub = Join-Path $FreshAppData "Launch-GameModeWatch.ps1"
-    if (-not (Test-Path -LiteralPath $stub)) {
-        Write-Host "Stub agent introuvable." -ForegroundColor Red
-        if (-not $NoPause) { Wait-ForUser }
-        return $false
-    }
-    try {
-        Start-FreshWindowsUnelevated -FilePath $stub -WorkingDirectory $FreshAppData
-        Write-Host "Agent lance (sans elevation admin)." -ForegroundColor Green
-        Write-Host "Regarde pres de l'horloge ; si rien, clique la fleche ^ des icones cachees." -ForegroundColor DarkCyan
-    }
-    catch {
-        Write-Host "Echec lancement agent : $($_.Exception.Message)" -ForegroundColor Red
         if (-not $NoPause) { Wait-ForUser }
         return $false
     }

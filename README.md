@@ -128,6 +128,8 @@ Ordre de chargement des libs : `Import-CachedScript` → `Core` → `WinUtil` �
 
 **Scripts locaux** : `%LOCALAPPDATA%\FreshWindows\` + `scripts.ref` (ref GitHub). Menu 11 ou agent → « Mettre à jour scripts locaux ».
 
+**Agent au démarrage** : raccourci Startup + tâche `FreshWindows-WatchAgent` (AtLogOn, Limited, délai 45 s). Le stub `Launch-GameModeWatch.ps1` re-télécharge `GameMode-WatchAgent.ps1` s’il a disparu.
+
 ### Tâches planifiées
 
 | Tâche | Planification | Commande |

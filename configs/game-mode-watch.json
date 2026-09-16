@@ -11,6 +11,26 @@
     "minProtectProcessRamMb": 400
   },
   "cooldownBetweenSameAlertSeconds": 300,
+  "ignoreSuggestProcesses": [
+    "SystemSettings",
+    "SystemSettingsBroker",
+    "ApplicationFrameHost",
+    "ShellExperienceHost",
+    "StartMenuExperienceHost",
+    "SearchHost",
+    "SearchApp",
+    "TextInputHost",
+    "RuntimeBroker",
+    "explorer",
+    "dwm",
+    "sihost",
+    "fontdrvhost",
+    "ctfmon",
+    "Taskmgr",
+    "SecurityHealthSystray",
+    "LockApp",
+    "UserOOBEBroker"
+  ],
   "knownDiskHogs": [
     "SearchIndexer",
     "MsMpEng",
