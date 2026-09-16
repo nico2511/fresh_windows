@@ -218,6 +218,59 @@ function Set-RegistryDWord {
     Set-ItemProperty -LiteralPath $Path -Name $Name -Value $Value -Type DWord -Force
 }
 
+function Set-FreshWindowsDns {
+    <#
+      Quad9 (9.9.9.9) : pas de log d'IP, fondation (pas un service qu'on eteint comme Mullvad DNS).
+      Filtre malware seulement, pas les pubs. IPv4/IPv6 separes (WinUtil). DoH si Windows le gère.
+    #>
+    Write-Host "  -> DNS Quad9 (9.9.9.9, sans log IP)" -ForegroundColor Gray
+
+    $v4 = @('9.9.9.9', '149.112.112.112')
+    $v6 = @('2620:fe::fe', '2620:fe::9')
+    $dohTemplate = 'https://dns.quad9.net/dns-query'
+
+    $adapters = @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' })
+    if ($adapters.Count -eq 0) {
+        Write-Host "    Aucun adaptateur Up, DNS non applique." -ForegroundColor DarkYellow
+        return
+    }
+
+    foreach ($adapter in $adapters) {
+        try {
+            Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses $v4 -ErrorAction Stop
+            Write-Host ("    {0} IPv4 Quad9" -f $adapter.Name) -ForegroundColor DarkGray
+        }
+        catch {
+            Write-Host ("    {0} IPv4 : {1}" -f $adapter.Name, $_.Exception.Message) -ForegroundColor DarkYellow
+        }
+        try {
+            Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses $v6 -ErrorAction Stop
+            Write-Host ("    {0} IPv6 Quad9" -f $adapter.Name) -ForegroundColor DarkGray
+        }
+        catch {
+            Write-Host ("    {0} IPv6 ignore : {1}" -f $adapter.Name, $_.Exception.Message) -ForegroundColor DarkGray
+        }
+    }
+
+    if (Get-Command Add-DnsClientDohServerAddress -ErrorAction SilentlyContinue) {
+        foreach ($ip in @('9.9.9.9', '149.112.112.112')) {
+            try {
+                $existing = Get-DnsClientDohServerAddress -ServerAddress $ip -ErrorAction SilentlyContinue
+                if ($existing) {
+                    Set-DnsClientDohServerAddress -ServerAddress $ip -DohTemplate $dohTemplate -AllowFallbackToUdp $true -AutoUpgrade $true -ErrorAction Stop
+                }
+                else {
+                    Add-DnsClientDohServerAddress -ServerAddress $ip -DohTemplate $dohTemplate -AllowFallbackToUdp $true -AutoUpgrade $true -ErrorAction Stop
+                }
+            }
+            catch {
+                Write-Host ("    DoH {0} : {1}" -f $ip, $_.Exception.Message) -ForegroundColor DarkGray
+            }
+        }
+        Write-Host "    DoH Quad9 active (requetes chiffrees, fallback UDP)." -ForegroundColor DarkGray
+    }
+}
+
 function Invoke-WinUtilPreferences {
     # Customize Preferences utiles (WinUtil ne les applique pas via -Config AutoRun)
     Write-Host "  → Dark Mode" -ForegroundColor Gray
@@ -241,7 +294,9 @@ function Invoke-WinUtilPreferences {
     Set-RegistryDWord "HKCU:\Software\Policies\Microsoft\Windows\Explorer" "DisableSearchBoxSuggestions" 1
     Set-RegistryDWord "HKCU:\Software\Microsoft\Windows\CurrentVersion\Search" "BingSearchEnabled" 0
 
-    # Rafraîchir Explorer pour le thème / fichiers
+    Set-FreshWindowsDns
+
+    # Rafraichir Explorer pour le theme / fichiers
     try {
         Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
         Start-Sleep -Milliseconds 800

@@ -110,7 +110,7 @@ Ordre de chargement des libs : `Import-CachedScript` → `Core` → `WinUtil` �
 #### Menu 7 — WinUtil one-click
 
 1. WinUtil `-Config` → `winutil-oneclick.json` (Standard + AppX + Hyper-V…)
-2. `Invoke-WinUtilPreferences` (dark, game mode, fichiers, Bing…)
+2. `Invoke-WinUtilPreferences` (dark, game mode, fichiers, Bing, DNS Quad9)
 3. `Enable-UltimatePerformance`
 
 ### Mode jeu
