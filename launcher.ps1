@@ -44,7 +44,7 @@ $IconUrl = "$RepoRawRoot/assets/fresh-windows.ico"
 $FreshAppData = Join-Path $env:LOCALAPPDATA "FreshWindows"
 $script:FreshBrand = "Fresh Windows"
 # Incrémenter quand les libs changent alors que FRESH_WIN_REF reste "main" (sinon cache périmé)
-$script:FreshWindowsLibEpoch = 14
+$script:FreshWindowsLibEpoch = 15
 
 function ConvertTo-Utf8BomFile {
     param([Parameter(Mandatory)][string]$Path)
@@ -133,6 +133,22 @@ try {
         . $libPath
     }
 
+    # Cache "main" sans epoch = libs d'avant le merge : forcer un re-telechargement
+    if (-not (Get-Command Register-FreshWindowsWatchAgentLogon -ErrorAction SilentlyContinue)) {
+        Write-Host "Cache libs obsolete -> re-telechargement force..." -ForegroundColor Yellow
+        $libPaths = @()
+        foreach ($name in $script:FreshWindowsLibFiles) {
+            $dest = Join-Path $FreshAppData $name
+            $meta = Join-Path $FreshAppData "$name.ref"
+            $url  = "$RepoRawRoot/scripts/lib/$name"
+            Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+            Set-Content -LiteralPath $meta -Value "$RepoRef|$script:FreshWindowsLibEpoch" -Encoding UTF8 -NoNewline
+            ConvertTo-Utf8BomFile -Path $dest
+            . $dest
+            $libPaths += $dest
+        }
+    }
+
     $gmRel = 'scripts/GameMode-Common.ps1'
     $gmPath = $null
     if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
@@ -145,12 +161,56 @@ try {
             -RemotePath $gmRel
         ConvertTo-Utf8BomFile -Path $gmPath
     }
+    # Common aussi : re-fetch si Start-FreshWindowsPowerShell trop vieux / absent
+    if (-not (Get-Command Start-FreshWindowsPowerShell -ErrorAction SilentlyContinue)) {
+        $gmPath = Join-Path $FreshAppData 'GameMode-Common.ps1'
+        Invoke-WebRequest -Uri "$RepoRawRoot/$gmRel" -OutFile $gmPath -UseBasicParsing
+        ConvertTo-Utf8BomFile -Path $gmPath
+    }
     . $gmPath -RepoRef $RepoRef
 }
 catch {
     Write-Host "Bibliotheques Fresh Windows indisponibles : $($_.Exception.Message)" -ForegroundColor Red
     Write-Host "Impossible de charger scripts/lib (reseau ou repo). Arret." -ForegroundColor Red
     exit 1
+}
+
+# Toujours definir ici (irm | iex) : independant du cache Core CDN
+function Register-FreshWindowsWatchAgentLogon {
+    param(
+        [Parameter(Mandatory)][string]$FreshAppData
+    )
+
+    $taskName = 'FreshWindows-WatchAgent'
+    $cmdPath = Join-Path $FreshAppData 'Start-WatchAgent.cmd'
+    if (-not (Test-Path -LiteralPath $cmdPath)) {
+        throw "Start-WatchAgent.cmd introuvable."
+    }
+
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+
+    $action = New-ScheduledTaskAction -Execute $cmdPath -WorkingDirectory $FreshAppData
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+    $trigger.Delay = 'PT45S'
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+    $settings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -StartWhenAvailable `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) `
+        -MultipleInstances IgnoreNew `
+        -DontStopOnIdleEnd
+
+    Register-ScheduledTask `
+        -TaskName $taskName `
+        -Action $action `
+        -Trigger $trigger `
+        -Principal $principal `
+        -Settings $settings `
+        -Description 'Fresh Windows agent tray (mode jeu). Limited + delai 45s.' `
+        -Force -ErrorAction Stop | Out-Null
+
+    return $taskName
 }
 
 function Install-FullSetup {

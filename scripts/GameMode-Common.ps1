@@ -177,13 +177,18 @@ function Start-FreshWindowsElevated {
 }
 
 function Start-FreshWindowsPowerShell {
-    param([string]$WorkingDirectory = $(Join-Path $env:LOCALAPPDATA 'FreshWindows'))
+    param([string]$WorkingDirectory = '')
+
+    if ([string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+        $WorkingDirectory = Join-Path $env:LOCALAPPDATA 'FreshWindows'
+    }
 
     if (-not (Test-Path -LiteralPath $WorkingDirectory)) {
         New-Item -ItemType Directory -Path $WorkingDirectory -Force | Out-Null
     }
 
+    # ArgumentList en tableau : une seule string casse le parsing Start-Process (fenetre qui plante)
     Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
-        -ArgumentList "-NoProfile -NoExit -Command Set-Location -LiteralPath '$WorkingDirectory'" `
-        -WorkingDirectory $WorkingDirectory
+        -WorkingDirectory $WorkingDirectory `
+        -ArgumentList @('-NoProfile', '-NoExit')
 }
