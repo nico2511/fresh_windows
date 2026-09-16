@@ -43,6 +43,8 @@ $LauncherUrl = "$RepoRawRoot/launcher.ps1"
 $IconUrl = "$RepoRawRoot/assets/fresh-windows.ico"
 $FreshAppData = Join-Path $env:LOCALAPPDATA "FreshWindows"
 $script:FreshBrand = "Fresh Windows"
+# Incrémenter quand les libs changent alors que FRESH_WIN_REF reste "main" (sinon cache périmé)
+$script:FreshWindowsLibEpoch = 14
 
 function ConvertTo-Utf8BomFile {
     param([Parameter(Mandatory)][string]$Path)
@@ -66,10 +68,11 @@ function Get-FreshWindowsBootstrapScriptPath {
     $dest = Join-Path $FreshAppData $CacheFileName
     $meta = Join-Path $FreshAppData "$CacheFileName.ref"
     $url  = "$RepoRawRoot/$RemotePath"
+    $cacheToken = "$RepoRef|$script:FreshWindowsLibEpoch"
     $needFetch = -not (Test-Path -LiteralPath $dest)
     if (-not $needFetch -and (Test-Path -LiteralPath $meta)) {
         try {
-            if ((Get-Content -LiteralPath $meta -Raw -Encoding UTF8).Trim() -ne $RepoRef) {
+            if ((Get-Content -LiteralPath $meta -Raw -Encoding UTF8).Trim() -ne $cacheToken) {
                 $needFetch = $true
             }
         }
@@ -79,7 +82,7 @@ function Get-FreshWindowsBootstrapScriptPath {
 
     if ($needFetch) {
         Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
-        Set-Content -LiteralPath $meta -Value $RepoRef -Encoding UTF8 -NoNewline
+        Set-Content -LiteralPath $meta -Value $cacheToken -Encoding UTF8 -NoNewline
     }
     ConvertTo-Utf8BomFile -Path $dest
     return $dest
