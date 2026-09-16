@@ -156,11 +156,22 @@ function Test-GamingSessionActive {
 function Show-Balloon {
     param([string]$Title, [string]$Text, [System.Windows.Forms.ToolTipIcon]$Icon = 'Info')
     if ($script:NotifyIcon) {
+        # ASCII only: BalloonTip WinForms affiche du mojibake sur accents si le .ps1 est mal lu
         $script:NotifyIcon.BalloonTipTitle = $Title
         $script:NotifyIcon.BalloonTipText = $Text
         $script:NotifyIcon.BalloonTipIcon = $Icon
         $script:NotifyIcon.ShowBalloonTip(8000)
     }
+}
+
+function Test-WatchIgnoredProcess {
+    param([string]$ProcessName)
+    if ([string]::IsNullOrWhiteSpace($ProcessName)) { return $false }
+    $list = @($script:WatchRules.ignoreSuggestProcesses)
+    foreach ($n in $list) {
+        if ($ProcessName.Equals([string]$n, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
 }
 
 function Test-AlertCooldown {
@@ -199,6 +210,7 @@ function Invoke-WatchTick {
             if ($p.Id -eq $PID) { continue }
             $name = $p.ProcessName
             if (Test-GameModeProtectedProcess -ProcessName $name -ProtectNames $protect) { continue }
+            if (Test-WatchIgnoredProcess -ProcessName $name) { continue }
 
             $id = $p.Id
             $cpuTime = $p.CPU
@@ -221,7 +233,7 @@ function Invoke-WatchTick {
                     $key = "cpu:$id"
                     if ($script:UserSettings.autoSuggestKill -and (Test-AlertCooldown -Key $key -CooldownSec $cooldown)) {
                         $script:PendingKill[$id] = $name
-                        Show-Balloon -Title 'CPU élevé (hors jeu/comm)' -Text (
+                        Show-Balloon -Title 'CPU eleve (hors jeu/comm)' -Text (
                             "$name CPU eleve. Clic droit: Tuer suggestion ou Mode jeu."
                         ) -Icon Warning
                         Mark-Alert -Key $key
@@ -240,16 +252,17 @@ function Invoke-WatchTick {
             if ($ramMb -ge $ramMin -or $ramPct -ge $ramPctThr) {
                 $key = "ram:$id"
                 if (Test-AlertCooldown -Key $key -CooldownSec $cooldown) {
-                    Show-Balloon -Title 'RAM élevée' -Text ("$name ~$([math]::Round($ramMb)) Mo ($([math]::Round($ramPct))% du système).") -Icon Warning
+                    Show-Balloon -Title 'RAM elevee' -Text ("$name ~$([math]::Round($ramMb)) Mo ($([math]::Round($ramPct))% systeme).") -Icon Warning
                     Mark-Alert -Key $key
                 }
             }
 
+            # SystemSettings et co. reportent souvent Responding=false a tort
             if ($p.Responding -eq $false) {
                 $key = "hang:$id"
                 if ($script:UserSettings.autoSuggestKill -and (Test-AlertCooldown -Key $key -CooldownSec $cooldown)) {
                     $script:PendingKill[$id] = $name
-                    Show-Balloon -Title 'Processus ne répond pas' -Text ("$name - proposition de fermeture via le menu de l'icône.") -Icon Error
+                    Show-Balloon -Title 'Processus ne repond pas' -Text ("$name - proposition de fermeture via le menu de l'icone.") -Icon Error
                     Mark-Alert -Key $key
                 }
             }
@@ -282,7 +295,7 @@ function Invoke-WatchTick {
                         if (Get-Process -Name $_ -ErrorAction SilentlyContinue) { $_ }
                     }
                     $extra = if ($hogs.Count) { "`nSuspects : $($hogs -join ', ')" } else { '' }
-                    Show-Balloon -Title 'Disque saturé' -Text (
+                    Show-Balloon -Title 'Disque sature' -Text (
                         "Disque ~$([math]::Round($disk))% (hors session jeu).$extra"
                     ) -Icon Warning
                     Mark-Alert -Key $key
@@ -302,7 +315,7 @@ function Invoke-GameModeKillNow {
         $idle = Stop-IdleGamingLaunchers -LauncherNames $cfg.GamingLauncherNames
         $n = $r.Killed.Count + $idle.Killed.Count
         $extra = if ($idle.Kept.Count) { " Launcher actif : $($idle.Kept[0])." } else { '' }
-        Show-Balloon -Title 'Mode jeu' -Text ("$n processus fermés (liste + launchers inactifs).$extra") -Icon Info
+        Show-Balloon -Title 'Mode jeu' -Text ("$n processus fermes (liste + launchers inactifs).$extra") -Icon Info
     }
     catch {
         Show-Balloon -Title 'Mode jeu' -Text $_.Exception.Message -Icon Error
@@ -347,7 +360,7 @@ function Invoke-SyncLocalScripts {
         $iconUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/assets/fresh-windows.ico"
         Write-FreshWindowsLaunchStub -FreshAppData $FreshAppData -Ref $RepoRef -LauncherUrl $launcherUrl | Out-Null
         Sync-GameModeLocalScripts -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $iconUrl | Out-Null
-        Show-Balloon -Title 'Scripts locaux' -Text "Mis à jour (ref $RepoRef). Redémarre l'agent si besoin." -Icon Info
+        Show-Balloon -Title 'Scripts locaux' -Text "Mis a jour (ref $RepoRef). Redemarre l'agent si besoin." -Icon Info
     }
     catch {
         Show-Balloon -Title 'Scripts locaux' -Text $_.Exception.Message -Icon Error
@@ -364,7 +377,7 @@ function Stop-PendingSuggestedProcesses {
         catch { }
         $script:PendingKill.Remove($entry.Key)
     }
-    Show-Balloon -Title 'Suggestions' -Text ("$n processus fermés.") -Icon Info
+    Show-Balloon -Title 'Suggestions' -Text ("$n processus fermes.") -Icon Info
 }
 
 # --- UI (formulaire cache obligatoire pour le message loop WinForms) ---
