@@ -73,7 +73,7 @@ irm "https://raw.githubusercontent.com/nico2511/fresh_windows/$env:FRESH_WIN_REF
 
 - **`launcher.ps1`** — point d’entrée (`irm | iex`), menu, installs winget, modes silencieux.
 - **`scripts/lib/`** — modules dot-sourcés (clone local ou cache `%LOCALAPPDATA%\FreshWindows` si lancement distant) :
-  - `Import-CachedScript.ps1` — téléchargement par `FRESH_WIN_REF`
+  - `Import-CachedScript.ps1` — téléchargement par `FRESH_WIN_REF` + epoch libs (`FreshWindowsLibEpoch` dans `launcher.ps1`, pour invalider le cache quand la ref reste `main`)
   - `Launcher-Core.ps1` — pause, winget upgrade, stubs, sync scripts mode jeu
   - `Launcher-WinUtil.ps1` — Chris Titus WinUtil, O&O ShutUp10, maintenance hebdo
   - `Launcher-Tasks.ps1` — tâches planifiées

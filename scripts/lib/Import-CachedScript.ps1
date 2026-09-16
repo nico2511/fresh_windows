@@ -22,6 +22,7 @@ function Get-FreshWindowsCachedScriptPath {
         [Parameter(Mandatory)][string]$RepoRawRoot,
         [Parameter(Mandatory)][string]$RepoRef,
         [Parameter(Mandatory)][string]$FreshAppData,
+        [string]$LibEpoch = '',
         [switch]$ForceRefresh
     )
 
@@ -30,11 +31,16 @@ function Get-FreshWindowsCachedScriptPath {
     $meta = Join-Path $FreshAppData "$CacheFileName.ref"
     $url  = "$RepoRawRoot/$RemotePath"
 
+    if ([string]::IsNullOrWhiteSpace($LibEpoch) -and $script:FreshWindowsLibEpoch) {
+        $LibEpoch = [string]$script:FreshWindowsLibEpoch
+    }
+    $cacheToken = if ($LibEpoch) { "$RepoRef|$LibEpoch" } else { $RepoRef }
+
     $needFetch = $ForceRefresh -or -not (Test-Path -LiteralPath $dest)
     if (-not $needFetch -and (Test-Path -LiteralPath $meta)) {
         try {
             $savedRef = (Get-Content -LiteralPath $meta -Raw -Encoding UTF8).Trim()
-            if ($savedRef -ne $RepoRef) { $needFetch = $true }
+            if ($savedRef -ne $cacheToken) { $needFetch = $true }
         }
         catch { $needFetch = $true }
     }
@@ -44,7 +50,7 @@ function Get-FreshWindowsCachedScriptPath {
 
     if ($needFetch) {
         Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
-        Set-Content -LiteralPath $meta -Value $RepoRef -Encoding UTF8 -NoNewline
+        Set-Content -LiteralPath $meta -Value $cacheToken -Encoding UTF8 -NoNewline
     }
 
     ConvertTo-Utf8BomFile -Path $dest
