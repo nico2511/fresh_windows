@@ -478,7 +478,14 @@ foreach ($pair in $fwModes) {
 
 $miPs = New-Object System.Windows.Forms.ToolStripMenuItem
 $miPs.Text = 'Ouvrir PowerShell (sans admin)'
-$miPs.Add_Click({ Start-FreshWindowsPowerShell })
+$miPs.Add_Click({
+    try {
+        Start-FreshWindowsPowerShell
+    }
+    catch {
+        Show-Balloon -Title 'PowerShell' -Text $_.Exception.Message -Icon Error
+    }
+})
 $miFw.DropDownItems.Add($miPs) | Out-Null
 
 $miSync = New-Object System.Windows.Forms.ToolStripMenuItem

@@ -19,6 +19,8 @@ irm https://raw.githubusercontent.com/nico2511/fresh_windows/main/launcher.ps1 |
 
 3. Un raccourci **Fresh Windows** apparaît sur le Bureau au premier menu.
 
+![Menu Fresh Windows](Docs/sc.jpg)
+
 Tout est téléchargé depuis GitHub (`main` par défaut). Pas besoin de cloner le repo pour l’usage courant.
 
 ### Après un formatage — ordre conseillé
