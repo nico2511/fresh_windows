@@ -187,8 +187,35 @@ function Start-FreshWindowsPowerShell {
         New-Item -ItemType Directory -Path $WorkingDirectory -Force | Out-Null
     }
 
-    # ArgumentList en tableau : une seule string casse le parsing Start-Process (fenetre qui plante)
-    Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
-        -WorkingDirectory $WorkingDirectory `
-        -ArgumentList @('-NoProfile', '-NoExit')
+    $psExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+    $conhost = "$env:SystemRoot\System32\conhost.exe"
+
+    # Win11 "Terminal par defaut" = Windows Terminal : Start-Process powershell.exe
+    # depuis l'agent (fenetre cachee) echoue souvent. Preferer wt, sinon conhost.
+    $wt = $null
+    try {
+        $cmd = Get-Command wt.exe -ErrorAction SilentlyContinue
+        if ($cmd -and $cmd.Source) { $wt = [string]$cmd.Source }
+    } catch { }
+    if (-not $wt) {
+        $storeWt = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\wt.exe'
+        if (Test-Path -LiteralPath $storeWt) { $wt = $storeWt }
+    }
+
+    if ($wt) {
+        Start-Process -FilePath $wt -ArgumentList @(
+            '-d', $WorkingDirectory,
+            '--', $psExe, '-NoProfile', '-NoExit'
+        )
+        return
+    }
+
+    if (Test-Path -LiteralPath $conhost) {
+        Start-Process -FilePath $conhost -ArgumentList @(
+            $psExe, '-NoProfile', '-NoExit'
+        ) -WorkingDirectory $WorkingDirectory
+        return
+    }
+
+    Start-Process -FilePath $psExe -WorkingDirectory $WorkingDirectory -ArgumentList @('-NoProfile', '-NoExit')
 }
