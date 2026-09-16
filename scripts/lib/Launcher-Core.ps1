@@ -99,10 +99,19 @@ function Start-FreshWindowsUnelevated {
     }
 }
 
+function Test-FreshWindowsIsElevated {
+    try {
+        $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $pr = New-Object Security.Principal.WindowsPrincipal $id
+        return $pr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    }
+    catch { return $false }
+}
+
 function Register-FreshWindowsWatchAgentLogon {
     <#
-      Tache AtLogOn Limited (pas Highest) + delai : Startup .lnk seul etait fragile
-      (scripts disparus => cmd start sans agent). Limited = icone tray visible.
+      Tache AtLogOn Limited. Depuis un launcher admin, Register-ScheduledTask -Force
+      renvoie souvent Acces refuse : on enregistre via runas trustlevel (non eleve).
     #>
     param(
         [Parameter(Mandatory)][string]$FreshAppData
@@ -114,31 +123,59 @@ function Register-FreshWindowsWatchAgentLogon {
         throw "Start-WatchAgent.cmd introuvable."
     }
 
-    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($existing) {
+        foreach ($a in @($existing.Actions)) {
+            $exe = [string]$a.Execute
+            if ($exe -and ($exe -eq $cmdPath -or $exe -like '*Start-WatchAgent.cmd*')) {
+                return $taskName
+            }
+        }
+    }
 
-    $action = New-ScheduledTaskAction -Execute $cmdPath -WorkingDirectory $FreshAppData
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-    # Reseau OK pour re-telecharger les .ps1 si absents
-    $trigger.Delay = 'PT45S'
-    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-    $settings = New-ScheduledTaskSettingsSet `
-        -AllowStartIfOnBatteries `
-        -DontStopIfGoingOnBatteries `
-        -StartWhenAvailable `
-        -ExecutionTimeLimit ([TimeSpan]::Zero) `
-        -MultipleInstances IgnoreNew `
-        -DontStopOnIdleEnd
+    $helperPs1 = Join-Path $FreshAppData 'Register-WatchAgentTask.ps1'
+    $helperCmd = Join-Path $FreshAppData 'Register-WatchAgentTask.cmd'
+    @"
+#Requires -Version 5.1
+`$ErrorActionPreference = 'Stop'
+`$taskName = 'FreshWindows-WatchAgent'
+`$dir = if (`$PSScriptRoot) { `$PSScriptRoot } else { Split-Path -Parent `$MyInvocation.MyCommand.Path }
+`$cmdPath = Join-Path `$dir 'Start-WatchAgent.cmd'
+Unregister-ScheduledTask -TaskName `$taskName -Confirm:`$false -ErrorAction SilentlyContinue
+`$action = New-ScheduledTaskAction -Execute `$cmdPath -WorkingDirectory `$dir
+`$trigger = New-ScheduledTaskTrigger -AtLogOn -User `$env:USERNAME
+`$trigger.Delay = 'PT45S'
+`$principal = New-ScheduledTaskPrincipal -UserId `$env:USERNAME -LogonType Interactive -RunLevel Limited
+`$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -DontStopOnIdleEnd
+Register-ScheduledTask -TaskName `$taskName -Action `$action -Trigger `$trigger -Principal `$principal -Settings `$settings -Description 'Fresh Windows agent tray (Limited).' -Force | Out-Null
+"@ | Set-Content -LiteralPath $helperPs1 -Encoding UTF8
 
-    Register-ScheduledTask `
-        -TaskName $taskName `
-        -Action $action `
-        -Trigger $trigger `
-        -Principal $principal `
-        -Settings $settings `
-        -Description 'Fresh Windows agent tray (mode jeu). Limited + delai 45s.' `
-        -Force -ErrorAction Stop | Out-Null
+    @"
+@echo off
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%~dp0Register-WatchAgentTask.ps1"
+"@ | Set-Content -LiteralPath $helperCmd -Encoding ASCII
 
-    return $taskName
+    if (-not (Test-FreshWindowsIsElevated)) {
+        & $helperPs1
+        return $taskName
+    }
+
+    Start-Process -FilePath "$env:SystemRoot\System32\runas.exe" `
+        -ArgumentList "/trustlevel:0x20000 `"$helperCmd`"" `
+        -Wait -WindowStyle Hidden | Out-Null
+    Start-Sleep -Milliseconds 800
+
+    if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
+        return $taskName
+    }
+
+    $null = & "$env:SystemRoot\System32\schtasks.exe" /Delete /TN $taskName /F 2>&1
+    $create = & "$env:SystemRoot\System32\schtasks.exe" /Create /TN $taskName /TR "`"$cmdPath`"" /SC ONLOGON /RL LIMITED /F 2>&1
+    if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
+        return $taskName
+    }
+
+    throw ("Acces refuse pour la tache Limited. Startup .lnk reste actif. Detail: {0}" -f ($create | Out-String).Trim())
 }
 
 function Sync-GameModeLocalScripts {
