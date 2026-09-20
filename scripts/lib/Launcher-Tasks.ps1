@@ -2,6 +2,7 @@
 
 $script:WingetUpgradeTaskName = 'FreshWindows-WingetUpgrade'
 $script:WinUtilReapplyTaskName = 'FreshWindows-WinUtilReapply'
+$script:SyncLocalScriptsTaskName = 'FreshWindows-SyncLocalScripts'
 
 function Test-IsAdmin {
     try {
@@ -21,6 +22,13 @@ function Get-CommonTaskSettings {
         -RunOnlyIfNetworkAvailable `
         -ExecutionTimeLimit (New-TimeSpan -Hours $Hours) `
         -MultipleInstances IgnoreNew)
+}
+
+function Get-SyncLocalScriptsPowerShellCommand {
+    # Resync scripts mode jeu dans %LOCALAPPDATA%\FreshWindows (ref figee a l'enregistrement)
+    return @"
+`$ErrorActionPreference='Stop'; try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}; `$ref='$RepoRef'; `$fresh=Join-Path `$env:LOCALAPPDATA 'FreshWindows'; New-Item -ItemType Directory -Path `$fresh -Force | Out-Null; `$raw='https://raw.githubusercontent.com/nico2511/fresh_windows/'+`$ref; foreach (`$n in @('GameMode-Common.ps1','Invoke-GameModeKill.ps1','GameMode-WatchAgent.ps1')) { Invoke-WebRequest -Uri (`$raw+'/scripts/'+`$n) -OutFile (Join-Path `$fresh `$n) -UseBasicParsing }; Set-Content -LiteralPath (Join-Path `$fresh 'scripts.ref') -Value `$ref -Encoding UTF8 -NoNewline
+"@
 }
 
 function Register-AllScheduledTasks {
@@ -84,6 +92,29 @@ function Register-AllScheduledTasks {
         $ok = $false
     }
 
+    try {
+        $syncCmd = Get-SyncLocalScriptsPowerShellCommand
+        $syncArg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$syncCmd`""
+        $syncAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $syncArg
+        $syncTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At "12:30"
+        $syncSettings = Get-CommonTaskSettings -Hours 1
+
+        Register-ScheduledTask `
+            -TaskName $script:SyncLocalScriptsTaskName `
+            -Action $syncAction `
+            -Trigger $syncTrigger `
+            -Settings $syncSettings `
+            -Principal $principal `
+            -Description "Fresh Windows: resync scripts locaux Mode jeu (%LOCALAPPDATA%\FreshWindows)." `
+            -Force -ErrorAction Stop | Out-Null
+
+        Write-Host "  [OK] $script:SyncLocalScriptsTaskName - dimanche 12:30 (+ rattrapage)" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "  [KO] Sync scripts : $($_.Exception.Message)" -ForegroundColor Red
+        $ok = $false
+    }
+
     if ($ok) {
         Write-Host "`nTout est en place. PC éteint à l'heure prévue → rattrapage au prochain allumage." -ForegroundColor Cyan
     }
@@ -98,7 +129,7 @@ function Register-AllScheduledTasks {
 function Unregister-AllScheduledTasks {
     param([switch]$NoPause)
 
-    foreach ($name in @($script:WingetUpgradeTaskName, $script:WinUtilReapplyTaskName)) {
+    foreach ($name in @($script:WingetUpgradeTaskName, $script:WinUtilReapplyTaskName, $script:SyncLocalScriptsTaskName)) {
         try {
             $existing = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
             if (-not $existing) {
@@ -132,7 +163,7 @@ function Open-ScheduledTasksMenu {
     do {
         Clear-Host
         Write-Host "=== TÂCHES PLANIFIÉES ===" -ForegroundColor Cyan
-        Write-Host "Une seule activation crée tout (winget + WinUtil/ShutUp10)." -ForegroundColor DarkGray
+        Write-Host "Une seule activation crée tout (winget + maintenance + sync scripts)." -ForegroundColor DarkGray
         Write-Host "Maintenance = fenêtre visible + log dans %LOCALAPPDATA%\FreshWindows\logs" -ForegroundColor DarkGray
         Write-Host ""
         if (-not (Test-IsAdmin)) {
@@ -141,6 +172,7 @@ function Open-ScheduledTasksMenu {
         }
         Show-NamedTaskStatus -TaskName $script:WingetUpgradeTaskName -Label "Winget (quotidien 12:00)"
         Show-NamedTaskStatus -TaskName $script:WinUtilReapplyTaskName -Label "WinUtil+ShutUp10 (dimanche 12:00)"
+        Show-NamedTaskStatus -TaskName $script:SyncLocalScriptsTaskName -Label "Sync scripts locaux (dimanche 12:30)"
         Write-Host ""
         Write-Host "1. Activer toutes les tâches" -ForegroundColor Green
         Write-Host "2. Lancer la maintenance maintenant (WinUtil + ShutUp10)" -ForegroundColor Yellow

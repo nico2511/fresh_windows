@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
-  Logique partagée mode jeu (kill list + protection comm/gaming).
-  Chargé par Invoke-GameModeKill.ps1 et GameMode-WatchAgent.ps1.
+  Logique partagee mode jeu (kill list + protection comm/gaming).
+  Charge par Invoke-GameModeKill.ps1 et GameMode-WatchAgent.ps1.
 #>
 param(
     [string]$RepoRef = $(if ($env:FRESH_WIN_REF) { $env:FRESH_WIN_REF.Trim() } else { 'main' })
@@ -15,9 +15,10 @@ function Get-GameModeKillConfig {
     $json = Invoke-RestMethod -Uri $ConfigUrl -UseBasicParsing
     if ($json -is [System.Array]) {
         return @{
-            KillNames           = @($json | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-            ProtectNames        = @()
-            GamingLauncherNames = @()
+            KillNames               = @($json | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            ProtectNames            = @()
+            GamingLauncherNames     = @()
+            GamingLauncherFamilies  = @{}
         }
     }
 
@@ -41,17 +42,41 @@ function Get-GameModeKillConfig {
 
     foreach ($p in $protect) { $kill.Remove($p) | Out-Null }
 
-    $launchers = @()
+    $families = @{}
+    $launchers = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+
+    if ($json.gaming_launcher_families) {
+        foreach ($prop in $json.gaming_launcher_families.PSObject.Properties) {
+            $names = @()
+            foreach ($n in @($prop.Value)) {
+                if ([string]::IsNullOrWhiteSpace($n)) { continue }
+                $t = $n.Trim()
+                $names += $t
+                [void]$launchers.Add($t)
+            }
+            if ($names.Count -gt 0) {
+                $families[$prop.Name] = $names
+            }
+        }
+    }
+
     if ($json.gaming_launchers) {
         foreach ($n in @($json.gaming_launchers)) {
-            if (-not [string]::IsNullOrWhiteSpace($n)) { $launchers += $n.Trim() }
+            if (-not [string]::IsNullOrWhiteSpace($n)) { [void]$launchers.Add($n.Trim()) }
+        }
+        # Compat ancienne liste plate : une famille par nom si pas de families
+        if ($families.Count -eq 0) {
+            foreach ($n in $launchers) {
+                $families[$n] = @($n)
+            }
         }
     }
 
     return @{
-        KillNames             = @($kill)
-        ProtectNames          = @($protect)
-        GamingLauncherNames   = $launchers
+        KillNames              = @($kill)
+        ProtectNames           = @($protect)
+        GamingLauncherNames    = @($launchers)
+        GamingLauncherFamilies = $families
     }
 }
 
@@ -84,7 +109,7 @@ function Stop-GameModeKillListProcesses {
         $procs = Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $ExcludePid }
         foreach ($p in $procs) {
             if (Test-GameModeProtectedProcess -ProcessName $p.ProcessName -ProtectNames $ProtectNames) {
-                $skipped += "$($p.ProcessName) ($($p.Id)) [protégé]"
+                $skipped += "$($p.ProcessName) ($($p.Id)) [protege]"
                 continue
             }
             try {
@@ -100,57 +125,214 @@ function Stop-GameModeKillListProcesses {
     return @{ Killed = $killed; Skipped = $skipped }
 }
 
+function Test-ProcessNameInLauncherSet {
+    param(
+        [string]$ProcessName,
+        [string[]]$LauncherNames
+    )
+    if ([string]::IsNullOrWhiteSpace($ProcessName)) { return $false }
+    foreach ($n in $LauncherNames) {
+        if ($ProcessName.Equals($n, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+}
+
+function Test-GameModeFamilyHasActiveSession {
+    <#
+      Session active = enfant (ou petit-enfant) d'un process launcher de la famille
+      qui n'est PAS lui-meme un process launcher connu.
+    #>
+    param(
+        [System.Diagnostics.Process[]]$FamilyProcs,
+        [string[]]$AllLauncherNames,
+        [int]$MinChildRamMb = 80
+    )
+
+    if (-not $FamilyProcs -or $FamilyProcs.Count -eq 0) { return $false }
+
+    $familyPids = [System.Collections.Generic.HashSet[int]]::new()
+    foreach ($p in $FamilyProcs) { [void]$familyPids.Add($p.Id) }
+
+    $minBytes = [int64]$MinChildRamMb * 1MB
+    try {
+        $cim = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue
+    }
+    catch {
+        return $false
+    }
+
+    foreach ($row in $cim) {
+        if (-not $row.ParentProcessId) { continue }
+        if (-not $familyPids.Contains([int]$row.ParentProcessId)) { continue }
+        if ($familyPids.Contains([int]$row.ProcessId)) { continue }
+
+        $childName = [string]$row.Name
+        if ($childName -match '\.exe$') { $childName = $childName.Substring(0, $childName.Length - 4) }
+        if (Test-ProcessNameInLauncherSet -ProcessName $childName -LauncherNames $AllLauncherNames) {
+            continue
+        }
+
+        try {
+            $child = Get-Process -Id $row.ProcessId -ErrorAction SilentlyContinue
+            if ($child -and $child.WorkingSet64 -ge $minBytes) {
+                return $true
+            }
+            # Jeu souvent plein ecran meme avec peu de RAM encore chargee
+            if ($child -and $child.MainWindowHandle -ne [IntPtr]::Zero) {
+                return $true
+            }
+        }
+        catch { }
+    }
+
+    # Fallback : chemin exe sous un dossier jeux connu pour un process hors launchers
+    foreach ($row in $cim) {
+        $path = [string]$row.ExecutablePath
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        if ($path -notmatch '(?i)\\(EA Games|Electronic Arts|steamapps\\common|Epic Games|GOG Galaxy|Ubisoft|Riot Games)\\') {
+            continue
+        }
+        $childName = [string]$row.Name
+        if ($childName -match '\.exe$') { $childName = $childName.Substring(0, $childName.Length - 4) }
+        if (Test-ProcessNameInLauncherSet -ProcessName $childName -LauncherNames $AllLauncherNames) {
+            continue
+        }
+        # Lie a la famille si parent dans famille OU path contient marqueur famille
+        if ($familyPids.Contains([int]$row.ParentProcessId)) { return $true }
+    }
+
+    return $false
+}
+
 function Stop-IdleGamingLaunchers {
     <#
-      Plusieurs launchers ouverts : garde celui qui consomme le plus (RAM/CPU),
-      ferme les autres (Epic + GOG pendant une session Steam = inutile).
+      Heuristique par famille : ne tue une famille idle que si une autre a une
+      session jeu active. Sans session claire -> ne tue aucun launcher.
     #>
     param(
         [string[]]$LauncherNames,
+        [hashtable]$LauncherFamilies = $null,
         [int]$ExcludePid = $PID
     )
 
-    if (-not $LauncherNames -or $LauncherNames.Count -eq 0) {
-        return @{ Killed = @(); Kept = @(); Skipped = @() }
+    $empty = @{ Killed = @(); Kept = @(); Skipped = @(); Notes = @() }
+
+    if ($LauncherFamilies -and $LauncherFamilies.Count -gt 0) {
+        $families = $LauncherFamilies
+    }
+    elseif ($LauncherNames -and $LauncherNames.Count -gt 0) {
+        $families = @{}
+        foreach ($n in $LauncherNames) {
+            if (-not [string]::IsNullOrWhiteSpace($n)) { $families[$n] = @($n.Trim()) }
+        }
+    }
+    else {
+        return $empty
     }
 
-    $running = [System.Collections.Generic.List[object]]::new()
-    foreach ($name in $LauncherNames) {
-        if ([string]::IsNullOrWhiteSpace($name)) { continue }
-        Get-Process -Name $name -ErrorAction SilentlyContinue | ForEach-Object {
-            if ($_.Id -ne $ExcludePid) { $running.Add($_) }
+    $allLauncherNames = @()
+    foreach ($key in $families.Keys) {
+        foreach ($n in @($families[$key])) {
+            if ($n) { $allLauncherNames += $n }
         }
     }
 
-    if ($running.Count -le 1) {
-        $kept = if ($running.Count -eq 1) { @("$($running[0].ProcessName) ($($running[0].Id))") } else { @() }
-        return @{ Killed = @(); Kept = $kept; Skipped = @() }
+    $familyState = @()
+    foreach ($famName in ($families.Keys | Sort-Object)) {
+        $names = @($families[$famName])
+        $procs = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
+        foreach ($name in $names) {
+            Get-Process -Name $name -ErrorAction SilentlyContinue | ForEach-Object {
+                if ($_.Id -ne $ExcludePid) { $procs.Add($_) }
+            }
+        }
+        if ($procs.Count -eq 0) { continue }
+
+        $score = 0.0
+        foreach ($p in $procs) {
+            $score += [double]$p.WorkingSet64 + ([double]$p.CPU * 2MB)
+        }
+        $hasSession = Test-GameModeFamilyHasActiveSession -FamilyProcs $procs.ToArray() `
+            -AllLauncherNames $allLauncherNames
+
+        $familyState += [pscustomobject]@{
+            Name       = $famName
+            Procs      = $procs.ToArray()
+            Score      = $score
+            HasSession = $hasSession
+        }
     }
 
-    $scored = @(
-        $running | ForEach-Object {
-            $score = [double]$_.WorkingSet64 + ([double]$_.CPU * 2MB)
-            [pscustomobject]@{ Proc = $_; Score = $score }
-        } | Sort-Object Score -Descending
-    )
+    if ($familyState.Count -eq 0) {
+        return $empty
+    }
 
-    $keep = $scored[0].Proc
-    $kept = @("$($keep.ProcessName) ($($keep.Id)) [actif]")
+    $activeFamilies = @($familyState | Where-Object { $_.HasSession })
+    $kept = @()
     $killed = @()
     $skipped = @()
+    $notes = @()
 
-    foreach ($item in ($scored | Select-Object -Skip 1)) {
-        $p = $item.Proc
-        try {
-            Stop-Process -Id $p.Id -Force -ErrorAction Stop
-            $killed += "$($p.ProcessName) ($($p.Id))"
+    if ($activeFamilies.Count -eq 0) {
+        foreach ($f in $familyState) {
+            $kept += ("{0} ({1} proc) [conserve - aucune session jeu claire]" -f $f.Name, $f.Procs.Count)
         }
-        catch {
-            $skipped += "$($p.ProcessName) ($($p.Id))"
-        }
+        $notes += 'Aucune session jeu detectee : aucun launcher tue.'
+        return @{ Killed = $killed; Kept = $kept; Skipped = $skipped; Notes = $notes }
     }
 
-    return @{ Killed = $killed; Kept = $kept; Skipped = $skipped }
+    foreach ($f in $familyState) {
+        if ($f.HasSession) {
+            $kept += ("{0} ({1} proc) [session active]" -f $f.Name, $f.Procs.Count)
+            continue
+        }
+
+        # Famille idle alors qu'une autre a une session -> kill
+        foreach ($p in $f.Procs) {
+            try {
+                Stop-Process -Id $p.Id -Force -ErrorAction Stop
+                $killed += "$($p.ProcessName) ($($p.Id)) [$($f.Name)]"
+            }
+            catch {
+                $skipped += "$($p.ProcessName) ($($p.Id)) [$($f.Name)]"
+            }
+        }
+        $notes += ("Famille {0} idle tuee (session active ailleurs)." -f $f.Name)
+    }
+
+    return @{ Killed = $killed; Kept = $kept; Skipped = $skipped; Notes = $notes }
+}
+
+function Ensure-UltimatePerformanceActive {
+    Write-Host "  -> Ultimate Performance (power plan)" -ForegroundColor Gray
+    try {
+        $list = powercfg /list 2>&1 | Out-String
+        $active = [regex]::Match($list, '(?i)\*\s*([A-Fa-f0-9-]{36}).*Ultimate Performance')
+        if ($active.Success) {
+            Write-Host "    Plan Ultimate deja actif." -ForegroundColor DarkGray
+            return $true
+        }
+        $existing = [regex]::Match($list, '(?i)([A-Fa-f0-9-]{36}).*Ultimate Performance')
+        if ($existing.Success) {
+            powercfg /setactive $existing.Groups[1].Value | Out-Null
+            Write-Host "    Plan Ultimate active." -ForegroundColor DarkGray
+            return $true
+        }
+        $schemeGuid = "e9a42b02-d5df-448d-aa00-03f14749eb61"
+        $dup = powercfg /duplicatescheme $schemeGuid 2>&1 | Out-String
+        $match = [regex]::Match($dup, '[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}')
+        if ($match.Success) {
+            powercfg /setactive $match.Value | Out-Null
+            Write-Host "    Plan Ultimate cree et active." -ForegroundColor DarkGray
+            return $true
+        }
+        Write-Host "    Impossible d'activer Ultimate Performance." -ForegroundColor DarkYellow
+        return $false
+    }
+    catch {
+        Write-Host "    Ultimate Performance ignore : $($_.Exception.Message)" -ForegroundColor DarkYellow
+        return $false
+    }
 }
 
 function Start-FreshWindowsElevated {
@@ -162,7 +344,7 @@ function Start-FreshWindowsElevated {
     $fresh = Join-Path $env:LOCALAPPDATA 'FreshWindows'
     $stub = Join-Path $fresh 'Launch-FreshWindows.ps1'
     if (-not (Test-Path -LiteralPath $stub)) {
-        throw "Stub Fresh Windows introuvable. Menu Fresh Windows → 11 (raccourcis)."
+        throw "Stub Fresh Windows introuvable. Menu Fresh Windows → 10 (mode jeu / raccourcis)."
     }
 
     $argList = "-NoProfile -ExecutionPolicy Bypass -File `"$stub`""
@@ -190,8 +372,6 @@ function Start-FreshWindowsPowerShell {
     $psExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
     $conhost = "$env:SystemRoot\System32\conhost.exe"
 
-    # Win11 "Terminal par defaut" = Windows Terminal : Start-Process powershell.exe
-    # depuis l'agent (fenetre cachee) echoue souvent. Preferer wt, sinon conhost.
     $wt = $null
     try {
         $cmd = Get-Command wt.exe -ErrorAction SilentlyContinue

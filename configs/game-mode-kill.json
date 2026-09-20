@@ -1,5 +1,5 @@
 {
-  "comment": "Noms de process Windows (Gestionnaire des tâches). Indépendant des listes winget d'installation.",
+  "comment": "Noms de process Windows (Gestionnaire des taches). Indépendant des listes winget d'installation.",
   "domains": {
     "dev": [
       "Cursor",
@@ -65,6 +65,10 @@
       "ms-teams",
       "ms-teamsupdate"
     ],
+    "security_tray": [
+      "Bitwarden",
+      "Bitwarden.Desktop"
+    ],
     "messaging": [
       "Signal",
       "WhatsApp",
@@ -91,14 +95,28 @@
       "DeepSeekHarness"
     ]
   },
+  "gaming_launcher_families": {
+    "steam": ["steam", "steamwebhelper", "steamservice"],
+    "epic": ["EpicGamesLauncher", "EpicWebHelper"],
+    "gog": ["GalaxyClient", "GalaxyCommunication"],
+    "ea": ["EADesktop", "eadesktop", "Origin", "EABackgroundService", "EALocalHostSvc", "EASteamProxy"],
+    "battle": ["Battle.net"],
+    "ubisoft": ["UbisoftConnect", "upc"],
+    "riot": ["RiotClientServices", "RiotClientCrashHandler"],
+    "overwolf": ["Overwolf", "OverwolfHelper"],
+    "playnite": ["Playnite", "Playnite.FullscreenApp"],
+    "xbox": ["XboxPcApp", "GamingServices"]
+  },
   "gaming_launchers": [
     "steam",
+    "steamwebhelper",
     "EpicGamesLauncher",
     "GalaxyClient",
     "GalaxyCommunication",
     "EADesktop",
     "eadesktop",
     "Origin",
+    "EABackgroundService",
     "Battle.net",
     "UbisoftConnect",
     "RiotClientServices",

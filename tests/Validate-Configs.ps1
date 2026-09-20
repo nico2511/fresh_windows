@@ -36,7 +36,8 @@ $requiredJson = @(
     'powertoys-profile.json',
     'winutil-appx.json',
     'winutil-oneclick.json',
-    'winutil-brave-debloat.json'
+    'winutil-brave-debloat.json',
+    'brave-optimize.json'
 )
 
 foreach ($name in $requiredJson) {
@@ -130,33 +131,62 @@ if (Test-Path -LiteralPath $killPath) {
     elseif (-not $kill.protect) {
         Fail 'game-mode-kill.json : propriete protect manquante'
     }
-    elseif (-not $kill.gaming_launchers) {
-        Fail 'game-mode-kill.json : gaming_launchers manquant'
-    }
     else {
-        $names = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-        foreach ($prop in $kill.domains.PSObject.Properties) {
-            foreach ($n in @($prop.Value)) {
-                if (-not [string]::IsNullOrWhiteSpace($n)) { [void]$names.Add($n.Trim()) }
-            }
-        }
-        $prot = 0
-        foreach ($prop in $kill.protect.PSObject.Properties) {
-            foreach ($n in @($prop.Value)) { if ($n) { $prot++ } }
-        }
-        $launchers = @($kill.gaming_launchers | Where-Object { $_ })
-        if ($names.Count -lt 5) {
-            Fail ("game-mode-kill.json : trop peu de process dans domains ({0})" -f $names.Count)
-        }
-        elseif ($prot -lt 3) {
-            Fail 'game-mode-kill.json : protect.communication trop courte'
-        }
-        elseif ($launchers.Count -lt 3) {
-            Fail 'game-mode-kill.json : gaming_launchers trop courte'
+        $hasFlat = $kill.gaming_launchers -and (@($kill.gaming_launchers).Count -gt 0)
+        $hasFamilies = $kill.gaming_launcher_families -and ($kill.gaming_launcher_families.PSObject.Properties.Count -gt 0)
+        if (-not $hasFlat -and -not $hasFamilies) {
+            Fail 'game-mode-kill.json : gaming_launchers ou gaming_launcher_families manquant'
         }
         else {
-            Ok ("game-mode-kill.json ({0} kill, {1} comm protect, {2} launchers)" -f $names.Count, $prot, $launchers.Count)
+            $names = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+            foreach ($prop in $kill.domains.PSObject.Properties) {
+                foreach ($n in @($prop.Value)) {
+                    if (-not [string]::IsNullOrWhiteSpace($n)) { [void]$names.Add($n.Trim()) }
+                }
+            }
+            $prot = 0
+            foreach ($prop in $kill.protect.PSObject.Properties) {
+                foreach ($n in @($prop.Value)) { if ($n) { $prot++ } }
+            }
+            $launcherCount = 0
+            if ($hasFamilies) {
+                foreach ($prop in $kill.gaming_launcher_families.PSObject.Properties) {
+                    $launcherCount += @($prop.Value).Count
+                }
+            }
+            elseif ($hasFlat) {
+                $launcherCount = @($kill.gaming_launchers | Where-Object { $_ }).Count
+            }
+            if ($names.Count -lt 5) {
+                Fail ("game-mode-kill.json : trop peu de process dans domains ({0})" -f $names.Count)
+            }
+            elseif ($prot -lt 3) {
+                Fail 'game-mode-kill.json : protect.communication trop courte'
+            }
+            elseif ($launcherCount -lt 3) {
+                Fail 'game-mode-kill.json : trop peu de launchers'
+            }
+            elseif (-not $names.Contains('Bitwarden')) {
+                Fail 'game-mode-kill.json : Bitwarden manquant dans domains'
+            }
+            else {
+                Ok ("game-mode-kill.json ({0} kill, {1} comm protect, {2} launcher names)" -f $names.Count, $prot, $launcherCount)
+            }
         }
+    }
+}
+
+$braveOpt = Join-Path $configs 'brave-optimize.json'
+if (Test-Path -LiteralPath $braveOpt) {
+    $bo = Get-Content -LiteralPath $braveOpt -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not $bo.disable) {
+        Fail 'brave-optimize.json : propriete disable manquante'
+    }
+    elseif (-not $bo.disable.BraveRewardsDisabled) {
+        Fail 'brave-optimize.json : BraveRewardsDisabled manquant'
+    }
+    else {
+        Ok 'brave-optimize.json policies presentes'
     }
 }
 

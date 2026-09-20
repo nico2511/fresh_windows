@@ -9,7 +9,7 @@
 #    WinUtil : winutil-oneclick | winutil-standard | winutil-minimal |
 #              winutil-advanced | winutil-appx | maintenance
 #    Autre : tasks | game-mode | game-mode-shortcuts | game-mode-watch |
-#            powertoys-profile | shutup10 | brave-debloat | betterzen
+#            powertoys-profile | shutup10 | brave-optimize | brave-debloat | betterzen
 #
 #  Pin de version (commit / tag / branche) :
 #    $env:FRESH_WIN_REF='abc1234'
@@ -44,7 +44,7 @@ $IconUrl = "$RepoRawRoot/assets/fresh-windows.ico"
 $FreshAppData = Join-Path $env:LOCALAPPDATA "FreshWindows"
 $script:FreshBrand = "Fresh Windows"
 # Incrémenter quand les libs changent alors que FRESH_WIN_REF reste "main" (sinon cache périmé)
-$script:FreshWindowsLibEpoch = 16
+$script:FreshWindowsLibEpoch = 17
 
 function ConvertTo-Utf8BomFile {
     param([Parameter(Mandatory)][string]$Path)
@@ -340,6 +340,7 @@ function Install-GitHubDownload {
     } else {
         Join-Path $env:LOCALAPPDATA "Programs\$name"
     }
+    $isArchive = ($App.archive -eq $true) -or ($fileName -match '\.zip$')
     $destPath = Join-Path $destDir $fileName
 
     if ([string]::IsNullOrWhiteSpace($url)) {
@@ -362,14 +363,44 @@ function Install-GitHubDownload {
         return $false
     }
 
-    if ($App.shortcut -eq $true) {
+    $shortcutTarget = $destPath
+    if ($isArchive) {
+        Write-Host "    Extraction archive..." -ForegroundColor DarkGray
+        try {
+            Expand-Archive -LiteralPath $destPath -DestinationPath $destDir -Force
+            Remove-Item -LiteralPath $destPath -Force -ErrorAction SilentlyContinue
+        }
+        catch {
+            Write-Host "    Échec extraction : $($_.Exception.Message)" -ForegroundColor Red
+            return $false
+        }
+
+        $exeName = if ($App.shortcutExe) { [string]$App.shortcutExe } else { "$name.exe" }
+        $found = Get-ChildItem -LiteralPath $destDir -Recurse -Filter $exeName -File -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if (-not $found) {
+            $found = Get-ChildItem -LiteralPath $destDir -Recurse -Filter '*.exe' -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -notmatch '(?i)(unins|setup|update|crash)' } |
+                Select-Object -First 1
+        }
+        if ($found) {
+            $shortcutTarget = $found.FullName
+            Write-Host "    Exe : $shortcutTarget" -ForegroundColor DarkGray
+        }
+        else {
+            Write-Host "    Archive extraite mais exe introuvable pour le raccourci." -ForegroundColor DarkYellow
+            $shortcutTarget = $null
+        }
+    }
+
+    if ($App.shortcut -eq $true -and $shortcutTarget) {
         try {
             $programs = [Environment]::GetFolderPath('Programs')
             $lnkPath  = Join-Path $programs "$name.lnk"
             $wsh = New-Object -ComObject WScript.Shell
             $lnk = $wsh.CreateShortcut($lnkPath)
-            $lnk.TargetPath = $destPath
-            $lnk.WorkingDirectory = $destDir
+            $lnk.TargetPath = $shortcutTarget
+            $lnk.WorkingDirectory = (Split-Path -Parent $shortcutTarget)
             $lnk.Description = $name
             $lnk.Save()
             Write-Host "    Raccourci menu Démarrer créé." -ForegroundColor DarkGray
@@ -420,6 +451,18 @@ function Install-AppEntry {
         if ($ok -and $App -eq 'OO-Software.ShutUp10') {
             Start-Sleep -Seconds 1
             Invoke-ShutUp10Recommended -LaunchGui | Out-Null
+        }
+        if ($ok -and $App -eq 'Brave.Brave') {
+            Start-Sleep -Seconds 1
+            Invoke-BraveOptimize -NoPause | Out-Null
+        }
+        if ($ok -and $App -eq 'Zen-Team.Zen-Browser') {
+            Start-Sleep -Seconds 2
+            Invoke-BetterZen -EnsureProfile -NoPause | Out-Null
+        }
+        if ($ok -and $App -eq 'voidtools.Everything') {
+            Start-Sleep -Seconds 1
+            Disable-EverythingAutostart | Out-Null
         }
         return $ok
     }
@@ -545,6 +588,173 @@ function Install-FromJson {
     return ($failed.Count -eq 0)
 }
 
+function Disable-EverythingAutostart {
+    Write-Host "  → Everything : désactivation service + démarrage auto..." -ForegroundColor Gray
+    $ok = $true
+    try {
+        $svc = Get-Service -Name 'Everything' -ErrorAction SilentlyContinue
+        if ($svc) {
+            if ($svc.Status -ne 'Stopped') {
+                Stop-Service -Name 'Everything' -Force -ErrorAction SilentlyContinue
+            }
+            Set-Service -Name 'Everything' -StartupType Disabled -ErrorAction SilentlyContinue
+            Write-Host "    Service Everything désactivé." -ForegroundColor DarkGray
+        }
+        else {
+            Write-Host "    Service Everything absent (OK)." -ForegroundColor DarkGray
+        }
+    }
+    catch {
+        Write-Host "    Service : $($_.Exception.Message)" -ForegroundColor DarkYellow
+        $ok = $false
+    }
+
+    # Run keys
+    foreach ($runKey in @(
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
+    )) {
+        try {
+            if (Test-Path -LiteralPath $runKey) {
+                $props = Get-ItemProperty -LiteralPath $runKey -ErrorAction SilentlyContinue
+                foreach ($p in $props.PSObject.Properties) {
+                    if ($p.Name -match '(?i)Everything' -or [string]$p.Value -match '(?i)Everything\.exe') {
+                        Remove-ItemProperty -LiteralPath $runKey -Name $p.Name -ErrorAction SilentlyContinue
+                        Write-Host "    Run retiré : $($p.Name)" -ForegroundColor DarkGray
+                    }
+                }
+            }
+        } catch { }
+    }
+
+    # Startup folder shortcuts
+    try {
+        $startup = [Environment]::GetFolderPath('Startup')
+        Get-ChildItem -LiteralPath $startup -Filter '*Everything*' -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+                Write-Host "    Startup retiré : $($_.Name)" -ForegroundColor DarkGray
+            }
+    } catch { }
+
+    # Prefer Everything.ini run_on_* = 0 if present
+    $iniCandidates = @(
+        (Join-Path $env:APPDATA 'Everything\Everything.ini'),
+        (Join-Path $env:ProgramFiles 'Everything\Everything.ini')
+    )
+    if (${env:ProgramFiles(x86)}) {
+        $iniCandidates += (Join-Path ${env:ProgramFiles(x86)} 'Everything\Everything.ini')
+    }
+    foreach ($ini in $iniCandidates) {
+        if (-not (Test-Path -LiteralPath $ini)) { continue }
+        try {
+            $raw = Get-Content -LiteralPath $ini -Raw -Encoding UTF8
+            $new = $raw
+            foreach ($key in @('run_on_system_startup', 'run_on_startup', 'run_as_service')) {
+                if ($new -match "(?im)^$key=") {
+                    $new = [regex]::Replace($new, "(?im)^$key=.*$", "$key=0")
+                }
+                else {
+                    $new = $new.TrimEnd() + "`r`n$key=0`r`n"
+                }
+            }
+            if ($new -ne $raw) {
+                Set-Content -LiteralPath $ini -Value $new -Encoding UTF8
+                Write-Host "    INI mis à jour : $ini" -ForegroundColor DarkGray
+            }
+        } catch { }
+    }
+
+    return $ok
+}
+
+function Invoke-BraveOptimize {
+    param(
+        [switch]$Remove,
+        [switch]$NoPause
+    )
+
+    $cfg = Get-ConfigObject -FileName 'brave-optimize.json'
+    $regPath = if ($cfg -and $cfg.registryPath) {
+        [string]$cfg.registryPath
+    } else {
+        'HKLM:\SOFTWARE\Policies\BraveSoftware\Brave'
+    }
+
+    if ($Remove) {
+        Write-Host "`n→ Retrait profil Brave (policies Fresh)..." -ForegroundColor Yellow
+        try {
+            if (Test-Path -LiteralPath $regPath) {
+                Remove-Item -LiteralPath $regPath -Recurse -Force -ErrorAction Stop
+                Write-Host "  Policies supprimées : $regPath" -ForegroundColor Green
+                Write-Host "  Relance Brave pour prendre effet." -ForegroundColor DarkGray
+            }
+            else {
+                Write-Host "  Aucune policy Fresh présente." -ForegroundColor DarkGray
+            }
+            if (-not $NoPause) { Wait-ForUser }
+            return $true
+        }
+        catch {
+            Write-Host "  Échec retrait : $($_.Exception.Message)" -ForegroundColor Red
+            if (-not $NoPause) { Wait-ForUser }
+            return $false
+        }
+    }
+
+    Write-Host "`n→ Profil Brave Fresh (policies curatées)..." -ForegroundColor Cyan
+    if (-not $cfg -or -not $cfg.disable) {
+        Write-Host "  brave-optimize.json introuvable." -ForegroundColor Red
+        if (-not $NoPause) { Wait-ForUser }
+        return $false
+    }
+
+    try {
+        New-Item -Path $regPath -Force | Out-Null
+        foreach ($prop in $cfg.disable.PSObject.Properties) {
+            $name = $prop.Name
+            $val = [int]$prop.Value
+            New-ItemProperty -Path $regPath -Name $name -PropertyType DWord -Value $val -Force | Out-Null
+            Write-Host ("    {0} = {1}" -f $name, $val) -ForegroundColor DarkGray
+        }
+        Write-Host "  Policies écrites (Rewards/Wallet/VPN/Leo/News/Talk/télémétrie off ; Sync/Tor gardés)." -ForegroundColor Green
+        Write-Host "  Relance Brave si déjà ouvert. Vérif : brave://policy" -ForegroundColor DarkGray
+        if (-not $NoPause) { Wait-ForUser }
+        return $true
+    }
+    catch {
+        Write-Host "  Échec policies Brave : $($_.Exception.Message)" -ForegroundColor Red
+        if (-not $NoPause) { Wait-ForUser }
+        return $false
+    }
+}
+
+function Initialize-ZenDefaultProfile {
+    $zenRoot = Join-Path $env:APPDATA 'zen'
+    $profilesRoot = Join-Path $zenRoot 'Profiles'
+    $profileDir = Join-Path $profilesRoot 'fresh.default'
+    $iniPath = Join-Path $zenRoot 'profiles.ini'
+
+    New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
+
+    if (-not (Test-Path -LiteralPath $iniPath)) {
+        @"
+[General]
+StartWithLastProfile=1
+Version=2
+
+[Profile0]
+Name=fresh
+IsRelative=1
+Path=Profiles/fresh.default
+Default=1
+"@ | Set-Content -LiteralPath $iniPath -Encoding UTF8
+        Write-Host "  Profil Zen créé : $profileDir" -ForegroundColor DarkGray
+    }
+
+    return $profileDir
+}
+
 function Get-ZenDefaultProfilePath {
     $zenRoot = Join-Path $env:APPDATA 'zen'
     $iniPath = Join-Path $zenRoot 'profiles.ini'
@@ -584,15 +794,27 @@ function Get-ZenDefaultProfilePath {
 }
 
 function Invoke-BetterZen {
-    param([switch]$NoPause)
+    param(
+        [switch]$EnsureProfile,
+        [switch]$NoPause
+    )
 
     Write-Host "`n→ BetterZen (Betterfox zen/user.js)" -ForegroundColor Cyan
     $profilePath = Get-ZenDefaultProfilePath
     if (-not $profilePath -or -not (Test-Path -LiteralPath $profilePath)) {
-        Write-Host "  Profil Zen introuvable sous %APPDATA%\zen." -ForegroundColor Red
-        Write-Host "  Installe Zen et lance-le une fois pour créer un profil." -ForegroundColor DarkYellow
-        if (-not $NoPause) { Wait-ForUser }
-        return $false
+        if ($EnsureProfile) {
+            $profilePath = Initialize-ZenDefaultProfile
+        }
+        else {
+            Write-Host "  Profil Zen introuvable sous %APPDATA%\zen." -ForegroundColor Red
+            Write-Host "  Installe Zen et lance-le une fois pour créer un profil." -ForegroundColor DarkYellow
+            if (-not $NoPause) { Wait-ForUser }
+            return $false
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $profilePath)) {
+        New-Item -ItemType Directory -Path $profilePath -Force | Out-Null
     }
 
     Write-Host "  Profil : $profilePath" -ForegroundColor DarkGray
@@ -625,15 +847,40 @@ function Invoke-BetterZen {
     }
 }
 
+function Open-BraveProfileMenu {
+    do {
+        Clear-Host
+        Write-Host "=== PROFIL BRAVE ===" -ForegroundColor Magenta
+        Write-Host "Policies Fresh : Rewards/Wallet/VPN/Leo/News/Talk/télémétrie OFF." -ForegroundColor DarkGray
+        Write-Host "Sync et Tor restent actifs. Vérif : brave://policy" -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "1. Appliquer / réappliquer le profil" -ForegroundColor Green
+        Write-Host "2. Retirer le profil (undo policies)" -ForegroundColor Yellow
+        Write-Host "3. Retour" -ForegroundColor DarkGray
+        Write-Host ""
+        $c = Read-Host "Choix"
+        switch ($c) {
+            "1" { Invoke-BraveOptimize | Out-Null }
+            "2" { Invoke-BraveOptimize -Remove | Out-Null }
+            "3" { return }
+            default {
+                Write-Host "Choix invalide" -ForegroundColor Red
+                Start-Sleep 1
+            }
+        }
+    } while ($true)
+}
+
 function Open-Extensions {
     do {
         Clear-Host
         Write-Host "=== NAVIGATEURS / EXTENSIONS ===" -ForegroundColor Cyan
+        Write-Host "Zen : Betterfox à l'install. Brave : profil Fresh à l'install." -ForegroundColor DarkGray
+        Write-Host ""
         Write-Host "1. Extensions Firefox-based (Zen, Firefox...) - Recommandé" -ForegroundColor Green
         Write-Host "2. Extensions Chrome-based (Brave, Chrome, Edge...)" -ForegroundColor Yellow
-        Write-Host "3. Brave - debloat (WinUtil)" -ForegroundColor Magenta
-        Write-Host "4. Zen - BetterZen (user.js)" -ForegroundColor Cyan
-        Write-Host "5. Retour" -ForegroundColor DarkGray
+        Write-Host "3. Profil Brave - réappliquer / retirer" -ForegroundColor Magenta
+        Write-Host "4. Retour" -ForegroundColor DarkGray
         $c = Read-Host "Choix"
 
         switch ($c) {
@@ -665,13 +912,8 @@ function Open-Extensions {
                 Write-Host "Pages ouvertes." -ForegroundColor Green
                 Wait-ForUser
             }
-            "3" {
-                Invoke-WinUtilConfig -ConfigUrl "$BaseUrl/winutil-brave-debloat.json" -Label "Brave debloat"
-            }
-            "4" {
-                Invoke-BetterZen | Out-Null
-            }
-            "5" { return }
+            "3" { Open-BraveProfileMenu }
+            "4" { return }
             default {
                 Write-Host "Choix invalide" -ForegroundColor Red
                 Start-Sleep 1
@@ -714,29 +956,27 @@ function Get-SystemProfileInfo {
 function Show-Menu {
     Clear-Host
     $info = Get-SystemProfileInfo
-    Write-Host "=======================================================" -ForegroundColor Cyan
-    Write-Host "              FRESH WINDOWS (GitHub)" -ForegroundColor Cyan
-    Write-Host "=======================================================" -ForegroundColor Cyan
+    Write-Host "=============== FRESH WINDOWS ===============" -ForegroundColor Cyan
     Write-Host ("User    : {0}" -f $info.User) -ForegroundColor DarkGray
     Write-Host ("Windows : {0} ({1})" -f $info.Edition, $info.DisplayVersion) -ForegroundColor DarkGray
     Write-Host ("Profil  : {0}" -f $info.ProfilePath) -ForegroundColor DarkGray
-    Write-Host "Ref GitHub : $RepoRef" -ForegroundColor DarkGray
+    Write-Host ("Ref     : {0}" -f $RepoRef) -ForegroundColor DarkGray
+    Write-Host "Apres formatage : 4 → 7 → 8 → 10" -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "--- Install ---" -ForegroundColor DarkCyan
-    Write-Host "1. Apps Standard" -ForegroundColor Green
-    Write-Host "2. Apps Gaming" -ForegroundColor Magenta
-    Write-Host "3. Apps Dev" -ForegroundColor Blue
-    Write-Host "4. Full (1+2+3)" -ForegroundColor Cyan
-    Write-Host "--- Maintien ---" -ForegroundColor DarkCyan
-    Write-Host "5. Navigateurs / extensions" -ForegroundColor Yellow
-    Write-Host "6. Winget upgrade --all" -ForegroundColor White
-    Write-Host "7. WinUtil / ShutUp10" -ForegroundColor Gray
-    Write-Host "8. Tâches planifiées (+ maintenance dimanche)" -ForegroundColor DarkCyan
-    Write-Host "9. GPU AMD / NVIDIA" -ForegroundColor DarkYellow
-    Write-Host "--- Session jeu ---" -ForegroundColor DarkCyan
-    Write-Host "10. Mode jeu - exécuter maintenant" -ForegroundColor Red
-    Write-Host "11. Mode jeu - raccourci & agent (sous-menu)" -ForegroundColor DarkRed
-    Write-Host "0. Quitter" -ForegroundColor DarkGray
+    Write-Host "--- Installer ---" -ForegroundColor DarkCyan
+    Write-Host " 1  Apps standard" -ForegroundColor Green
+    Write-Host " 2  Apps gaming" -ForegroundColor Magenta
+    Write-Host " 3  Apps dev" -ForegroundColor Blue
+    Write-Host " 4  Full setup (1+2+3)" -ForegroundColor Cyan
+    Write-Host "--- Configurer ---" -ForegroundColor DarkCyan
+    Write-Host " 5  Navigateurs (extensions + profil Brave)" -ForegroundColor Yellow
+    Write-Host " 6  Winget upgrade --all" -ForegroundColor White
+    Write-Host " 7  Tweaks Windows (one-click, ShutUp10, presets)" -ForegroundColor Gray
+    Write-Host " 8  Taches planifiees (MAJ + maintenance + sync scripts)" -ForegroundColor DarkCyan
+    Write-Host " 9  GPU (AMD Adrenalin / Ryzen Master / NVIDIA)" -ForegroundColor DarkYellow
+    Write-Host "--- Mode jeu ---" -ForegroundColor DarkCyan
+    Write-Host "10  Mode jeu (lancer / raccourci / agent)" -ForegroundColor Red
+    Write-Host " 0  Quitter" -ForegroundColor DarkGray
     Write-Host ""
 }
 
@@ -752,40 +992,66 @@ function Invoke-GameModeKill {
     param([switch]$NoPause)
 
     Write-Host "`n=== MODE JEU - fermeture processus lourds ===" -ForegroundColor Red
-    Write-Host "Liste générique (dev / IA / 3D / vidéo / sync). Comm protégée ; launchers inactifs fermés." -ForegroundColor DarkGray
+    Write-Host "Kill : dev / IA / sync / Bitwarden / ... Discord & Legcord proteges." -ForegroundColor DarkGray
+    Write-Host "Launchers : familles (EA/Steam/...) - session active jamais tuee." -ForegroundColor DarkGray
 
     if (-not (Import-GameModeCommon)) {
         if (-not $NoPause) { Wait-ForUser }
         return $false
     }
 
+    Ensure-UltimatePerformanceActive | Out-Null
+
     $cfg = Get-GameModeKillConfig
     $result = Stop-GameModeKillListProcesses -KillNames $cfg.KillNames -ProtectNames $cfg.ProtectNames
-    $idle = Stop-IdleGamingLaunchers -LauncherNames $cfg.GamingLauncherNames
+    $idle = Stop-IdleGamingLaunchers -LauncherNames $cfg.GamingLauncherNames -LauncherFamilies $cfg.GamingLauncherFamilies
 
     if ($result.Killed.Count -gt 0) {
-        Write-Host "`nFermés ($($result.Killed.Count)) :" -ForegroundColor Green
+        Write-Host "`nFermes ($($result.Killed.Count)) :" -ForegroundColor Green
         $result.Killed | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
     }
     else {
-        Write-Host "`nAucun process de la liste n'était ouvert." -ForegroundColor Yellow
+        Write-Host "`nAucun process de la liste n'etait ouvert." -ForegroundColor Yellow
     }
     if ($result.Skipped.Count -gt 0) {
-        Write-Host "Ignorés / protégés :" -ForegroundColor DarkYellow
+        Write-Host "Ignores / proteges :" -ForegroundColor DarkYellow
         $result.Skipped | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
     }
-    if ($idle.Killed.Count -gt 0) {
-        Write-Host "`nLaunchers gaming inactifs fermés ($($idle.Killed.Count)) :" -ForegroundColor Green
-        $idle.Killed | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
-        if ($idle.Kept.Count -gt 0) {
-            Write-Host "Launcher conservé : $($idle.Kept -join ', ')" -ForegroundColor DarkCyan
+    if ($idle.Notes) {
+        foreach ($n in $idle.Notes) {
+            Write-Host "  $n" -ForegroundColor DarkCyan
         }
     }
+    if ($idle.Killed.Count -gt 0) {
+        Write-Host "`nLaunchers idle fermes ($($idle.Killed.Count)) :" -ForegroundColor Green
+        $idle.Killed | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
+    }
+    if ($idle.Kept.Count -gt 0) {
+        Write-Host "Launchers conserves :" -ForegroundColor DarkCyan
+        $idle.Kept | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
+    }
 
-    Write-Host "`nAstuce : raccourci Bureau Mode Jeu ou agent barre des taches (menu 11)." -ForegroundColor DarkCyan
-    Write-Host "Plan Ultimate Performance : menu WinUtil one-click." -ForegroundColor DarkCyan
+    Write-Host "`nAstuce : menu 10 → raccourci Bureau / agent barre des taches." -ForegroundColor DarkCyan
     if (-not $NoPause) { Wait-ForUser }
     return ($result.Skipped.Count -eq 0)
+}
+
+function Test-WatchAgentAlreadyInstalled {
+    param([string]$FreshAppData)
+
+    $cmdPath = Join-Path $FreshAppData 'Start-WatchAgent.cmd'
+    if (-not (Test-Path -LiteralPath $cmdPath)) { return $false }
+
+    $task = Get-ScheduledTask -TaskName 'FreshWindows-WatchAgent' -ErrorAction SilentlyContinue
+    if (-not $task) { return $false }
+
+    foreach ($a in @($task.Actions)) {
+        $exe = [string]$a.Execute
+        if ($exe -and ($exe -eq $cmdPath -or $exe -like '*Start-WatchAgent.cmd*')) {
+            return $true
+        }
+    }
+    return $false
 }
 
 function Install-GameModeShortcuts {
@@ -825,26 +1091,36 @@ function Install-GameModeShortcuts {
     Write-Host "→ Raccourci Bureau : Mode Jeu.lnk (sans admin)" -ForegroundColor Green
 
     if ($IncludeWatchAgent) {
+        # Retirer l'ancien Startup .lnk (cause du double agent avec la tache)
         $startup = [Environment]::GetFolderPath('Startup')
         $lnkWatch = Join-Path $startup "Fresh Windows Surveillance.lnk"
-        $w = $wsh.CreateShortcut($lnkWatch)
-        $cmdWatch = Join-Path $FreshAppData 'Start-WatchAgent.cmd'
-        $w.TargetPath = $cmdWatch
-        $w.Arguments = ''
-        $w.WorkingDirectory = $FreshAppData
-        $w.WindowStyle = 7
-        $w.Description = "Agent Fresh Windows (CPU/RAM/disque/hang + toggle auto)"
-        if (Test-Path -LiteralPath $iconPath) { $w.IconLocation = "$iconPath,0" }
-        $w.Save()
-        Write-Host "-> Demarrage Windows : Fresh Windows Surveillance.lnk" -ForegroundColor Green
-
-        try {
-            $taskName = Register-FreshWindowsWatchAgentLogon -FreshAppData $FreshAppData
-            Write-Host "-> Tache planifiee : $taskName (AtLogOn Limited, delai 45s)" -ForegroundColor Green
+        if (Test-Path -LiteralPath $lnkWatch) {
+            Remove-Item -LiteralPath $lnkWatch -Force -ErrorAction SilentlyContinue
+            Write-Host "-> Ancien raccourci Startup retire (evite double icone)." -ForegroundColor DarkGray
         }
-        catch {
-            Write-Host "Tache planifiee non creee : $($_.Exception.Message)" -ForegroundColor DarkYellow
-            Write-Host "  Le raccourci Startup reste en place." -ForegroundColor DarkGray
+
+        if (Test-WatchAgentAlreadyInstalled -FreshAppData $FreshAppData) {
+            Write-Host "-> Agent deja installe (tache FreshWindows-WatchAgent) - skip creation." -ForegroundColor Green
+        }
+        else {
+            try {
+                $taskName = Register-FreshWindowsWatchAgentLogon -FreshAppData $FreshAppData
+                Write-Host "-> Tache planifiee : $taskName (AtLogOn Limited, delai 45s)" -ForegroundColor Green
+            }
+            catch {
+                Write-Host "Tache planifiee non creee : $($_.Exception.Message)" -ForegroundColor DarkYellow
+                # Fallback Startup uniquement si la tache echoue
+                $w = $wsh.CreateShortcut($lnkWatch)
+                $cmdWatch = Join-Path $FreshAppData 'Start-WatchAgent.cmd'
+                $w.TargetPath = $cmdWatch
+                $w.Arguments = ''
+                $w.WorkingDirectory = $FreshAppData
+                $w.WindowStyle = 7
+                $w.Description = "Agent Fresh Windows (fallback Startup)"
+                if (Test-Path -LiteralPath $iconPath) { $w.IconLocation = "$iconPath,0" }
+                $w.Save()
+                Write-Host "-> Fallback Startup : Fresh Windows Surveillance.lnk" -ForegroundColor Yellow
+            }
         }
 
         Write-Host "  Clic droit sur l'icone pour Detection auto." -ForegroundColor DarkGray
@@ -864,19 +1140,19 @@ function Install-GameModeShortcuts {
 function Open-GameModeSetupMenu {
     do {
         Clear-Host
-        Write-Host "=== MODE JEU - raccourci & agent ===" -ForegroundColor Red
-        Write-Host "Scripts copiés dans %LOCALAPPDATA%\FreshWindows (ref $RepoRef)." -ForegroundColor DarkGray
+        Write-Host "=== MODE JEU ===" -ForegroundColor Red
+        Write-Host "Scripts dans %LOCALAPPDATA%\FreshWindows (ref $RepoRef)." -ForegroundColor DarkGray
         Write-Host ""
-        Write-Host "1. Raccourci Bureau Mode Jeu (sans admin)" -ForegroundColor Green
-        Write-Host "2. Raccourci + agent au démarrage Windows" -ForegroundColor Cyan
-        Write-Host "3. Lancer l'agent maintenant" -ForegroundColor Yellow
+        Write-Host "1. Lancer le mode jeu maintenant" -ForegroundColor Red
+        Write-Host "2. Raccourci Bureau Mode Jeu" -ForegroundColor Green
+        Write-Host "3. Agent au demarrage (+ lancer maintenant)" -ForegroundColor Cyan
         Write-Host "4. Retour" -ForegroundColor DarkGray
         Write-Host ""
         $sub = Read-Host "Choix"
         switch ($sub) {
-            "1" { Install-GameModeShortcuts | Out-Null }
-            "2" { Install-GameModeShortcuts -IncludeWatchAgent | Out-Null }
-            "3" { Start-GameModeWatchAgent | Out-Null }
+            "1" { Invoke-GameModeKill | Out-Null }
+            "2" { Install-GameModeShortcuts | Out-Null }
+            "3" { Install-GameModeShortcuts -IncludeWatchAgent | Out-Null }
             "4" { return }
             default {
                 Write-Host "Choix invalide" -ForegroundColor Red
@@ -889,7 +1165,6 @@ function Open-GameModeSetupMenu {
 function Start-GameModeWatchAgent {
     param([switch]$NoPause)
 
-    # Reinstalle aussi Startup + tache logon (repare un agent qui ne repart plus au boot)
     $ok = Install-GameModeShortcuts -NoPause -IncludeWatchAgent
     if (-not $ok) {
         if (-not $NoPause) { Wait-ForUser }
@@ -944,10 +1219,13 @@ function Invoke-SilentMode {
                 $ok = [bool](Invoke-WinUtilConfig -ConfigUrl "$BaseUrl/winutil-appx.json" -Label "AppX bloat" -NoPause)
             }
             "brave-debloat" {
-                $ok = [bool](Invoke-WinUtilConfig -ConfigUrl "$BaseUrl/winutil-brave-debloat.json" -Label "Brave debloat" -NoPause)
+                $ok = [bool](Invoke-BraveOptimize -NoPause)
+            }
+            "brave-optimize" {
+                $ok = [bool](Invoke-BraveOptimize -NoPause)
             }
             "betterzen" {
-                $ok = [bool](Invoke-BetterZen -NoPause)
+                $ok = [bool](Invoke-BetterZen -EnsureProfile -NoPause)
             }
             "tasks" {
                 $ok = [bool](Register-AllScheduledTasks -NoPause)
@@ -1060,7 +1338,7 @@ do {
             "7" { Open-WinUtilMenu }
             "8" { Open-ScheduledTasksMenu }
             "9" { Open-GpuMenu }
-            "10" { Invoke-GameModeKill }
+            "10" { Open-GameModeSetupMenu }
             "11" { Open-GameModeSetupMenu }
             "0" { exit 0 }
             default {

@@ -28,31 +28,40 @@ else {
 }
 
 Write-Host "`n=== MODE JEU - fermeture processus lourds ===" -ForegroundColor Red
-Write-Host "(Liste générique : dev / IA / 3D / vidéo / sync - comm protégée)" -ForegroundColor DarkGray
+Write-Host "(Liste generique : dev / IA / sync / Bitwarden - Discord/Legcord proteges)" -ForegroundColor DarkGray
+Write-Host "Launchers : familles (EA/Steam/...) - session active jamais tuee." -ForegroundColor DarkGray
+
+Ensure-UltimatePerformanceActive | Out-Null
 
 $cfg = Get-GameModeKillConfig
 $result = Stop-GameModeKillListProcesses -KillNames $cfg.KillNames -ProtectNames $cfg.ProtectNames
-$idle = Stop-IdleGamingLaunchers -LauncherNames $cfg.GamingLauncherNames
+$idle = Stop-IdleGamingLaunchers -LauncherNames $cfg.GamingLauncherNames -LauncherFamilies $cfg.GamingLauncherFamilies
 
 if ($result.Killed.Count -gt 0) {
-    Write-Host "`nFermés ($($result.Killed.Count)) :" -ForegroundColor Green
+    Write-Host "`nFermes ($($result.Killed.Count)) :" -ForegroundColor Green
     $result.Killed | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
 }
 else {
-    Write-Host "`nAucun process de la liste n'était ouvert." -ForegroundColor Yellow
+    Write-Host "`nAucun process de la liste n'etait ouvert." -ForegroundColor Yellow
 }
 if ($result.Skipped.Count -gt 0) {
-    Write-Host "Ignorés :" -ForegroundColor DarkYellow
+    Write-Host "Ignores :" -ForegroundColor DarkYellow
     $result.Skipped | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
 }
-if ($idle.Killed.Count -gt 0) {
-    Write-Host "`nLaunchers gaming inactifs fermés ($($idle.Killed.Count)) :" -ForegroundColor Green
-    $idle.Killed | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
-    if ($idle.Kept.Count -gt 0) {
-        Write-Host "Launcher conservé : $($idle.Kept -join ', ')" -ForegroundColor DarkCyan
+if ($idle.Notes) {
+    foreach ($n in $idle.Notes) {
+        Write-Host "  $n" -ForegroundColor DarkCyan
     }
+}
+if ($idle.Killed.Count -gt 0) {
+    Write-Host "`nLaunchers idle fermes ($($idle.Killed.Count)) :" -ForegroundColor Green
+    $idle.Killed | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
+}
+if ($idle.Kept.Count -gt 0) {
+    Write-Host "Launchers conserves :" -ForegroundColor DarkCyan
+    $idle.Kept | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
 }
 
 if ($env:FRESH_WIN_NO_PAUSE -ne '1') {
-    Read-Host "`nEntrée pour fermer"
+    Read-Host "`nEntree pour fermer"
 }

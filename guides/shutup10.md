@@ -20,6 +20,7 @@ ooshutup10.exe shutup10-recommended.cfg /quiet /nosrp /lang:fr
 ```
 
 ## Dans ce toolbox
-1. Après install standard, le launcher tente l’import quiet du cfg GitHub.
-2. Menu **7 → 6** : même logique / GUI si besoin.
-3. Tâche hebdo maintenance : WinUtil + ShutUp10 quiet (pas de GUI).
+1. ShutUp10 vient de **winget** (`OO-Software.ShutUp10`) — pas de portable O&O séparé.
+2. Après install standard, le launcher tente l’import quiet du cfg GitHub.
+3. Menu **7 → 2** : même logique / GUI si besoin.
+4. Tâche hebdo maintenance : WinUtil + ShutUp10 quiet (pas de GUI).

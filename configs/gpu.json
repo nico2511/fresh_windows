@@ -2,7 +2,23 @@
   "amd": {
     "downloadUrl": "https://drivers.amd.com/drivers/installer/26.10/whql/amd-software-adrenalin-edition-26.8.1-minimalsetup-260818_web.exe",
     "driversPage": "https://www.amd.com/en/support/download/drivers.html",
-    "guideUrl": "https://github.com/nico2511/fresh_windows/blob/main/guides/amd-adrenalin.md"
+    "guideUrl": "https://github.com/nico2511/fresh_windows/blob/main/guides/amd-adrenalin.md",
+    "ryzenMasterPage": "https://www.amd.com/en/products/software/ryzen-master.html",
+    "ryzenMaster": {
+      "defaultUrl": "https://download.amd.com/desktop/amd-ryzen-master.exe",
+      "byCpuPattern": [
+        {
+          "match": "Ryzen (9 )?9[0-9]{3}|Ryzen AI|Ryzen [57] [29][0-9]{3}",
+          "label": "Zen 4 / Zen 5 / AI (recent)",
+          "url": "https://download.amd.com/desktop/amd-ryzen-master.exe"
+        },
+        {
+          "match": "Ryzen [3579] [123][0-9]{3}",
+          "label": "Zen 2 / Zen 3",
+          "url": "https://download.amd.com/desktop/amd-ryzen-master.exe"
+        }
+      ]
+    }
   },
   "nvidia": {
     "driversPage": "https://www.nvidia.com/Download/index.aspx",

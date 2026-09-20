@@ -43,19 +43,19 @@ function Get-ShutUp10Exe {
     $exe = Find-ShutUp10Executable
     if ($exe) { return $exe }
 
-    # Fallback : portable officiel (comme WinUtil)
-    $destDir = Join-Path $env:LOCALAPPDATA "winutil"
-    $dest = Join-Path $destDir "ooshutup10.exe"
-    New-Item -ItemType Directory -Path $destDir -Force | Out-Null
-    Write-Host "  -> Telechargement OO ShutUp10 (portable)..." -ForegroundColor Gray
+    # Preferer winget (apps standard) plutot qu'un portable O&O separe
+    Write-Host "  -> Installation OO ShutUp10 via winget..." -ForegroundColor Gray
     try {
-        # URL winget / package O&O (version flottante via page produit si besoin)
-        $url = "https://dl5.oo-software.com/files/ooshutup10/OOSU10.exe"
-        Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
-        if (Test-Path -LiteralPath $dest) { return $dest }
+        winget install -e --id OO-Software.ShutUp10 --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
+        if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189) {
+            Start-Sleep -Seconds 1
+            $exe = Find-ShutUp10Executable
+            if ($exe) { return $exe }
+        }
+        Write-Host "    winget OK mais exe introuvable (PATH / packages)." -ForegroundColor DarkYellow
     }
     catch {
-        Write-Host "    Échec download ShutUp10 : $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "    Echec winget ShutUp10 : $($_.Exception.Message)" -ForegroundColor Red
     }
     return $null
 }
@@ -305,27 +305,39 @@ function Invoke-WinUtilPreferences {
 }
 
 function Enable-UltimatePerformance {
+    Ensure-UltimatePerformanceActive
+}
+
+function Ensure-UltimatePerformanceActive {
+    <#
+      Active le plan Ultimate Performance s'il existe ; ne duplicate que s'il manque.
+    #>
     Write-Host "  → Ultimate Performance (power plan)" -ForegroundColor Gray
+    $list = powercfg /list 2>&1 | Out-String
+    $active = [regex]::Match($list, '(?i)\*\s*([A-Fa-f0-9-]{36}).*Ultimate Performance')
+    if ($active.Success) {
+        Write-Host "    Plan Ultimate déjà actif." -ForegroundColor DarkGray
+        return $true
+    }
+    $existing = [regex]::Match($list, '(?i)([A-Fa-f0-9-]{36}).*Ultimate Performance')
+    if ($existing.Success) {
+        powercfg /setactive $existing.Groups[1].Value | Out-Null
+        Write-Host "    Plan Ultimate activé." -ForegroundColor DarkGray
+        return $true
+    }
+
     $schemeGuid = "e9a42b02-d5df-448d-aa00-03f14749eb61"
     $dup = powercfg /duplicatescheme $schemeGuid 2>&1 | Out-String
     $match = [regex]::Match($dup, '[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}')
     if ($match.Success) {
         powercfg /setactive $match.Value | Out-Null
-        Write-Host "    Plan activé : $($match.Value)" -ForegroundColor DarkGray
+        Write-Host "    Plan créé et activé : $($match.Value)" -ForegroundColor DarkGray
+        return $true
     }
-    else {
-        # Déjà présent : activer s'il existe dans la liste
-        $list = powercfg /list 2>&1 | Out-String
-        $existing = [regex]::Match($list, '(?i)([A-Fa-f0-9-]{36}).*Ultimate Performance')
-        if ($existing.Success) {
-            powercfg /setactive $existing.Groups[1].Value | Out-Null
-            Write-Host "    Plan Ultimate déjà présent, activé." -ForegroundColor DarkGray
-        }
-        else {
-            Write-Host "    Impossible d'activer Ultimate Performance." -ForegroundColor Red
-            Write-Host "    $dup" -ForegroundColor DarkRed
-        }
-    }
+
+    Write-Host "    Impossible d'activer Ultimate Performance." -ForegroundColor Red
+    Write-Host "    $dup" -ForegroundColor DarkRed
+    return $false
 }
 
 function Invoke-WinUtilOneClick {
@@ -413,34 +425,51 @@ function Invoke-WinUtilPreset {
 function Open-WinUtilMenu {
     do {
         Clear-Host
-        Write-Host "=== WINUTIL ===" -ForegroundColor Cyan
-        Write-Host "Calibrage Windows via WinUtil (Chris Titus)." -ForegroundColor DarkGray
+        Write-Host "=== TWEAKS WINDOWS ===" -ForegroundColor Cyan
+        Write-Host "WinUtil (Chris Titus) + O&O ShutUp10." -ForegroundColor DarkGray
         Write-Host ""
-        Write-Host "1. PROFIL ONE-CLICK  ★" -ForegroundColor Green
-        Write-Host "   Standard + AppX bloat + Dark/Game Mode + Hyper-V + Ultimate Perf" -ForegroundColor DarkGreen
+        Write-Host "1. PROFIL ONE-CLICK  *" -ForegroundColor Green
+        Write-Host "   Tweaks + AppX + prefs + Ultimate Perf" -ForegroundColor DarkGreen
         Write-Host ""
-        Write-Host "2. Preset Standard (WinUtil)" -ForegroundColor Yellow
-        Write-Host "3. Preset Minimal (WinUtil)" -ForegroundColor Yellow
-        Write-Host "4. Preset Advanced (WinUtil)" -ForegroundColor Magenta
-        Write-Host "5. AppX bloat - retire les apps safe (via -Config)" -ForegroundColor DarkYellow
-        Write-Host "6. OO ShutUp10 - profil recommande (GUI / cfg)" -ForegroundColor White
-        Write-Host "7. Ouvrir WinUtil (interface graphique)" -ForegroundColor Gray
-        Write-Host "8. Retour" -ForegroundColor DarkGray
+        Write-Host "2. OO ShutUp10 - profil recommande" -ForegroundColor White
+        Write-Host "3. Ouvrir WinUtil (GUI)" -ForegroundColor Gray
+        Write-Host "4. Presets WinUtil (Standard / Minimal / Advanced)" -ForegroundColor Magenta
+        Write-Host "5. Retour" -ForegroundColor DarkGray
         Write-Host ""
         $c = Read-Host "Choix"
 
         switch ($c) {
             "1" { Invoke-WinUtilOneClick }
-            "2" { Invoke-WinUtilPreset -Preset Standard }
-            "3" { Invoke-WinUtilPreset -Preset Minimal }
-            "4" { Invoke-WinUtilPreset -Preset Advanced }
-            "5" { Invoke-WinUtilConfig -ConfigUrl "$BaseUrl/winutil-appx.json" -Label "AppX bloat" }
-            "6" { Invoke-ShutUp10Recommended -LaunchGui }
-            "7" {
+            "2" { Invoke-ShutUp10Recommended -LaunchGui }
+            "3" {
                 Write-Host "Lancement de WinUtil (GUI)..." -ForegroundColor Yellow
                 irm "https://christitus.com/win" | iex
             }
-            "8" { return }
+            "4" { Open-WinUtilPresetsMenu }
+            "5" { return }
+            default {
+                Write-Host "Choix invalide" -ForegroundColor Red
+                Start-Sleep 1
+            }
+        }
+    } while ($true)
+}
+
+function Open-WinUtilPresetsMenu {
+    do {
+        Clear-Host
+        Write-Host "=== PRESETS WINUTIL ===" -ForegroundColor Magenta
+        Write-Host "1. Standard" -ForegroundColor Yellow
+        Write-Host "2. Minimal" -ForegroundColor Yellow
+        Write-Host "3. Advanced" -ForegroundColor Magenta
+        Write-Host "4. Retour" -ForegroundColor DarkGray
+        Write-Host ""
+        $c = Read-Host "Choix"
+        switch ($c) {
+            "1" { Invoke-WinUtilPreset -Preset Standard }
+            "2" { Invoke-WinUtilPreset -Preset Minimal }
+            "3" { Invoke-WinUtilPreset -Preset Advanced }
+            "4" { return }
             default {
                 Write-Host "Choix invalide" -ForegroundColor Red
                 Start-Sleep 1

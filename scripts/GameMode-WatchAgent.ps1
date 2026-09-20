@@ -31,6 +31,18 @@ if ([Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
     exit 0
 }
 
+# Une seule instance agent (evite double icone systray)
+try {
+    $script:WatchMutex = New-Object System.Threading.Mutex($false, 'Global\FreshWindows-WatchAgent')
+    if (-not $script:WatchMutex.WaitOne(0, $false)) {
+        Write-WatchLog 'Autre instance deja active - exit'
+        exit 0
+    }
+}
+catch {
+    Write-WatchLog ("Mutex ignore : {0}" -f $_.Exception.Message)
+}
+
 function Hide-WatchConsole {
     try {
         Add-Type -TypeDefinition @'
@@ -310,12 +322,13 @@ function Invoke-WatchTick {
 
 function Invoke-GameModeKillNow {
     try {
+        Ensure-UltimatePerformanceActive | Out-Null
         $cfg = Get-GameModeKillConfig
         $r = Stop-GameModeKillListProcesses -KillNames $cfg.KillNames -ProtectNames $cfg.ProtectNames
-        $idle = Stop-IdleGamingLaunchers -LauncherNames $cfg.GamingLauncherNames
+        $idle = Stop-IdleGamingLaunchers -LauncherNames $cfg.GamingLauncherNames -LauncherFamilies $cfg.GamingLauncherFamilies
         $n = $r.Killed.Count + $idle.Killed.Count
-        $extra = if ($idle.Kept.Count) { " Launcher actif : $($idle.Kept[0])." } else { '' }
-        Show-Balloon -Title 'Mode jeu' -Text ("$n processus fermes (liste + launchers inactifs).$extra") -Icon Info
+        $extra = if ($idle.Kept.Count) { " Gardes : $($idle.Kept[0])." } else { '' }
+        Show-Balloon -Title 'Mode jeu' -Text ("$n processus fermes.$extra") -Icon Info
     }
     catch {
         Show-Balloon -Title 'Mode jeu' -Text $_.Exception.Message -Icon Error
@@ -325,13 +338,14 @@ function Invoke-GameModeKillNow {
 function Invoke-IdleLaunchersOnly {
     try {
         $cfg = Get-GameModeKillConfig
-        $idle = Stop-IdleGamingLaunchers -LauncherNames $cfg.GamingLauncherNames
+        $idle = Stop-IdleGamingLaunchers -LauncherNames $cfg.GamingLauncherNames -LauncherFamilies $cfg.GamingLauncherFamilies
         if ($idle.Killed.Count -eq 0) {
-            Show-Balloon -Title 'Launchers' -Text 'Aucun launcher gaming superflu ouvert.' -Icon Info
+            $msg = if ($idle.Notes -and $idle.Notes.Count) { $idle.Notes[0] } else { 'Aucun launcher gaming superflu ouvert.' }
+            Show-Balloon -Title 'Launchers' -Text $msg -Icon Info
         }
         else {
             Show-Balloon -Title 'Launchers' -Text (
-                "Fermés : $($idle.Killed.Count). Gardé : $($idle.Kept -join ', ')"
+                "Fermes : $($idle.Killed.Count). Gardes : $($idle.Kept -join ', ')"
             ) -Icon Info
         }
     }

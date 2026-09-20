@@ -1,0 +1,23 @@
+{
+  "comment": "Policies Brave curatees Fresh Windows. Sync et Tor restent actifs. Undo via menu Navigateurs.",
+  "registryPath": "HKLM:\\SOFTWARE\\Policies\\BraveSoftware\\Brave",
+  "disable": {
+    "BraveRewardsDisabled": 1,
+    "BraveWalletDisabled": 1,
+    "BraveVPNDisabled": 1,
+    "BraveAIChatEnabled": 0,
+    "BraveNewsDisabled": 1,
+    "BraveTalkDisabled": 1,
+    "BraveP3AEnabled": 0,
+    "BraveStatsPingEnabled": 0,
+    "MetricsReportingEnabled": 0,
+    "UrlKeyedAnonymizedDataCollectionEnabled": 0,
+    "SafeBrowsingExtendedReportingEnabled": 0
+  },
+  "keepEnabledNote": [
+    "Shields (defaut Brave)",
+    "Sync (pas de SyncDisabled)",
+    "Tor (pas de TorDisabled)",
+    "Password manager Brave (pas force)"
+  ]
+}

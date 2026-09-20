@@ -16,7 +16,7 @@
   "AppWork.JDownloader",
   "Brother.iPrintScan",
   "REALiX.HWiNFO",
-  "MartiCliment.UniGetUI",
+  "Devolutions.UniGetUI",
   "WireGuard.WireGuard",
   "WinSCP.WinSCP",
   "Martchus.syncthingtray",
@@ -25,12 +25,21 @@
   "StirlingTools.StirlingPDF",
   "Wagnardsoft.DisplayDriverUninstaller",
   "OO-Software.ShutUp10",
-
+  "Syncthing.Syncthing",
   {
     "name": "CyberScribe",
     "url": "https://github.com/nico2511/CyberScribe/releases/latest/download/CyberScribe.exe",
     "destDir": "%LOCALAPPDATA%\\Programs\\CyberScribe",
     "fileName": "CyberScribe.exe",
+    "shortcut": true
+  },
+  {
+    "name": "CyberScribeNote",
+    "url": "https://github.com/nico2511/CyberScribeNote/releases/latest/download/CyberScribeNote-win.zip",
+    "destDir": "%LOCALAPPDATA%\\Programs\\CyberScribeNote",
+    "fileName": "CyberScribeNote-win.zip",
+    "archive": true,
+    "shortcutExe": "CyberScribeNote.exe",
     "shortcut": true
   }
 ]
