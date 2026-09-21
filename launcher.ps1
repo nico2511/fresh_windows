@@ -5,7 +5,7 @@
 #
 #  Modes non interactifs :
 #    $env:FRESH_WIN_MODE='full'; irm ... | iex
-#    Apps : standard | gaming | dev | full
+#    Apps : standard | gaming | dev | custom | custom:<nom> | full
 #    WinUtil : winutil-oneclick | winutil-standard | winutil-minimal |
 #              winutil-advanced | winutil-appx | maintenance
 #    Autre : tasks | game-mode | game-mode-shortcuts | game-mode-watch |
@@ -34,17 +34,19 @@ try {
         [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 } catch { }
 
-# Source unique : listes JSON sur GitHub (pas de configs locales)
-$RepoRawRoot = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef"
-$RepoBlobRoot = "https://github.com/nico2511/fresh_windows/blob/$RepoRef"
+# Configs : builtins sur GitHub + paquets custom (repo et/ou AppData local)
+$RepoSlug = "nico2511/fresh_windows"
+$RepoRawRoot = "https://raw.githubusercontent.com/$RepoSlug/$RepoRef"
+$RepoBlobRoot = "https://github.com/$RepoSlug/blob/$RepoRef"
 $BaseUrl = "$RepoRawRoot/configs"
 $GuidesBaseUrl = "$RepoBlobRoot/guides"
 $LauncherUrl = "$RepoRawRoot/launcher.ps1"
 $IconUrl = "$RepoRawRoot/assets/fresh-windows.ico"
 $FreshAppData = Join-Path $env:LOCALAPPDATA "FreshWindows"
+$CustomAppsLocalDir = Join-Path $FreshAppData "apps-custom"
 $script:FreshBrand = "Fresh Windows"
 # Incrémenter quand les libs changent alors que FRESH_WIN_REF reste "main" (sinon cache périmé)
-$script:FreshWindowsLibEpoch = 17
+$script:FreshWindowsLibEpoch = 18
 
 function ConvertTo-Utf8BomFile {
     param([Parameter(Mandatory)][string]$Path)
@@ -271,17 +273,30 @@ function Install-FullSetup {
 }
 
 function Get-Config {
-    param([string]$FileName)
+    param(
+        [string]$FileName,
+        [string]$LocalPath
+    )
     try {
-        $url  = "$BaseUrl/$FileName"
-        $json = Invoke-RestMethod -Uri $url -UseBasicParsing
+        if ($LocalPath) {
+            if (-not (Test-Path -LiteralPath $LocalPath)) {
+                throw "Fichier local introuvable : $LocalPath"
+            }
+            $raw = Get-Content -LiteralPath $LocalPath -Raw -Encoding UTF8
+            $json = $raw | ConvertFrom-Json
+        }
+        else {
+            $url  = "$BaseUrl/$FileName"
+            $json = Invoke-RestMethod -Uri $url -UseBasicParsing
+        }
         if ($null -eq $json) {
             throw "Config vide ou invalide."
         }
         return @($json)
     }
     catch {
-        Write-Host "Erreur lors du téléchargement de $FileName" -ForegroundColor Red
+        $label = if ($LocalPath) { $LocalPath } else { $FileName }
+        Write-Host "Erreur lors du chargement de $label" -ForegroundColor Red
         Write-Host $_.Exception.Message -ForegroundColor DarkRed
         return $null
     }
@@ -542,10 +557,15 @@ function Apply-PowerToysProfile {
 function Install-FromJson {
     param(
         [string]$FileName,
+        [string]$LocalPath,
         [string]$Category,
         [switch]$NoPause
     )
-    $apps = Get-Config -FileName $FileName
+    $apps = if ($LocalPath) {
+        Get-Config -LocalPath $LocalPath
+    } else {
+        Get-Config -FileName $FileName
+    }
     if (-not $apps) {
         if (-not $NoPause) { Wait-ForUser }
         return $false
@@ -586,6 +606,228 @@ function Install-FromJson {
 
     if (-not $NoPause) { Wait-ForUser }
     return ($failed.Count -eq 0)
+}
+
+function Get-CustomAppsRepoDir {
+    if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { return $null }
+    $dir = Join-Path $PSScriptRoot 'configs/apps-custom'
+    if (Test-Path -LiteralPath $dir) { return $dir }
+    return $null
+}
+
+function Add-CustomAppPackCandidate {
+    param(
+        [Parameter(Mandatory)]$PackMap,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][ValidateSet('local', 'repo', 'github')][string]$Source,
+        [string]$LocalPath,
+        [string]$RemoteFileName
+    )
+
+    $key = $Name.ToLowerInvariant()
+    if ($PackMap.ContainsKey($key)) {
+        # Priorité : local AppData > clone repo > GitHub
+        $rank = @{ local = 3; repo = 2; github = 1 }
+        $existing = $PackMap[$key]
+        if ($rank[$Source] -le $rank[$existing.Source]) { return }
+    }
+
+    $PackMap[$key] = [pscustomobject]@{
+        Name           = $Name
+        Source         = $Source
+        LocalPath      = $LocalPath
+        RemoteFileName = $RemoteFileName
+    }
+}
+
+function Get-CustomAppPacks {
+    $map = @{}
+
+    New-Item -ItemType Directory -Path $CustomAppsLocalDir -Force | Out-Null
+    Get-ChildItem -LiteralPath $CustomAppsLocalDir -Filter '*.json' -File -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            Add-CustomAppPackCandidate -PackMap $map -Name $_.BaseName -Source local -LocalPath $_.FullName
+        }
+
+    $repoDir = Get-CustomAppsRepoDir
+    if ($repoDir) {
+        Get-ChildItem -LiteralPath $repoDir -Filter '*.json' -File -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                Add-CustomAppPackCandidate -PackMap $map -Name $_.BaseName -Source repo -LocalPath $_.FullName
+            }
+    }
+
+    try {
+        $apiUrl = "https://api.github.com/repos/$RepoSlug/contents/configs/apps-custom?ref=$([uri]::EscapeDataString($RepoRef))"
+        $headers = @{
+            'User-Agent' = 'FreshWindows'
+            'Accept'     = 'application/vnd.github+json'
+        }
+        $remote = Invoke-RestMethod -Uri $apiUrl -Headers $headers -UseBasicParsing
+        foreach ($item in @($remote)) {
+            if ($item.type -ne 'file') { continue }
+            $fileName = [string]$item.name
+            if ($fileName -notmatch '\.json$') { continue }
+            $packName = [IO.Path]::GetFileNameWithoutExtension($fileName)
+            Add-CustomAppPackCandidate `
+                -PackMap $map `
+                -Name $packName `
+                -Source github `
+                -RemoteFileName ("apps-custom/{0}" -f $fileName)
+        }
+    }
+    catch {
+        Write-Host "Liste GitHub apps-custom indisponible : $($_.Exception.Message)" -ForegroundColor DarkYellow
+    }
+
+    return @($map.Values | Sort-Object Name)
+}
+
+function Install-CustomAppPack {
+    param(
+        [Parameter(Mandatory)]$Pack,
+        [switch]$NoPause
+    )
+
+    $category = "Custom: $($Pack.Name)"
+    if ($Pack.LocalPath) {
+        return [bool](Install-FromJson -LocalPath $Pack.LocalPath -Category $category -NoPause:$NoPause)
+    }
+    if ($Pack.RemoteFileName) {
+        return [bool](Install-FromJson -FileName $Pack.RemoteFileName -Category $category -NoPause:$NoPause)
+    }
+    Write-Host "Paquet custom invalide : $($Pack.Name)" -ForegroundColor Red
+    if (-not $NoPause) { Wait-ForUser }
+    return $false
+}
+
+function Install-AllCustomAppPacks {
+    param([switch]$NoPause)
+
+    $packs = @(Get-CustomAppPacks)
+    if ($packs.Count -eq 0) {
+        Write-Host "Aucun paquet custom trouvé." -ForegroundColor Yellow
+        Write-Host "  Repo  : configs/apps-custom/*.json" -ForegroundColor DarkGray
+        Write-Host "  Local : $CustomAppsLocalDir" -ForegroundColor DarkGray
+        Write-Host "  IDs   : https://winstall.app" -ForegroundColor DarkGray
+        if (-not $NoPause) { Wait-ForUser }
+        return $false
+    }
+
+    $ok = $true
+    foreach ($pack in $packs) {
+        if (-not (Install-CustomAppPack -Pack $pack -NoPause)) {
+            $ok = $false
+        }
+    }
+    if (-not $NoPause) { Wait-ForUser }
+    return $ok
+}
+
+function Install-CustomAppPackByName {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [switch]$NoPause
+    )
+
+    $packs = @(Get-CustomAppPacks)
+    $match = $packs | Where-Object { $_.Name -eq $Name } | Select-Object -First 1
+    if (-not $match) {
+        $match = $packs | Where-Object { $_.Name -eq $Name -or $_.Name.ToLowerInvariant() -eq $Name.ToLowerInvariant() } |
+            Select-Object -First 1
+    }
+    if (-not $match) {
+        Write-Host "Paquet custom introuvable : $Name" -ForegroundColor Red
+        if ($packs.Count -gt 0) {
+            Write-Host ("Disponibles : {0}" -f (($packs | ForEach-Object { $_.Name }) -join ', ')) -ForegroundColor DarkGray
+        }
+        if (-not $NoPause) { Wait-ForUser }
+        return $false
+    }
+    return (Install-CustomAppPack -Pack $match -NoPause:$NoPause)
+}
+
+function Open-CustomAppsMenu {
+    do {
+        Clear-Host
+        Write-Host "=== APPS CUSTOM ===" -ForegroundColor Cyan
+        Write-Host "Dossier local : $CustomAppsLocalDir" -ForegroundColor DarkGray
+        Write-Host "IDs winget    : https://winstall.app" -ForegroundColor DarkGray
+        Write-Host ""
+
+        $packs = @(Get-CustomAppPacks)
+        if ($packs.Count -eq 0) {
+            Write-Host "Aucun fichier *.json détecté." -ForegroundColor Yellow
+            Write-Host "Ajoute un paquet dans configs/apps-custom/ (fork) ou dans le dossier local." -ForegroundColor DarkGray
+            Write-Host ""
+            Write-Host "1. Ouvrir le dossier local" -ForegroundColor Yellow
+            Write-Host "2. Ouvrir winstall.app" -ForegroundColor White
+            Write-Host "3. Retour" -ForegroundColor Gray
+            $c = Read-Host "Choix"
+            switch ($c) {
+                "1" {
+                    New-Item -ItemType Directory -Path $CustomAppsLocalDir -Force | Out-Null
+                    Start-Process explorer.exe $CustomAppsLocalDir
+                }
+                "2" { Start-Process "https://winstall.app" }
+                "3" { return }
+                default {
+                    Write-Host "Choix invalide" -ForegroundColor Red
+                    Start-Sleep 1
+                }
+            }
+            continue
+        }
+
+        $i = 1
+        foreach ($pack in $packs) {
+            $srcLabel = switch ($pack.Source) {
+                'local'  { 'local' }
+                'repo'   { 'repo' }
+                'github' { 'github' }
+                default  { $pack.Source }
+            }
+            Write-Host (" {0,2}  {1}  [{2}]" -f $i, $pack.Name, $srcLabel) -ForegroundColor Green
+            $i++
+        }
+        Write-Host (" {0,2}  Installer tous les paquets custom" -f $i) -ForegroundColor Cyan
+        $allChoice = $i
+        $i++
+        Write-Host (" {0,2}  Ouvrir le dossier local" -f $i) -ForegroundColor Yellow
+        $openDirChoice = $i
+        $i++
+        Write-Host (" {0,2}  Ouvrir winstall.app" -f $i) -ForegroundColor White
+        $winstallChoice = $i
+        $i++
+        Write-Host (" {0,2}  Retour" -f $i) -ForegroundColor Gray
+        $backChoice = $i
+        Write-Host ""
+        $c = Read-Host "Choix"
+
+        if ($c -match '^\d+$') {
+            $n = [int]$c
+            if ($n -ge 1 -and $n -le $packs.Count) {
+                Install-CustomAppPack -Pack $packs[$n - 1] | Out-Null
+                continue
+            }
+            if ($n -eq $allChoice) {
+                Install-AllCustomAppPacks | Out-Null
+                continue
+            }
+            if ($n -eq $openDirChoice) {
+                New-Item -ItemType Directory -Path $CustomAppsLocalDir -Force | Out-Null
+                Start-Process explorer.exe $CustomAppsLocalDir
+                continue
+            }
+            if ($n -eq $winstallChoice) {
+                Start-Process "https://winstall.app"
+                continue
+            }
+            if ($n -eq $backChoice) { return }
+        }
+        Write-Host "Choix invalide" -ForegroundColor Red
+        Start-Sleep 1
+    } while ($true)
 }
 
 function Disable-EverythingAutostart {
@@ -961,21 +1203,22 @@ function Show-Menu {
     Write-Host ("Windows : {0} ({1})" -f $info.Edition, $info.DisplayVersion) -ForegroundColor DarkGray
     Write-Host ("Profil  : {0}" -f $info.ProfilePath) -ForegroundColor DarkGray
     Write-Host ("Ref     : {0}" -f $RepoRef) -ForegroundColor DarkGray
-    Write-Host "Apres formatage : 4 → 7 → 8 → 10" -ForegroundColor DarkGray
+    Write-Host "Apres formatage : 5 → 8 → 9 → 11" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "--- Installer ---" -ForegroundColor DarkCyan
     Write-Host " 1  Apps standard" -ForegroundColor Green
     Write-Host " 2  Apps gaming" -ForegroundColor Magenta
     Write-Host " 3  Apps dev" -ForegroundColor Blue
-    Write-Host " 4  Full setup (1+2+3)" -ForegroundColor Cyan
+    Write-Host " 4  Apps custom (auto-detect)" -ForegroundColor DarkYellow
+    Write-Host " 5  Full setup (1+2+3)" -ForegroundColor Cyan
     Write-Host "--- Configurer ---" -ForegroundColor DarkCyan
-    Write-Host " 5  Navigateurs (extensions + profil Brave)" -ForegroundColor Yellow
-    Write-Host " 6  Winget upgrade --all" -ForegroundColor White
-    Write-Host " 7  Tweaks Windows (one-click, ShutUp10, presets)" -ForegroundColor Gray
-    Write-Host " 8  Taches planifiees (MAJ + maintenance + sync scripts)" -ForegroundColor DarkCyan
-    Write-Host " 9  GPU (AMD Adrenalin / Ryzen Master / NVIDIA)" -ForegroundColor DarkYellow
+    Write-Host " 6  Navigateurs (extensions + profil Brave)" -ForegroundColor Yellow
+    Write-Host " 7  Winget upgrade --all" -ForegroundColor White
+    Write-Host " 8  Tweaks Windows (one-click, ShutUp10, presets)" -ForegroundColor Gray
+    Write-Host " 9  Taches planifiees (MAJ + maintenance + sync scripts)" -ForegroundColor DarkCyan
+    Write-Host "10  GPU (AMD Adrenalin / Ryzen Master / NVIDIA)" -ForegroundColor DarkYellow
     Write-Host "--- Mode jeu ---" -ForegroundColor DarkCyan
-    Write-Host "10  Mode jeu (lancer / raccourci / agent)" -ForegroundColor Red
+    Write-Host "11  Mode jeu (lancer / raccourci / agent)" -ForegroundColor Red
     Write-Host " 0  Quitter" -ForegroundColor DarkGray
     Write-Host ""
 }
@@ -1031,7 +1274,7 @@ function Invoke-GameModeKill {
         $idle.Kept | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
     }
 
-    Write-Host "`nAstuce : menu 10 → raccourci Bureau / agent barre des taches." -ForegroundColor DarkCyan
+    Write-Host "`nAstuce : menu 11 → raccourci Bureau / agent barre des taches." -ForegroundColor DarkCyan
     if (-not $NoPause) { Wait-ForUser }
     return ($result.Skipped.Count -eq 0)
 }
@@ -1187,6 +1430,15 @@ function Invoke-SilentMode {
     $ok = $true
 
     try {
+        if ($InstallMode -like 'custom:*') {
+            $packName = $InstallMode.Substring(7).Trim()
+            if ([string]::IsNullOrWhiteSpace($packName)) {
+                Write-Host "Mode custom: : nom de paquet manquant." -ForegroundColor Red
+                exit 1
+            }
+            $ok = [bool](Install-CustomAppPackByName -Name $packName -NoPause)
+        }
+        else {
         switch ($InstallMode) {
             "standard" {
                 $ok = [bool](Install-FromJson -FileName "apps-standard.json" -Category "Standard" -NoPause)
@@ -1196,6 +1448,9 @@ function Invoke-SilentMode {
             }
             "dev" {
                 $ok = [bool](Install-FromJson -FileName "apps-dev.json" -Category "Dev" -NoPause)
+            }
+            "custom" {
+                $ok = [bool](Install-AllCustomAppPacks -NoPause)
             }
             "full" {
                 $ok = [bool](Install-FullSetup -NoPause)
@@ -1252,6 +1507,7 @@ function Invoke-SilentMode {
                 Write-Host "Mode inconnu : $InstallMode" -ForegroundColor Red
                 exit 1
             }
+        }
         }
     }
     catch {
@@ -1332,13 +1588,13 @@ do {
             "1" { Install-FromJson -FileName "apps-standard.json" -Category "Standard" | Out-Null }
             "2" { Install-FromJson -FileName "apps-gaming.json" -Category "Gaming" | Out-Null }
             "3" { Install-FromJson -FileName "apps-dev.json" -Category "Dev" | Out-Null }
-            "4" { Install-FullSetup | Out-Null }
-            "5" { Open-Extensions }
-            "6" { Invoke-WingetUpgradeAll | Out-Null }
-            "7" { Open-WinUtilMenu }
-            "8" { Open-ScheduledTasksMenu }
-            "9" { Open-GpuMenu }
-            "10" { Open-GameModeSetupMenu }
+            "4" { Open-CustomAppsMenu }
+            "5" { Install-FullSetup | Out-Null }
+            "6" { Open-Extensions }
+            "7" { Invoke-WingetUpgradeAll | Out-Null }
+            "8" { Open-WinUtilMenu }
+            "9" { Open-ScheduledTasksMenu }
+            "10" { Open-GpuMenu }
             "11" { Open-GameModeSetupMenu }
             "0" { exit 0 }
             default {

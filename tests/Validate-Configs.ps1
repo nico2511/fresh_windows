@@ -80,6 +80,43 @@ foreach ($appsFile in @('apps-standard.json', 'apps-gaming.json', 'apps-dev.json
     Ok ("{0} ({1} entrees) structure OK" -f $appsFile, $i)
 }
 
+$customDir = Join-Path $configs 'apps-custom'
+if (-not (Test-Path -LiteralPath $customDir)) {
+    Fail 'apps-custom/ manquant'
+}
+else {
+    Ok 'apps-custom/ present'
+    Get-ChildItem -LiteralPath $customDir -Filter '*.json' -File -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            $appsFile = "apps-custom/$($_.Name)"
+            try {
+                $items = Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+            }
+            catch {
+                Fail ("{0} JSON invalide : {1}" -f $appsFile, $_.Exception.Message)
+                return
+            }
+            $i = 0
+            foreach ($item in @($items)) {
+                $i++
+                if ($item -is [string]) {
+                    if ([string]::IsNullOrWhiteSpace($item)) {
+                        Fail ("{0}[{1}] : id winget vide" -f $appsFile, $i)
+                    }
+                }
+                elseif ($item.url) {
+                    if ([string]::IsNullOrWhiteSpace([string]$item.url)) {
+                        Fail ("{0}[{1}] : objet sans url" -f $appsFile, $i)
+                    }
+                }
+                else {
+                    Fail ("{0}[{1}] : ni string ni objet .url" -f $appsFile, $i)
+                }
+            }
+            Ok ("{0} ({1} entrees) structure OK" -f $appsFile, $i)
+        }
+}
+
 $ptPath = Join-Path $configs 'powertoys-profile.json'
 if (Test-Path -LiteralPath $ptPath) {
     $pt = Get-Content -LiteralPath $ptPath -Raw -Encoding UTF8 | ConvertFrom-Json

@@ -83,7 +83,7 @@ function Start-FreshWindowsUnelevated {
 
     $cmdPath = Join-Path $WorkingDirectory 'Start-WatchAgent.cmd'
     if (-not (Test-Path -LiteralPath $cmdPath)) {
-        throw "Start-WatchAgent.cmd introuvable (menu 10 d'abord)."
+        throw "Start-WatchAgent.cmd introuvable (menu 11 d'abord)."
     }
 
     # Un seul argument : le .cmd (pas de quotes PowerShell imbriquees)
