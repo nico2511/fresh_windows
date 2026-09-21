@@ -237,7 +237,31 @@ if (Test-Path -LiteralPath $gpuPath) {
             continue
         }
     }
-    Ok 'gpu.json cles amd/nvidia presentes'
+    if (-not $gpu.chipset) {
+        Fail 'gpu.json : cle chipset manquante'
+    }
+    elseif (-not $gpu.chipset.intel -or -not $gpu.chipset.intel.wingetId) {
+        Fail 'gpu.json : chipset.intel.wingetId manquant'
+    }
+    elseif (-not $gpu.chipset.amd -or -not $gpu.chipset.amd.supportPage) {
+        Fail 'gpu.json : chipset.amd.supportPage manquant'
+    }
+    elseif (-not $gpu.chipset.amd.bySocket -or (@($gpu.chipset.amd.bySocket).Count -lt 1)) {
+        Fail 'gpu.json : chipset.amd.bySocket vide'
+    }
+    else {
+        $socketOk = $true
+        foreach ($rule in @($gpu.chipset.amd.bySocket)) {
+            if (-not $rule.match -or -not $rule.label) {
+                Fail 'gpu.json : entree bySocket sans match/label'
+                $socketOk = $false
+                break
+            }
+        }
+        if ($socketOk) {
+            Ok 'gpu.json cles amd/nvidia/chipset presentes'
+        }
+    }
 }
 
 Write-Host ""

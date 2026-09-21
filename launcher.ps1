@@ -13,7 +13,11 @@
 #
 #  Pin de version (commit / tag / branche) :
 #    $env:FRESH_WIN_REF='abc1234'
-#    irm https://raw.githubusercontent.com/nico2511/fresh_windows/$env:FRESH_WIN_REF/launcher.ps1 | iex
+#    powershell -NoProfile -ExecutionPolicy Bypass -Command "irm .../$env:FRESH_WIN_REF/launcher.ps1 | iex"
+#
+#  Premier lancement (ExecutionPolicy) :
+#    powershell -NoProfile -ExecutionPolicy Bypass -Command "irm .../launcher.ps1 | iex"
+#    Le launcher pose RemoteSigned (CurrentUser) + Unblock-File sur le cache AppData.
 # ============================================================
 
 # Via env (compatible irm | iex) - pas de param() qui casse le pipe
@@ -46,7 +50,49 @@ $FreshAppData = Join-Path $env:LOCALAPPDATA "FreshWindows"
 $CustomAppsLocalDir = Join-Path $FreshAppData "apps-custom"
 $script:FreshBrand = "Fresh Windows"
 # Incrémenter quand les libs changent alors que FRESH_WIN_REF reste "main" (sinon cache périmé)
-$script:FreshWindowsLibEpoch = 18
+$script:FreshWindowsLibEpoch = 20
+
+function Ensure-FreshWindowsExecutionPolicy {
+    <#
+      Debloque ExecutionPolicy pour scripts locaux / cache AppData.
+      Process = Bypass (session). CurrentUser = RemoteSigned si trop strict.
+      Unblock-File retire la zone Internet (ADS) sur les .ps1 telecharges.
+    #>
+    $changed = $false
+
+    try {
+        Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction Stop
+    } catch { }
+
+    $restrictive = @('Restricted', 'AllSigned')
+    try {
+        $currentUser = Get-ExecutionPolicy -Scope CurrentUser -ErrorAction SilentlyContinue
+        $effective = Get-ExecutionPolicy -ErrorAction SilentlyContinue
+        $needsUser = ($currentUser -in $restrictive) -or (
+            ($currentUser -eq 'Undefined' -or [string]::IsNullOrWhiteSpace([string]$currentUser)) -and
+            ($effective -in $restrictive)
+        )
+        if ($needsUser) {
+            Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction Stop
+            $changed = $true
+            Write-Host "ExecutionPolicy CurrentUser → RemoteSigned (scripts locaux autorises)." -ForegroundColor DarkGray
+        }
+    } catch {
+        Write-Host "ExecutionPolicy CurrentUser non modifiable : $($_.Exception.Message)" -ForegroundColor DarkYellow
+    }
+
+    try {
+        New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null
+        Get-ChildItem -LiteralPath $FreshAppData -Filter '*.ps1' -File -Recurse -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                try { Unblock-File -LiteralPath $_.FullName -ErrorAction SilentlyContinue } catch { }
+            }
+    } catch { }
+
+    return $changed
+}
+
+Ensure-FreshWindowsExecutionPolicy | Out-Null
 
 function ConvertTo-Utf8BomFile {
     param([Parameter(Mandatory)][string]$Path)
@@ -87,6 +133,7 @@ function Get-FreshWindowsBootstrapScriptPath {
         Set-Content -LiteralPath $meta -Value $cacheToken -Encoding UTF8 -NoNewline
     }
     ConvertTo-Utf8BomFile -Path $dest
+    try { Unblock-File -LiteralPath $dest -ErrorAction SilentlyContinue } catch { }
     return $dest
 }
 
@@ -1216,7 +1263,7 @@ function Show-Menu {
     Write-Host " 7  Winget upgrade --all" -ForegroundColor White
     Write-Host " 8  Tweaks Windows (one-click, ShutUp10, presets)" -ForegroundColor Gray
     Write-Host " 9  Taches planifiees (MAJ + maintenance + sync scripts)" -ForegroundColor DarkCyan
-    Write-Host "10  GPU (AMD Adrenalin / Ryzen Master / NVIDIA)" -ForegroundColor DarkYellow
+    Write-Host "10  GPU / Chipset (AMD, NVIDIA, Intel DSA)" -ForegroundColor DarkYellow
     Write-Host "--- Mode jeu ---" -ForegroundColor DarkCyan
     Write-Host "11  Mode jeu (lancer / raccourci / agent)" -ForegroundColor Red
     Write-Host " 0  Quitter" -ForegroundColor DarkGray

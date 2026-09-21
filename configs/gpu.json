@@ -24,5 +24,30 @@
     "driversPage": "https://www.nvidia.com/Download/index.aspx",
     "nvcleanstallUrl": "https://www.techpowerup.com/download/techpowerup-nvcleanstall/",
     "guideUrl": "https://github.com/nico2511/fresh_windows/blob/main/guides/nvidia-nvcleanstall.md"
+  },
+  "chipset": {
+    "guideUrl": "https://github.com/nico2511/fresh_windows/blob/main/guides/chipset.md",
+    "intel": {
+      "wingetId": "Intel.IntelDriverAndSupportAssistant",
+      "supportPage": "https://www.intel.com/content/www/us/en/support/detect.html"
+    },
+    "amd": {
+      "supportPage": "https://www.amd.com/en/support/download/drivers.html",
+      "defaultDownloadUrl": "https://drivers.amd.com/drivers/amd_chipset_software_7.04.09.545.exe",
+      "bySocket": [
+        {
+          "match": "Ryzen AI|Ryzen [5789] 9[0-9]{3}|Ryzen [578] [78][0-9]{3}",
+          "label": "AM5",
+          "downloadUrl": "https://drivers.amd.com/drivers/amd_chipset_software_7.04.09.545.exe",
+          "page": "https://www.amd.com/en/support/downloads/drivers.html/chipsets/am5/x870e.html"
+        },
+        {
+          "match": "Ryzen [3579] [1-5][0-9]{3}",
+          "label": "AM4",
+          "downloadUrl": "https://drivers.amd.com/drivers/amd_chipset_software_7.04.09.545.exe",
+          "page": "https://www.amd.com/en/support/downloads/drivers.html/chipsets/am4/b550.html"
+        }
+      ]
+    }
   }
 }

@@ -54,5 +54,6 @@ function Get-FreshWindowsCachedScriptPath {
     }
 
     ConvertTo-Utf8BomFile -Path $dest
+    try { Unblock-File -LiteralPath $dest -ErrorAction SilentlyContinue } catch { }
     return $dest
 }

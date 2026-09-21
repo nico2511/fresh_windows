@@ -45,6 +45,15 @@ function Get-FreshWindowsLaunchStubContent {
 param([string]`$SilentMode = '')
 `$ErrorActionPreference = 'Stop'
 try {
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction SilentlyContinue
+} catch {}
+try {
+    `$cu = Get-ExecutionPolicy -Scope CurrentUser -ErrorAction SilentlyContinue
+    if (`$cu -in @('Restricted', 'AllSigned')) {
+        Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction SilentlyContinue
+    }
+} catch {}
+try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 } catch {}
 `$env:FRESH_WIN_REF = '$Ref'
@@ -62,6 +71,7 @@ function Write-FreshWindowsLaunchStub {
     New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null
     $stubPath = Join-Path $FreshAppData "Launch-FreshWindows.ps1"
     Set-Content -LiteralPath $stubPath -Value (Get-FreshWindowsLaunchStubContent -Ref $Ref -LauncherUrl $LauncherUrl) -Encoding UTF8
+    try { Unblock-File -LiteralPath $stubPath -ErrorAction SilentlyContinue } catch { }
     return $stubPath
 }
 
