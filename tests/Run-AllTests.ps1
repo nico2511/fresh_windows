@@ -11,6 +11,14 @@ Write-Host "=== Validate-Configs ===" -ForegroundColor Cyan
 & (Join-Path $root 'Validate-Configs.ps1')
 if ($LASTEXITCODE -ne 0) { $failed++ }
 
+Write-Host "`n=== Validate-SkillsRegistry ===" -ForegroundColor Cyan
+& (Join-Path $root 'Validate-SkillsRegistry.ps1')
+if ($LASTEXITCODE -ne 0) { $failed++ }
+
+Write-Host "`n=== Parse-Scripts ===" -ForegroundColor Cyan
+& (Join-Path $root 'Parse-Scripts.ps1')
+if ($LASTEXITCODE -ne 0) { $failed++ }
+
 if (Get-Module -ListAvailable -Name Pester) {
     Write-Host "`n=== Pester Launcher-Core ===" -ForegroundColor Cyan
     Import-Module Pester -MinimumVersion 5.0 -ErrorAction Stop
@@ -19,6 +27,21 @@ if (Get-Module -ListAvailable -Name Pester) {
     $pesterConfig.Output.Verbosity = 'Detailed'
     $result = Invoke-Pester -Configuration $pesterConfig
     if ($result.FailedCount -gt 0) { $failed++ }
+
+    foreach ($pesterFile in @(
+            'FreshAgent-OllamaBridge.Tests.ps1',
+            'FreshAgent-Inventory.Tests.ps1',
+            'FreshAgent-Rag.Tests.ps1',
+            'FreshAgent-Config.Tests.ps1',
+            'Windows-Stt.Tests.ps1'
+        )) {
+        $path = Join-Path $root $pesterFile
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        Write-Host "`n=== Pester $pesterFile ===" -ForegroundColor Cyan
+        $pesterConfig.Run.Path = $path
+        $result = Invoke-Pester -Configuration $pesterConfig
+        if ($result.FailedCount -gt 0) { $failed++ }
+    }
 }
 else {
     Write-Host "`nPester non installé - tests Launcher-Core ignorés (winget install Pester.Pester)." -ForegroundColor DarkYellow

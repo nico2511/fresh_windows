@@ -162,6 +162,61 @@ function Get-FreshAgentSkillsWebConfig {
     return @{ searchEngines = @{ google = 'https://www.google.com/search?q={query}' } }
 }
 
+function Get-FreshAgentUserProtectedFileNames {
+    <#
+      Fichiers locaux jamais supprimes par le sync repo (overrides / etat).
+    #>
+    return @(
+        'agent-ai.user.json',
+        'skills-apps.user.json',
+        'skills-web.user.json',
+        'inventory.json',
+        'game-session.state.json',
+        'ai-history.jsonl',
+        'ai-prompt.pending.txt'
+    )
+}
+
+function Get-FreshAgentRegistryFromRepo {
+    param([string]$RepoRawRoot)
+    $url = "$RepoRawRoot/configs/skills/registry.json"
+    return Invoke-FreshAgentRestJson -Url $url
+}
+
+function Get-FreshAgentRepoConfigSyncList {
+    param(
+        [string]$RepoRawRoot,
+        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
+    )
+    $paths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($p in @(
+            'configs/agent-ai.json',
+            'configs/skills-apps.json',
+            'configs/skills-web.json',
+            'configs/skills/registry.json',
+            'configs/agent-profiles.json',
+            'configs/services-allowlist.json'
+        )) {
+        [void]$paths.Add($p)
+    }
+
+    $reg = $null
+    $localReg = Join-Path $FreshAppData 'configs\skills\registry.json'
+    if (Test-Path -LiteralPath $localReg) {
+        try { $reg = Get-Content -LiteralPath $localReg -Raw -Encoding UTF8 | ConvertFrom-Json } catch { }
+    }
+    if (-not $reg) {
+        $reg = Get-FreshAgentRegistryFromRepo -RepoRawRoot $RepoRawRoot
+    }
+    if ($reg -and $reg.skills) {
+        foreach ($entry in @($reg.skills)) {
+            if (-not $entry.file) { continue }
+            [void]$paths.Add('configs/skills/' + ($entry.file -replace '\\', '/'))
+        }
+    }
+    return @($paths)
+}
+
 function Sync-FreshAgentLocalAssets {
     param(
         [string]$FreshAppData,
@@ -182,7 +237,8 @@ function Sync-FreshAgentLocalAssets {
         'lib/FreshAgent-Inventory.ps1',
         'lib/FreshAgent-Rag.ps1',
         'lib/FreshAgent-History.ps1',
-        'lib/FreshAgent-Profiles.ps1'
+        'lib/FreshAgent-Profiles.ps1',
+        'lib/FreshAgent-Log.ps1'
     )
     foreach ($rel in $scriptPaths) {
         $dest = Join-Path $FreshAppData ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)
@@ -200,25 +256,7 @@ function Sync-FreshAgentLocalAssets {
         }
     }
 
-    $configPaths = @(
-        'configs/agent-ai.json',
-        'configs/skills-apps.json',
-        'configs/skills-web.json',
-        'configs/skills/registry.json',
-        'configs/skills/system/check_system_health.json',
-        'configs/skills/system/launch_app.json',
-        'configs/skills/system/game_session.json',
-        'configs/skills/system/end_game_session.json',
-        'configs/skills/browser/open_url.json',
-        'configs/skills/browser/browser_search.json',
-        'configs/skills/browser/youtube_search.json',
-        'configs/skills/system/refresh_inventory.json',
-        'configs/skills/system/list_machine_inventory.json',
-        'configs/skills/system/refresh_rag_index.json',
-        'configs/skills/system/list_services.json',
-        'configs/agent-profiles.json',
-        'configs/services-allowlist.json'
-    )
+    $configPaths = Get-FreshAgentRepoConfigSyncList -RepoRawRoot $RepoRawRoot -FreshAppData $FreshAppData
     foreach ($rel in $configPaths) {
         $dest = Join-Path $FreshAppData ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)
         $dir = Split-Path $dest -Parent
@@ -236,6 +274,10 @@ function Sync-FreshAgentLocalAssets {
     }
 
     Set-Content -LiteralPath (Join-Path $FreshAppData 'agent.ref') -Value $Ref -Encoding UTF8 -NoNewline
+
+    if (Get-Command Write-FreshAgentLog -ErrorAction SilentlyContinue) {
+        Write-FreshAgentLog -Category 'Sync' -Message ("Assets OK ref={0} configs={1} scripts={2}" -f $Ref, $configPaths.Count, $scriptPaths.Count) -FreshAppData $FreshAppData
+    }
     return $true
 }
 
