@@ -114,6 +114,7 @@ function Exit-FreshWatchAgentSingleInstance {
 }
 
 Enter-FreshWatchAgentSingleInstance
+Write-WatchLog 'Post-mutex OK'
 
 function Hide-WatchConsole {
     try {
@@ -132,10 +133,16 @@ public static class FreshWinNative {
     } catch { }
 }
 
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-[System.Windows.Forms.Application]::EnableVisualStyles()
-Write-WatchLog 'WinForms charge'
+try {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    [System.Windows.Forms.Application]::EnableVisualStyles()
+    Write-WatchLog 'WinForms charge'
+}
+catch {
+    Write-WatchLog ("WinForms echec: {0}" -f $_.Exception.Message)
+    throw
+}
 
 try {
     [Net.ServicePointManager]::SecurityProtocol = `
@@ -286,24 +293,43 @@ function Set-WatchUserSettings {
     $Settings | ConvertTo-Json | Set-Content -LiteralPath $UserSettingsPath -Encoding UTF8
 }
 
-function Get-WatchRules {
-    try {
-        return Invoke-RestMethod -Uri $WatchConfigUrl -UseBasicParsing
+function Get-WatchRulesDefault {
+    return @{
+        pollIntervalSeconds             = 12
+        cpuThresholdPercent             = 28
+        cpuSustainedSeconds             = 150
+        ramAlertMinMb                   = 6144
+        ramAlertPercentOfSystem         = 18
+        diskBusyThresholdPercent        = 92
+        diskBusySustainedSeconds        = 120
+        diskAlertOnlyWhenNotGaming      = $true
+        cooldownBetweenSameAlertSeconds = 300
+        knownDiskHogs                   = @('SearchIndexer', 'MsMpEng')
     }
-    catch {
-        return @{
-            pollIntervalSeconds            = 12
-            cpuThresholdPercent            = 28
-            cpuSustainedSeconds            = 150
-            ramAlertMinMb                  = 6144
-            ramAlertPercentOfSystem        = 18
-            diskBusyThresholdPercent       = 92
-            diskBusySustainedSeconds       = 120
-            diskAlertOnlyWhenNotGaming     = $true
-            cooldownBetweenSameAlertSeconds = 300
-            knownDiskHogs                  = @('SearchIndexer', 'MsMpEng')
+}
+
+function Get-WatchRules {
+    $defaults = Get-WatchRulesDefault
+    try {
+        $job = Start-Job -ArgumentList $WatchConfigUrl -ScriptBlock {
+            param($Uri)
+            Invoke-RestMethod -Uri $Uri -UseBasicParsing
+        }
+        if (Wait-Job -Job $job -Timeout 8) {
+            $r = Receive-Job -Job $job
+            Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+            if ($r) { return $r }
+        }
+        else {
+            Stop-Job -Job $job -ErrorAction SilentlyContinue
+            Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+            Write-WatchLog 'Get-WatchRules: timeout reseau (defaults)'
         }
     }
+    catch {
+        Write-WatchLog ("Get-WatchRules: {0}" -f $_.Exception.Message)
+    }
+    return $defaults
 }
 
 $script:CpuTrack = @{}
@@ -311,9 +337,16 @@ $script:DiskHighSince = $null
 $script:LastAlerts = @{}
 $script:PendingKill = @{}
 $script:GameModeCfg = $null
-$script:WatchRules = Get-WatchRules
+$script:WatchRules = Get-WatchRulesDefault
+$script:WatchRulesRemotePending = $true
 $script:UserSettings = Get-WatchUserSettings
-$script:TotalRamMb = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1MB)
+$script:TotalRamMb = 16384
+try {
+    $script:TotalRamMb = [math]::Round((Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory / 1MB)
+}
+catch {
+    Write-WatchLog ("RAM systeme: {0}" -f $_.Exception.Message)
+}
 Write-WatchLog 'Surveillance prete (avant menu)'
 
 function Test-GamingSessionActive {
@@ -464,6 +497,10 @@ function Invoke-FreshAgentDeferredBoot {
 }
 
 function Invoke-WatchTick {
+    if ($script:WatchRulesRemotePending) {
+        $script:WatchRulesRemotePending = $false
+        $script:WatchRules = Get-WatchRules
+    }
     $script:UserSettings = Get-WatchUserSettings
     Update-FreshAgentTrayStatus
     Invoke-FreshWatchAgentModuleBoot
