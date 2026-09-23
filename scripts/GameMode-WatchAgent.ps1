@@ -6,7 +6,7 @@
   Prefs: %LOCALAPPDATA%\FreshWindows\watch-agent-user.json
   Lancer avec powershell.exe -STA (sinon l'icone n'apparait pas).
 #>
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 $WatchLog = Join-Path $env:LOCALAPPDATA 'FreshWindows\watch-agent.log'
 
 function Write-WatchLog {
@@ -31,17 +31,72 @@ if ([Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
     exit 0
 }
 
-# Une seule instance agent (evite double icone systray)
-try {
-    $script:WatchMutex = New-Object System.Threading.Mutex($false, 'Global\FreshWindows-WatchAgent')
-    if (-not $script:WatchMutex.WaitOne(0, $false)) {
-        Write-WatchLog 'Autre instance deja active - exit'
-        exit 0
+function Get-FreshWatchAgentPeerProcesses {
+    $self = $PID
+    $out = @()
+    try {
+        Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.ProcessId -ne $self -and
+                $_.Name -match '^(?i)(powershell|pwsh)(\.exe)?$' -and
+                $_.CommandLine -and
+                $_.CommandLine -match 'GameMode-WatchAgent|Launch-GameModeWatch'
+            } | ForEach-Object { $out += $_ }
+    }
+    catch { }
+    return $out
+}
+
+function Enter-FreshWatchAgentSingleInstance {
+    $mutexName = 'Global\FreshWindows-WatchAgent'
+    $script:WatchMutex = $null
+    $acquired = $false
+    try {
+        $script:WatchMutex = New-Object System.Threading.Mutex($false, $mutexName)
+        try {
+            $acquired = $script:WatchMutex.WaitOne(0, $false)
+        }
+        catch [System.Threading.AbandonedMutexException] {
+            $acquired = $true
+            Write-WatchLog 'Mutex abandonne (crash precedent) — reprise'
+        }
+        if (-not $acquired) {
+            $peers = @(Get-FreshWatchAgentPeerProcesses)
+            if ($peers.Count -eq 0) {
+                Write-WatchLog 'Mutex bloque sans processus agent — reset'
+                try { $script:WatchMutex.Dispose() } catch {}
+                $script:WatchMutex = $null
+                $created = $false
+                $script:WatchMutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$created)
+                $acquired = $true
+            }
+            else {
+                $pids = ($peers | ForEach-Object { [string]$_.ProcessId }) -join ','
+                Write-WatchLog ("Autre instance active (PID $pids) — exit. Arreter: Stop-Process -Id $pids -Force")
+                exit 0
+            }
+        }
+        if ($acquired) {
+            Write-WatchLog ("Mutex acquis PID $PID")
+        }
+    }
+    catch {
+        Write-WatchLog ("Mutex ignore : {0}" -f $_.Exception.Message)
     }
 }
-catch {
-    Write-WatchLog ("Mutex ignore : {0}" -f $_.Exception.Message)
+
+function Exit-FreshWatchAgentSingleInstance {
+    try {
+        if ($script:WatchMutex) {
+            try { [void]$script:WatchMutex.ReleaseMutex() } catch {}
+            try { $script:WatchMutex.Dispose() } catch {}
+            $script:WatchMutex = $null
+        }
+    }
+    catch { }
 }
+
+Enter-FreshWatchAgentSingleInstance
 
 function Hide-WatchConsole {
     try {
@@ -97,6 +152,7 @@ $script:MiAiListenItem = $null
 $script:MiAiListenLabel = $null
 $script:FaBgResultPending = $false
 $script:FaBgResultLastAt = $null
+$script:FreshAgentDeferredBootPending = $false
 $faConfigCandidates = @(
     (Join-Path $FreshAppData 'lib\FreshAgent-Config.ps1'),
     (Join-Path $PSScriptRoot 'lib\FreshAgent-Config.ps1')
@@ -151,30 +207,7 @@ if (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue) {
         $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
         $script:FreshAgentReady = $true
         Write-WatchLog 'Fresh Agent modules charges'
-        if (Get-Command Build-FreshAgentMachineInventory -ErrorAction SilentlyContinue) {
-            try {
-                $invPath = Get-FreshAgentInventoryPath -FreshAppData $FreshAppData
-                if (-not (Test-Path -LiteralPath $invPath)) {
-                    Build-FreshAgentMachineInventory -FreshAppData $FreshAppData | Out-Null
-                    Write-WatchLog 'Inventaire machine initialise'
-                }
-            }
-            catch {
-                Write-WatchLog ("Inventaire: {0}" -f $_.Exception.Message)
-            }
-        }
-        if ($script:FreshAgentAi.rag -and $script:FreshAgentAi.rag.enabled -and (Get-Command Build-FreshAgentRagIndex -ErrorAction SilentlyContinue)) {
-            try {
-                $ragPath = Get-FreshAgentRagIndexPath -FreshAppData $FreshAppData
-                if (-not (Test-Path -LiteralPath $ragPath)) {
-                    Build-FreshAgentRagIndex -RepoRef $RepoRef -FreshAppData $FreshAppData | Out-Null
-                    Write-WatchLog 'Index RAG initialise'
-                }
-            }
-            catch {
-                Write-WatchLog ("RAG: {0}" -f $_.Exception.Message)
-            }
-        }
+        $script:FreshAgentDeferredBootPending = $true
     }
     catch {
         Write-WatchLog ("Fresh Agent config: {0}" -f $_.Exception.Message)
@@ -308,9 +341,40 @@ function Update-FreshAgentTrayStatus {
     $script:NotifyIcon.Text = $text
 }
 
+function Invoke-FreshAgentDeferredBoot {
+    if (-not $script:FreshAgentDeferredBootPending) { return }
+    $script:FreshAgentDeferredBootPending = $false
+    if (-not $script:FreshAgentReady) { return }
+    if (Get-Command Build-FreshAgentMachineInventory -ErrorAction SilentlyContinue) {
+        try {
+            $invPath = Get-FreshAgentInventoryPath -FreshAppData $script:FreshAppData
+            if (-not (Test-Path -LiteralPath $invPath)) {
+                Build-FreshAgentMachineInventory -FreshAppData $script:FreshAppData | Out-Null
+                Write-WatchLog 'Inventaire machine initialise (differe)'
+            }
+        }
+        catch {
+            Write-WatchLog ("Inventaire: {0}" -f $_.Exception.Message)
+        }
+    }
+    if ($script:FreshAgentAi -and $script:FreshAgentAi.rag -and $script:FreshAgentAi.rag.enabled -and (Get-Command Build-FreshAgentRagIndex -ErrorAction SilentlyContinue)) {
+        try {
+            $ragPath = Get-FreshAgentRagIndexPath -FreshAppData $script:FreshAppData
+            if (-not (Test-Path -LiteralPath $ragPath)) {
+                Build-FreshAgentRagIndex -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData | Out-Null
+                Write-WatchLog 'Index RAG initialise (differe)'
+            }
+        }
+        catch {
+            Write-WatchLog ("RAG: {0}" -f $_.Exception.Message)
+        }
+    }
+}
+
 function Invoke-WatchTick {
     $script:UserSettings = Get-WatchUserSettings
     Update-FreshAgentTrayStatus
+    Invoke-FreshAgentDeferredBoot
     Invoke-FreshAgentBackgroundResultPoll
     if (Get-Command Update-FreshAgentDashboardIfOpen -ErrorAction SilentlyContinue) {
         Update-FreshAgentDashboardIfOpen
@@ -1071,6 +1135,7 @@ function Open-FreshAgentDashboardPanel {
             OpenPowerShell    = { try { Start-FreshWindowsPowerShell } catch { Show-Balloon -Title 'PowerShell' -Text $_.Exception.Message -Icon Error } }
             QuitAgent         = {
                 $script:NotifyIcon.Visible = $false
+                Exit-FreshWatchAgentSingleInstance
                 if ($script:FreshAgentDashboardForm -and -not $script:FreshAgentDashboardForm.IsDisposed) {
                     $script:FreshAgentDashboardForm.Close()
                 }
@@ -1162,6 +1227,7 @@ $script:HiddenForm.Add_FormClosed({
         $script:NotifyIcon.Visible = $false
         $script:NotifyIcon.Dispose()
     }
+    Exit-FreshWatchAgentSingleInstance
 })
 
 $script:NotifyIcon = New-Object System.Windows.Forms.NotifyIcon
@@ -1430,6 +1496,7 @@ $menu.Items.Add('-') | Out-Null
 $miExit = $menu.Items.Add('Quitter')
 $miExit.Add_Click({
     $script:NotifyIcon.Visible = $false
+    Exit-FreshWatchAgentSingleInstance
     if ($script:HiddenForm) { $script:HiddenForm.Close() }
     [System.Windows.Forms.Application]::Exit()
 })
