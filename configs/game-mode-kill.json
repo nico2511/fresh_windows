@@ -131,6 +131,12 @@
       "Slack",
       "slack",
       "Zoom"
+    ],
+    "ai_runtime": [
+      "ollama",
+      "Ollama",
+      "CyberScribe",
+      "FreshWindowsWatch"
     ]
   }
 }

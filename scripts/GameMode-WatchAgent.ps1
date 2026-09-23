@@ -87,6 +87,47 @@ else {
     . $tmp
 }
 
+$script:FreshAgentReady = $false
+$script:FreshAgentAi = $null
+$faConfigCandidates = @(
+    (Join-Path $FreshAppData 'lib\FreshAgent-Config.ps1'),
+    (Join-Path $PSScriptRoot 'lib\FreshAgent-Config.ps1')
+)
+foreach ($faPath in $faConfigCandidates) {
+    if ($faPath -and (Test-Path -LiteralPath $faPath)) {
+        try {
+            . $faPath
+            break
+        }
+        catch {
+            Write-WatchLog ("FreshAgent-Config: {0}" -f $_.Exception.Message)
+        }
+    }
+}
+if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
+    foreach ($mod in @(
+            'lib/FreshAgent-SkillsEngine.ps1',
+            'lib/FreshAgent-SkillHandlers.ps1',
+            'lib/FreshAgent-GameSession.ps1',
+            'ai/Ollama-Manager.ps1',
+            'ai/Windows-Stt.ps1'
+        )) {
+        if (-not (Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData)) {
+            Write-WatchLog ("Module Fresh Agent absent: {0}" -f $mod)
+        }
+    }
+}
+if (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue) {
+    try {
+        $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
+        $script:FreshAgentReady = $true
+        Write-WatchLog 'Fresh Agent modules charges'
+    }
+    catch {
+        Write-WatchLog ("Fresh Agent config: {0}" -f $_.Exception.Message)
+    }
+}
+
 function Get-WatchUserSettings {
     $defaults = @{
         autoSuggestKill = $true
@@ -363,6 +404,82 @@ function Test-LocalScriptsStale {
     catch { return $true }
 }
 
+function Invoke-FreshAgentSkillMenu {
+    param(
+        [Parameter(Mandatory)]
+        [string]$SkillId,
+        [hashtable]$Parameters = @{}
+    )
+    if (-not $script:FreshAgentReady) {
+        Show-Balloon -Title 'Fresh Agent' -Text 'Modules skills non charges (sync scripts locaux).' -Icon Warning
+        return
+    }
+    try {
+        $r = Invoke-FreshAgentSkill -SkillId $SkillId -Parameters $Parameters -RepoRef $RepoRef -FreshAppData $FreshAppData
+        $text = if ($r.message) { [string]$r.message } else { 'Termine.' }
+        $icon = if ($r.ok) { 'Info' } else { 'Warning' }
+        Show-Balloon -Title 'Fresh Agent' -Text $text -Icon $icon
+    }
+    catch {
+        Show-Balloon -Title 'Fresh Agent' -Text $_.Exception.Message -Icon Error
+    }
+}
+
+function Start-FreshAgentBackgroundWork {
+    param(
+        [ValidateSet('StartOllama', 'EnsureModel')]
+        [string]$Action,
+        [string]$BusyTitle = 'Fresh Agent',
+        [string]$BusyText = 'Operation en cours...'
+    )
+    Show-Balloon -Title $BusyTitle -Text $BusyText -Icon Info
+    $fresh = $FreshAppData.Replace("'", "''")
+    $repo = $RepoRef.Replace("'", "''")
+    $inner = @"
+`$ErrorActionPreference='Continue'
+`$fresh='$fresh'
+`$repo='$repo'
+. (Join-Path `$fresh 'lib\FreshAgent-Config.ps1')
+. (Join-Path `$fresh 'ai\Ollama-Manager.ps1')
+`$log=Join-Path `$fresh 'watch-agent.log'
+function Log([string]`$m){ try { Add-Content -LiteralPath `$log -Value ((Get-Date -Format o)+' '+`$m) -Encoding UTF8 } catch {} }
+try {
+  if ('$Action' -eq 'StartOllama') { Start-OllamaServer | Out-Null; Log 'Ollama demarre' }
+  else {
+    `$cfg = Get-FreshAgentAiConfig -RepoRef `$repo -FreshAppData `$fresh
+    Ensure-OllamaReady -AiConfig `$cfg -OnProgress { param(`$m) Log `$m }
+    Log 'Modele pret'
+  }
+} catch { Log `$_.Exception.Message }
+"@
+    $psExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+    Start-Process -FilePath $psExe -WindowStyle Hidden -ArgumentList @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $inner
+    ) | Out-Null
+}
+
+function Update-FreshAgentAiMenu {
+    param($MiAiRoot, $MiAiToggle, $MiOllamaState, $MiSttState)
+    if (-not $MiAiRoot) { return }
+    $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
+    $enabled = $false
+    if ($script:FreshAgentAi -and $null -ne $script:FreshAgentAi.enabled) {
+        $enabled = [bool]$script:FreshAgentAi.enabled
+    }
+    $MiAiToggle.Text = if ($enabled) { 'IA : ON' } else { 'IA : OFF (defaut)' }
+    $ollamaOk = $false
+    if (Get-Command Test-OllamaApi -ErrorAction SilentlyContinue) {
+        $base = if ($script:FreshAgentAi.ollama.baseUrl) { $script:FreshAgentAi.ollama.baseUrl } else { 'http://127.0.0.1:11434' }
+        $ollamaOk = Test-OllamaApi -BaseUrl $base
+    }
+    $MiOllamaState.Text = if ($ollamaOk) { 'Ollama : actif' } else { 'Ollama : arrete / injoignable' }
+    $sttMsg = 'STT : Windows API'
+    if (Get-Command Get-WindowsSttStatusMessage -ErrorAction SilentlyContinue) {
+        $sttMsg = Get-WindowsSttStatusMessage
+    }
+    $MiSttState.Text = $sttMsg
+}
+
 function Invoke-SyncLocalScripts {
     try {
         $corePath = Join-Path $FreshAppData 'Launcher-Core.ps1'
@@ -374,7 +491,20 @@ function Invoke-SyncLocalScripts {
         $iconUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/assets/fresh-windows.ico"
         Write-FreshWindowsLaunchStub -FreshAppData $FreshAppData -Ref $RepoRef -LauncherUrl $launcherUrl | Out-Null
         Sync-GameModeLocalScripts -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $iconUrl | Out-Null
-        Show-Balloon -Title 'Scripts locaux' -Text "Mis a jour (ref $RepoRef). Redemarre l'agent si besoin." -Icon Info
+        if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
+            foreach ($mod in @(
+                    'lib/FreshAgent-SkillsEngine.ps1',
+                    'lib/FreshAgent-SkillHandlers.ps1',
+                    'lib/FreshAgent-GameSession.ps1',
+                    'ai/Ollama-Manager.ps1',
+                    'ai/Windows-Stt.ps1'
+                )) {
+                Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
+            }
+            $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
+            $script:FreshAgentReady = $true
+        }
+        Show-Balloon -Title 'Scripts locaux' -Text "Mis a jour (ref $RepoRef). Modules Fresh Agent recharges." -Icon Info
     }
     catch {
         Show-Balloon -Title 'Scripts locaux' -Text $_.Exception.Message -Icon Error
@@ -458,6 +588,77 @@ $miMon.Add_Click({
     $script:UserSettings = $s
     $miMon.Text = if ($s.monitorEnabled) { 'Surveillance : ON' } else { 'Surveillance : OFF' }
 })
+
+$menu.Items.Add('-') | Out-Null
+
+$miSkillHealth = $menu.Items.Add('Etat systeme (skill)')
+$miSkillHealth.Add_Click({ Invoke-FreshAgentSkillMenu -SkillId 'check_system_health' })
+
+$miSkillGame = $menu.Items.Add('Session jeu (DND + mode jeu)')
+$miSkillGame.Add_Click({ Invoke-FreshAgentSkillMenu -SkillId 'game_session' })
+
+$miSkillEndGame = $menu.Items.Add('Fin session jeu')
+$miSkillEndGame.Add_Click({ Invoke-FreshAgentSkillMenu -SkillId 'end_game_session' })
+
+$menu.Items.Add('-') | Out-Null
+
+$miAi = New-Object System.Windows.Forms.ToolStripMenuItem
+$miAi.Text = 'Intelligence artificielle'
+$null = $menu.Items.Add($miAi)
+
+$miAiToggle = New-Object System.Windows.Forms.ToolStripMenuItem
+$miAiToggle.Text = 'IA : OFF (defaut)'
+$miAiToggle.Add_Click({
+    if (-not $script:FreshAgentReady) {
+        Show-Balloon -Title 'IA' -Text 'Modules non charges.' -Icon Warning
+        return
+    }
+    $cur = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
+    $next = -not [bool]$cur.enabled
+    Set-FreshAgentAiUserConfig -Patch @{ enabled = $next } -FreshAppData $FreshAppData
+    $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
+    Update-FreshAgentAiMenu -MiAiRoot $miAi -MiAiToggle $miAiToggle -MiOllamaState $miOllamaState -MiSttState $miSttState
+    if ($next -and $script:FreshAgentAi.ollama.autoStart) {
+        Start-FreshAgentBackgroundWork -Action EnsureModel -BusyText 'Demarrage Ollama + modele...'
+    }
+})
+$miAi.DropDownItems.Add($miAiToggle) | Out-Null
+
+$miOllamaStart = New-Object System.Windows.Forms.ToolStripMenuItem
+$miOllamaStart.Text = 'Demarrer Ollama'
+$miOllamaStart.Add_Click({
+    Start-FreshAgentBackgroundWork -Action StartOllama -BusyText 'Demarrage Ollama...'
+})
+$miAi.DropDownItems.Add($miOllamaStart) | Out-Null
+
+$miOllamaPull = New-Object System.Windows.Forms.ToolStripMenuItem
+$miOllamaPull.Text = 'Telecharger modele par defaut'
+$miOllamaPull.Add_Click({
+    Start-FreshAgentBackgroundWork -Action EnsureModel -BusyText 'Telechargement modele...'
+})
+$miAi.DropDownItems.Add($miOllamaPull) | Out-Null
+
+$miOllamaState = New-Object System.Windows.Forms.ToolStripMenuItem
+$miOllamaState.Text = 'Ollama : ?'
+$miOllamaState.Enabled = $false
+$miAi.DropDownItems.Add($miOllamaState) | Out-Null
+
+$miSttState = New-Object System.Windows.Forms.ToolStripMenuItem
+$miSttState.Text = 'STT : Windows API'
+$miSttState.Enabled = $false
+$miAi.DropDownItems.Add($miSttState) | Out-Null
+
+$miAiListen = New-Object System.Windows.Forms.ToolStripMenuItem
+$miAiListen.Text = 'Ecouter (STT Windows — bientot)'
+$miAiListen.Enabled = $false
+$miAi.DropDownItems.Add($miAiListen) | Out-Null
+
+if ($script:FreshAgentReady) {
+    Update-FreshAgentAiMenu -MiAiRoot $miAi -MiAiToggle $miAiToggle -MiOllamaState $miOllamaState -MiSttState $miSttState
+}
+else {
+    $miAi.Enabled = $false
+}
 
 $menu.Items.Add('-') | Out-Null
 

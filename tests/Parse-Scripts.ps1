@@ -6,7 +6,14 @@ $files = @(
     'scripts\lib\Launcher-WinUtil.ps1',
     'scripts\lib\Launcher-GpuMenus.ps1',
     'scripts\lib\Launcher-Tasks.ps1',
-    'scripts\lib\Launcher-Core.ps1'
+    'scripts\lib\Launcher-Core.ps1',
+    'scripts\lib\FreshAgent-Config.ps1',
+    'scripts\lib\FreshAgent-SkillsEngine.ps1',
+    'scripts\lib\FreshAgent-SkillHandlers.ps1',
+    'scripts\lib\FreshAgent-GameSession.ps1',
+    'scripts\ai\Ollama-Manager.ps1',
+    'scripts\ai\Windows-Stt.ps1',
+    'scripts\ai\FreshAgent-OllamaBridge.ps1'
 )
 $bad = 0
 foreach ($f in $files) {

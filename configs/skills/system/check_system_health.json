@@ -1,0 +1,11 @@
+{
+  "id": "check_system_health",
+  "title": "Etat systeme",
+  "handler": "Invoke-SkillCheckSystemHealth",
+  "menuVisible": true,
+  "requiresAdmin": false,
+  "ai": {
+    "expose": true,
+    "description": "Resume CPU, RAM, disque et alimentation."
+  }
+}

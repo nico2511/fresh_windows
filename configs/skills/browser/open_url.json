@@ -1,0 +1,14 @@
+{
+  "id": "open_url",
+  "title": "Ouvrir une URL",
+  "handler": "Invoke-SkillOpenUrl",
+  "menuVisible": false,
+  "requiresAdmin": false,
+  "parameters": {
+    "url": { "type": "string", "required": true }
+  },
+  "ai": {
+    "expose": true,
+    "description": "Ouvre une URL dans le navigateur par defaut."
+  }
+}

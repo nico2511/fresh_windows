@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "defaultBrowser": "system",
+  "searchEngines": {
+    "google": "https://www.google.com/search?q={query}",
+    "duckduckgo": "https://duckduckgo.com/?q={query}"
+  },
+  "youtube": {
+    "search": "https://www.youtube.com/results?search_query={query}",
+    "watch": "https://www.youtube.com/watch?v={id}"
+  }
+}

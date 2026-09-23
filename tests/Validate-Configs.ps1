@@ -206,8 +206,19 @@ if (Test-Path -LiteralPath $killPath) {
             elseif (-not $names.Contains('Bitwarden')) {
                 Fail 'game-mode-kill.json : Bitwarden manquant dans domains'
             }
+            elseif (-not $kill.protect.ai_runtime) {
+                Fail 'game-mode-kill.json : protect.ai_runtime manquant (Ollama / STT)'
+            }
             else {
-                Ok ("game-mode-kill.json ({0} kill, {1} comm protect, {2} launcher names)" -f $names.Count, $prot, $launcherCount)
+                $aiProt = @($kill.protect.ai_runtime | Where-Object { $_ })
+                $hasOllama = $false
+                foreach ($n in $aiProt) {
+                    if ($n -match 'ollama') { $hasOllama = $true }
+                }
+                if (-not $hasOllama) {
+                    Fail 'game-mode-kill.json : ollama manquant dans protect.ai_runtime'
+                }
+                Ok ("game-mode-kill.json ({0} kill, {1} protect entries, {2} launcher names)" -f $names.Count, $prot, $launcherCount)
             }
         }
     }
@@ -262,6 +273,40 @@ if (Test-Path -LiteralPath $gpuPath) {
             Ok 'gpu.json cles amd/nvidia/chipset presentes'
         }
     }
+}
+
+$agentAiPath = Join-Path $configs 'agent-ai.json'
+if (Test-Path -LiteralPath $agentAiPath) {
+    $ai = Get-Content -LiteralPath $agentAiPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($null -eq $ai.enabled) {
+        Fail 'agent-ai.json : enabled manquant'
+    }
+    elseif (-not $ai.ollama -or -not $ai.ollama.defaultModel) {
+        Fail 'agent-ai.json : ollama.defaultModel manquant'
+    }
+    elseif ($ai.stt.provider -ne 'windows' -and $ai.stt.provider -ne 'cyberScribe') {
+        Fail 'agent-ai.json : stt.provider doit etre windows ou cyberScribe'
+    }
+    else {
+        Ok ("agent-ai.json (enabled=$($ai.enabled), model=$($ai.ollama.defaultModel), stt=$($ai.stt.provider))")
+    }
+}
+else {
+    Fail 'agent-ai.json manquant'
+}
+
+$skillsReg = Join-Path $configs 'skills\registry.json'
+if (Test-Path -LiteralPath $skillsReg) {
+    $reg = Get-Content -LiteralPath $skillsReg -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not $reg.skills -or @($reg.skills).Count -lt 1) {
+        Fail 'skills/registry.json : liste skills vide'
+    }
+    else {
+        Ok ("skills/registry.json ({0} skills)" -f @($reg.skills).Count)
+    }
+}
+else {
+    Fail 'skills/registry.json manquant'
 }
 
 Write-Host ""
