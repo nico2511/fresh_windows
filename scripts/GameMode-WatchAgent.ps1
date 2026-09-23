@@ -594,7 +594,6 @@ function Test-FreshAgentOllamaWorkerReady {
     }
     if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
         Import-FreshAgentModule -RelativePath 'ai/Ollama-Manager.ps1' -FreshAppData $script:FreshAppData | Out-Null
-        Import-FreshAgentModule -RelativePath 'ai/FreshAgent-BackgroundWorker.ps1' -FreshAppData $script:FreshAppData | Out-Null
     }
     return ((Test-Path -LiteralPath $worker) -and (Test-Path -LiteralPath $mgr))
 }
@@ -1106,7 +1105,6 @@ function Invoke-SyncLocalScripts {
                     'lib/FreshAgent-GameSession.ps1',
                     'ai/Ollama-Manager.ps1',
                     'ai/FreshAgent-OllamaBridge.ps1',
-                    'ai/FreshAgent-BackgroundWorker.ps1',
                     'ai/Windows-Stt.ps1',
                     'ai/FreshAgent-Tts.ps1',
                     'lib/FreshAgent-Inventory.ps1',
