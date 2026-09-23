@@ -46,8 +46,9 @@ function Invoke-SkillCheckSystemHealth {
     $os = Get-CimInstance Win32_OperatingSystem
     $cs = Get-CimInstance Win32_ComputerSystem
     $totalRam = [math]::Round($cs.TotalPhysicalMemory / 1GB, 1)
+    # Win32_OperatingSystem.FreePhysicalMemory est en kilo-octets
     $freeRam = [math]::Round($os.FreePhysicalMemory / 1MB, 1)
-    $usedPct = if ($totalRam -gt 0) { [math]::Round((($totalRam - ($freeRam / 1024)) / $totalRam) * 100, 1) } else { 0 }
+    $usedPct = if ($totalRam -gt 0) { [math]::Round((($totalRam - $freeRam) / $totalRam) * 100, 1) } else { 0 }
     $cpuLoad = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
     $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" -ErrorAction SilentlyContinue
     $diskFree = if ($disk) { [math]::Round($disk.FreeSpace / 1GB, 1) } else { $null }

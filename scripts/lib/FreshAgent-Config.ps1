@@ -66,8 +66,15 @@ function Merge-FreshAgentJsonObject {
             return $Override
         }
         $hash = @{}
-        foreach ($prop in $Base.PSObject.Properties) {
-            $hash[$prop.Name] = $prop.Value
+        if ($Base -is [System.Collections.IDictionary]) {
+            foreach ($key in $Base.Keys) {
+                $hash[[string]$key] = $Base[$key]
+            }
+        }
+        else {
+            foreach ($prop in $Base.PSObject.Properties) {
+                $hash[$prop.Name] = $prop.Value
+            }
         }
         foreach ($prop in $Override.PSObject.Properties) {
             $hash[$prop.Name] = Merge-FreshAgentJsonObject -Base $hash[$prop.Name] -Override $prop.Value

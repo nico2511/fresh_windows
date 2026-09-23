@@ -491,7 +491,20 @@ function Invoke-SyncLocalScripts {
         $iconUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/assets/fresh-windows.ico"
         Write-FreshWindowsLaunchStub -FreshAppData $FreshAppData -Ref $RepoRef -LauncherUrl $launcherUrl | Out-Null
         Sync-GameModeLocalScripts -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $iconUrl | Out-Null
-        Show-Balloon -Title 'Scripts locaux' -Text "Mis a jour (ref $RepoRef). Redemarre l'agent si besoin." -Icon Info
+        if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
+            foreach ($mod in @(
+                    'lib/FreshAgent-SkillsEngine.ps1',
+                    'lib/FreshAgent-SkillHandlers.ps1',
+                    'lib/FreshAgent-GameSession.ps1',
+                    'ai/Ollama-Manager.ps1',
+                    'ai/Windows-Stt.ps1'
+                )) {
+                Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
+            }
+            $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
+            $script:FreshAgentReady = $true
+        }
+        Show-Balloon -Title 'Scripts locaux' -Text "Mis a jour (ref $RepoRef). Modules Fresh Agent recharges." -Icon Info
     }
     catch {
         Show-Balloon -Title 'Scripts locaux' -Text $_.Exception.Message -Icon Error
