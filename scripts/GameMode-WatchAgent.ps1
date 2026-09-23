@@ -133,6 +133,57 @@ $script:RepoRawRoot = $RepoRawRoot
 $UserSettingsPath = Join-Path $FreshAppData 'watch-agent-user.json'
 $WatchConfigUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/configs/game-mode-watch.json"
 
+function Initialize-WatchAgentSystrayEarly {
+    if ($script:NotifyIcon) { return }
+    Write-WatchLog 'Init UI (early)'
+    $script:HiddenForm = New-Object System.Windows.Forms.Form
+    $script:HiddenForm.Text = 'Fresh Windows Watch'
+    $script:HiddenForm.WindowState = 'Minimized'
+    $script:HiddenForm.ShowInTaskbar = $false
+    $script:HiddenForm.FormBorderStyle = 'FixedToolWindow'
+    $script:HiddenForm.Size = New-Object System.Drawing.Size(1, 1)
+    $script:HiddenForm.Opacity = 0
+    $script:HiddenForm.Add_FormClosed({
+            if ($script:NotifyIcon) {
+                $script:NotifyIcon.Visible = $false
+                $script:NotifyIcon.Dispose()
+            }
+            Exit-FreshWatchAgentSingleInstance
+        })
+
+    $script:NotifyIcon = New-Object System.Windows.Forms.NotifyIcon
+    $iconPath = Join-Path $script:FreshAppData 'fresh-windows.ico'
+    try {
+        if (Test-Path -LiteralPath $iconPath) {
+            $script:NotifyIcon.Icon = New-Object System.Drawing.Icon($iconPath)
+        }
+        else {
+            $script:NotifyIcon.Icon = [System.Drawing.SystemIcons]::Application
+        }
+    }
+    catch {
+        Write-WatchLog ("Icone early: {0}" -f $_.Exception.Message)
+        $script:NotifyIcon.Icon = [System.Drawing.SystemIcons]::Application
+    }
+    $script:NotifyIcon.Text = 'Fresh Agent (demarrage...)'
+    $earlyMenu = New-Object System.Windows.Forms.ContextMenuStrip
+    $null = $earlyMenu.Items.Add('Chargement des modules...')
+    $miQuitEarly = $earlyMenu.Items.Add('Quitter')
+    $miQuitEarly.Add_Click({
+            $script:NotifyIcon.Visible = $false
+            Exit-FreshWatchAgentSingleInstance
+            if ($script:HiddenForm) { $script:HiddenForm.Close() }
+            [System.Windows.Forms.Application]::Exit()
+        })
+    $script:NotifyIcon.ContextMenuStrip = $earlyMenu
+    $script:NotifyIcon.Visible = $true
+    Write-WatchLog 'NotifyIcon visible (early)'
+    try { Hide-WatchConsole } catch { }
+}
+
+Initialize-WatchAgentSystrayEarly
+
+Write-WatchLog 'Chargement GameMode-Common'
 $commonPath = $null
 if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
     $commonPath = Join-Path $PSScriptRoot 'GameMode-Common.ps1'
@@ -141,11 +192,18 @@ if ($commonPath -and (Test-Path -LiteralPath $commonPath)) { . $commonPath }
 else {
     $commonUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/scripts/GameMode-Common.ps1"
     $tmp = Join-Path $env:TEMP 'GameMode-Common.ps1'
-    Invoke-WebRequest -Uri $commonUrl -OutFile $tmp -UseBasicParsing
-    . $tmp
+    try {
+        Invoke-WebRequest -Uri $commonUrl -OutFile $tmp -UseBasicParsing -TimeoutSec 25
+        . $tmp
+    }
+    catch {
+        Write-WatchLog ("GameMode-Common download: {0}" -f $_.Exception.Message)
+    }
 }
+Write-WatchLog 'GameMode-Common pret'
 
 $script:FreshAgentReady = $false
+$script:FreshAgentModuleBootPending = $true
 $script:FreshAgentAi = $null
 $script:VoiceListenActive = $false
 $script:MiAiListenItem = $null
@@ -161,56 +219,12 @@ foreach ($faPath in $faConfigCandidates) {
     if ($faPath -and (Test-Path -LiteralPath $faPath)) {
         try {
             . $faPath
+            Write-WatchLog 'FreshAgent-Config charge (boot leger)'
             break
         }
         catch {
             Write-WatchLog ("FreshAgent-Config: {0}" -f $_.Exception.Message)
         }
-    }
-}
-if (Get-Command Import-FreshAgentStandardModules -ErrorAction SilentlyContinue) {
-    Import-FreshAgentStandardModules -FreshAppData $FreshAppData
-}
-elseif (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
-    foreach ($mod in @(
-            'lib/FreshAgent-SkillsEngine.ps1', 'lib/FreshAgent-SkillHandlers.ps1',
-            'lib/FreshAgent-Profiles.ps1', 'lib/FreshAgent-GameSession.ps1'
-        )) {
-        if (-not (Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData)) {
-            Write-WatchLog ("Module Fresh Agent absent: {0}" -f $mod)
-        }
-    }
-}
-if (-not (Get-Command Invoke-FreshAgentProfile -ErrorAction SilentlyContinue)) {
-    Write-WatchLog 'Invoke-FreshAgentProfile indisponible — sync scripts locaux recommande'
-}
-$dashBoot = Join-Path $FreshAppData 'lib\FreshAgent-Dashboard.ps1'
-if ((Test-Path -LiteralPath $dashBoot) -and -not (Get-Command Show-FreshAgentDashboard -ErrorAction SilentlyContinue)) {
-    try {
-        . $dashBoot
-        Write-WatchLog 'Fresh Agent Dashboard charge (boot)'
-    }
-    catch {
-        Write-WatchLog ("Dashboard boot: {0}" -f $_.Exception.Message)
-    }
-}
-if (Get-Command Ensure-FreshAgentAiBridgeLoaded -ErrorAction SilentlyContinue) {
-    if (Ensure-FreshAgentAiBridgeLoaded -FreshAppData $FreshAppData) {
-        Write-WatchLog 'Fresh Agent IA bridge charge (boot)'
-    }
-    else {
-        Write-WatchLog 'Fresh Agent IA bridge absent — sync ai\ et lib\ recommande'
-    }
-}
-if (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue) {
-    try {
-        $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
-        $script:FreshAgentReady = $true
-        Write-WatchLog 'Fresh Agent modules charges'
-        $script:FreshAgentDeferredBootPending = $true
-    }
-    catch {
-        Write-WatchLog ("Fresh Agent config: {0}" -f $_.Exception.Message)
     }
 }
 
@@ -341,6 +355,47 @@ function Update-FreshAgentTrayStatus {
     $script:NotifyIcon.Text = $text
 }
 
+function Invoke-FreshWatchAgentModuleBoot {
+    if (-not $script:FreshAgentModuleBootPending) { return }
+    $script:FreshAgentModuleBootPending = $false
+    Write-WatchLog 'Boot modules Fresh Agent (differe)...'
+    try {
+        if (Get-Command Import-FreshAgentStandardModules -ErrorAction SilentlyContinue) {
+            Import-FreshAgentStandardModules -FreshAppData $script:FreshAppData
+        }
+        elseif (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
+            foreach ($mod in @(
+                    'lib/FreshAgent-SkillsEngine.ps1', 'lib/FreshAgent-SkillHandlers.ps1',
+                    'lib/FreshAgent-Profiles.ps1', 'lib/FreshAgent-GameSession.ps1'
+                )) {
+                if (-not (Import-FreshAgentModule -RelativePath $mod -FreshAppData $script:FreshAppData)) {
+                    Write-WatchLog ("Module Fresh Agent absent: {0}" -f $mod)
+                }
+            }
+        }
+        Import-FreshAgentDashboardAtScriptScope | Out-Null
+        if (Get-Command Ensure-FreshAgentAiBridgeLoaded -ErrorAction SilentlyContinue) {
+            Ensure-FreshAgentAiBridgeLoaded -FreshAppData $script:FreshAppData | Out-Null
+        }
+        if (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue) {
+            $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData
+            $script:FreshAgentReady = $true
+            Write-WatchLog 'Fresh Agent modules charges (differe)'
+            $script:FreshAgentDeferredBootPending = $true
+        }
+        if ($script:FreshAgentAiMenu) {
+            $m = $script:FreshAgentAiMenu
+            Update-FreshAgentAiMenu -MiAiRoot $m.Root -MiAiToggle $m.Toggle -MiOllamaState $m.OllamaState `
+                -MiSttState $m.SttState -MiAiListen $m.Listen -MiTtsCycle $m.TtsCycle -MiRagToggle $m.RagToggle
+            if ($script:FreshAgentReady) { $m.Root.Enabled = $true }
+        }
+        Update-FreshAgentTrayStatus
+    }
+    catch {
+        Write-WatchLog ("Module boot: {0}" -f $_.Exception.Message)
+    }
+}
+
 function Invoke-FreshAgentDeferredBoot {
     if (-not $script:FreshAgentDeferredBootPending) { return }
     $script:FreshAgentDeferredBootPending = $false
@@ -374,6 +429,7 @@ function Invoke-FreshAgentDeferredBoot {
 function Invoke-WatchTick {
     $script:UserSettings = Get-WatchUserSettings
     Update-FreshAgentTrayStatus
+    Invoke-FreshWatchAgentModuleBoot
     Invoke-FreshAgentDeferredBoot
     Invoke-FreshAgentBackgroundResultPoll
     if (Get-Command Update-FreshAgentDashboardIfOpen -ErrorAction SilentlyContinue) {
@@ -1213,42 +1269,11 @@ function Stop-PendingSuggestedProcesses {
 
 # --- UI (formulaire cache obligatoire pour le message loop WinForms) ---
 $ErrorActionPreference = 'Continue'
-Write-WatchLog 'Init UI'
-
-$script:HiddenForm = New-Object System.Windows.Forms.Form
-$script:HiddenForm.Text = 'Fresh Windows Watch'
-$script:HiddenForm.WindowState = 'Minimized'
-$script:HiddenForm.ShowInTaskbar = $false
-$script:HiddenForm.FormBorderStyle = 'FixedToolWindow'
-$script:HiddenForm.Size = New-Object System.Drawing.Size(1, 1)
-$script:HiddenForm.Opacity = 0
-$script:HiddenForm.Add_FormClosed({
-    if ($script:NotifyIcon) {
-        $script:NotifyIcon.Visible = $false
-        $script:NotifyIcon.Dispose()
-    }
-    Exit-FreshWatchAgentSingleInstance
-})
-
-$script:NotifyIcon = New-Object System.Windows.Forms.NotifyIcon
-$iconPath = Join-Path $FreshAppData 'fresh-windows.ico'
-try {
-    if (Test-Path -LiteralPath $iconPath) {
-        $script:NotifyIcon.Icon = New-Object System.Drawing.Icon($iconPath)
-    }
-    else {
-        $script:NotifyIcon.Icon = [System.Drawing.SystemIcons]::Application
-    }
+if (-not $script:NotifyIcon) {
+    Initialize-WatchAgentSystrayEarly
 }
-catch {
-    Write-WatchLog ("Icone: {0}" -f $_.Exception.Message)
-    $script:NotifyIcon.Icon = [System.Drawing.SystemIcons]::Application
-}
-$script:NotifyIcon.Text = 'Fresh Agent'
-$script:NotifyIcon.Visible = $true
-Write-WatchLog 'NotifyIcon visible'
+Write-WatchLog 'Init UI (menu complet)'
 Update-FreshAgentTrayStatus
-Hide-WatchConsole
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 
@@ -1512,6 +1537,16 @@ $script:NotifyIcon.Add_MouseDoubleClick({ Open-FreshAgentDashboardPanel })
 
 $miAuto.Text = if ($script:UserSettings.autoSuggestKill) { 'Détection auto : ON' } else { 'Détection auto : OFF' }
 $miMon.Text = if ($script:UserSettings.monitorEnabled) { 'Surveillance : ON' } else { 'Surveillance : OFF' }
+
+$script:WatchBootTimer = New-Object System.Windows.Forms.Timer
+$script:WatchBootTimer.Interval = 400
+$script:WatchBootTimer.Add_Tick({
+        $script:WatchBootTimer.Stop()
+        $script:WatchBootTimer.Dispose()
+        Invoke-FreshWatchAgentModuleBoot
+        Invoke-FreshAgentDeferredBoot
+    })
+$script:WatchBootTimer.Start()
 
 $pollMs = [math]::Max(5000, [int]$script:WatchRules.pollIntervalSeconds * 1000)
 $timer = New-Object System.Windows.Forms.Timer
