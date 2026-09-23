@@ -674,13 +674,13 @@ function Start-FreshAgentAiPromptBackground {
 
     Show-Balloon -Title 'Fresh Agent IA' -Text 'Analyse en cours (Ollama)...' -Icon Info
 
-    $fresh = $script:FreshAppData
-    $repo = $script:RepoRef
+    $freshEsc = $script:FreshAppData.Replace("'", "''")
+    $repoEsc = $script:RepoRef.Replace("'", "''")
     $scriptBody = @"
 `$ErrorActionPreference = 'Continue'
 Add-Type -AssemblyName System.Windows.Forms
-`$fresh = '$($fresh.Replace("'", "''"))'
-`$repo = '$($repo.Replace("'", "''"))'
+`$fresh = '$freshEsc'
+`$repo = '$repoEsc'
 . (Join-Path `$fresh 'lib\FreshAgent-Config.ps1')
 . (Join-Path `$fresh 'lib\FreshAgent-SkillsEngine.ps1')
 . (Join-Path `$fresh 'lib\FreshAgent-SkillHandlers.ps1')
@@ -699,7 +699,7 @@ try {
   if (-not `$cfg.enabled) { throw 'IA desactivee — active IA : ON dans le menu.' }
   `$r = Invoke-FreshAgentAiTurn -UserPrompt `$prompt.Trim() -AiConfig `$cfg -RepoRef `$repo -FreshAppData `$fresh
   `$text = if (`$r.message) { [string]`$r.message } else { 'Termine.' }
-  if (`$r.skills -and `$r.skills.Count -gt 0) { `$text += "`nSkills: " + (`$r.skills -join ', ') }
+  if (`$r.skills -and `$r.skills.Count -gt 0) { `$text += ([Environment]::NewLine + 'Skills: ' + (`$r.skills -join ', ')) }
   Log `$text
   if (Get-Command Invoke-FreshAgentSpeak -ErrorAction SilentlyContinue) {
     Invoke-FreshAgentSpeak -Text `$text -AiConfig `$cfg -FreshAppData `$fresh | Out-Null
