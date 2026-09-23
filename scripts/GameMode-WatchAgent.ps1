@@ -705,7 +705,7 @@ try {
     Invoke-FreshAgentSpeak -Text `$text -AiConfig `$cfg -FreshAppData `$fresh | Out-Null
   }
   if (Get-Command Add-FreshAgentAiHistoryEntry -ErrorAction SilentlyContinue) {
-    Add-FreshAgentAiHistoryEntry -Prompt `$prompt.Trim() -Response `$text -Skills @(`$r.skills) -FreshAppData `$fresh
+    Add-FreshAgentAiHistoryEntry -Prompt `$prompt.Trim() -Response `$text -Skills `$r.skills -FreshAppData `$fresh
   }
   [System.Windows.Forms.MessageBox]::Show(`$text, 'Fresh Agent IA')
 }
