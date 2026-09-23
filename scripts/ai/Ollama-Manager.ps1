@@ -168,18 +168,46 @@ function Invoke-OllamaChat {
         $AiConfig,
         [int]$TimeoutSec = 120
     )
-    $base = Get-OllamaBaseUrl -AiConfig $AiConfig
-    $model = $AiConfig.ollama.defaultModel
-    $body = @{
-        model    = $model
-        messages = @(
-            @{ role = 'user'; content = $Prompt }
-        )
-        stream   = $false
-    } | ConvertTo-Json -Depth 6
-    $resp = Invoke-RestMethod -Uri "$base/api/chat" -Method Post -Body $body -ContentType 'application/json' -TimeoutSec $TimeoutSec
+    $resp = Invoke-OllamaChatCompletion -AiConfig $AiConfig -Messages @(
+        @{ role = 'user'; content = $Prompt }
+    ) -Tools @() -TimeoutSec $TimeoutSec
+    if (-not $resp.ok) { return $resp.message }
     if ($resp.message -and $resp.message.content) {
         return $resp.message.content
     }
-    return ($resp | ConvertTo-Json -Compress)
+    return ($resp.raw | ConvertTo-Json -Compress)
+}
+
+function Invoke-OllamaChatCompletion {
+    param(
+        $AiConfig,
+        [array]$Messages,
+        [array]$Tools = @(),
+        [int]$TimeoutSec = 120
+    )
+    $base = Get-OllamaBaseUrl -AiConfig $AiConfig
+    $model = $AiConfig.ollama.defaultModel
+    $bodyObj = @{
+        model    = $model
+        messages = @($Messages)
+        stream   = $false
+    }
+    if ($Tools -and $Tools.Count -gt 0) {
+        $bodyObj.tools = @($Tools)
+    }
+    $body = $bodyObj | ConvertTo-Json -Depth 12 -Compress
+    try {
+        $raw = Invoke-RestMethod -Uri "$base/api/chat" -Method Post -Body $body -ContentType 'application/json' -TimeoutSec $TimeoutSec
+        return @{
+            ok      = $true
+            message = $raw.message
+            raw     = $raw
+        }
+    }
+    catch {
+        return @{
+            ok      = $false
+            message = $_.Exception.Message
+        }
+    }
 }
