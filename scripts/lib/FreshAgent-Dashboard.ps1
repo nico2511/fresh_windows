@@ -1,6 +1,7 @@
 #Requires -Version 5.1
 <#
   Panneau Fresh Agent (clic gauche systray) — toggles et actions sans menu imbrique.
+  Les handlers WinForms doivent invoquer des ScriptBlock via Tag / $script: (pas de Function: lookup).
 #>
 
 function New-FreshAgentDashboardTabPage {
@@ -23,20 +24,25 @@ function Add-FreshAgentDashboardButton {
         [int]$Y,
         [int]$W = 220,
         [int]$H = 32,
-        [scriptblock]$OnClick
+        [Parameter(Mandatory)][string]$ActionKey
     )
     $btn = New-Object System.Windows.Forms.Button
     $btn.Text = $Text
     $btn.Location = New-Object System.Drawing.Point($X, $Y)
     $btn.Size = New-Object System.Drawing.Size($W, $H)
-    # WinForms callbacks n'ont pas le lookup Function: du module : try/catch + logique via $script:
+    $btn.Tag = $ActionKey
     $btn.Add_Click({
             param($sender, $e)
             try {
-                if ($OnClick) { & $OnClick $sender $e }
+                $key = [string]$sender.Tag
+                if ([string]::IsNullOrWhiteSpace($key)) { return }
+                $map = $script:FreshAgentDashboardActions
+                if (-not $map) { return }
+                $sb = $map[$key]
+                if ($sb -is [scriptblock]) { & $sb }
             }
             catch { }
-        }.GetNewClosure())
+        })
     $Parent.Controls.Add($btn) | Out-Null
     return $btn
 }
@@ -47,19 +53,26 @@ function Add-FreshAgentDashboardCheck {
         [string]$Text,
         [int]$X,
         [int]$Y,
-        [scriptblock]$OnChanged
+        [Parameter(Mandatory)][string]$ActionKey
     )
     $cb = New-Object System.Windows.Forms.CheckBox
     $cb.Text = $Text
     $cb.AutoSize = $true
     $cb.Location = New-Object System.Drawing.Point($X, $Y)
+    $cb.Tag = $ActionKey
     $cb.Add_CheckedChanged({
             param($sender, $e)
             try {
-                if ($OnChanged) { & $OnChanged $sender $e }
+                if ($script:FreshAgentDashboardUi -and $script:FreshAgentDashboardUi._suppress) { return }
+                $key = [string]$sender.Tag
+                if ([string]::IsNullOrWhiteSpace($key)) { return }
+                $map = $script:FreshAgentDashboardActions
+                if (-not $map) { return }
+                $sb = $map[$key]
+                if ($sb -is [scriptblock]) { & $sb ([bool]$sender.Checked) }
             }
             catch { }
-        }.GetNewClosure())
+        })
     $Parent.Controls.Add($cb) | Out-Null
     return $cb
 }
@@ -94,8 +107,7 @@ function Update-FreshAgentDashboardUi {
     }
 }
 
-# Publie des ScriptBlock sur $script: : les handlers WinForms ne resolvent pas Function: apres import.
-$script:FreshAgentDashboardInvokeGetState = {
+function Get-FreshAgentDashboardStateSafe {
     param($GetState)
     $sb = $null
     if ($GetState -is [scriptblock]) { $sb = $GetState }
@@ -103,35 +115,6 @@ $script:FreshAgentDashboardInvokeGetState = {
     if (-not $sb) { return @{} }
     try { return & $sb }
     catch { return @{} }
-}
-
-$script:FreshAgentDashboardInvokeAction = {
-    param(
-        $Action,
-        [object[]]$ActionArgs
-    )
-    $sb = $null
-    if ($Action -is [scriptblock]) { $sb = $Action }
-    elseif ($Action -is [System.Management.Automation.CommandInfo]) { $sb = $Action.ScriptBlock }
-    if (-not $sb) { return }
-    try {
-        if ($ActionArgs -and $ActionArgs.Count -gt 0) { & $sb @ActionArgs }
-        else { & $sb }
-    }
-    catch { }
-}
-
-function Invoke-FreshAgentDashboardGetStateSafe {
-    param($GetState)
-    & $script:FreshAgentDashboardInvokeGetState $GetState
-}
-
-function Invoke-FreshAgentDashboardActionSafe {
-    param(
-        $Action,
-        [object[]]$ActionArgs
-    )
-    & $script:FreshAgentDashboardInvokeAction -Action $Action -ActionArgs $ActionArgs
 }
 
 function Show-FreshAgentDashboard {
@@ -146,8 +129,11 @@ function Show-FreshAgentDashboard {
         throw 'GetState doit etre un ScriptBlock'
     }
 
+    $script:FreshAgentDashboardActions = $Actions
+    $script:FreshAgentDashboardGetState = $GetState
+
     if ($script:FreshAgentDashboardForm -and -not $script:FreshAgentDashboardForm.IsDisposed) {
-        Update-FreshAgentDashboardUi -Ui $script:FreshAgentDashboardUi -State (& $script:FreshAgentDashboardInvokeGetState -GetState $GetState)
+        Update-FreshAgentDashboardUi -Ui $script:FreshAgentDashboardUi -State (Get-FreshAgentDashboardStateSafe -GetState $GetState)
         $script:FreshAgentDashboardForm.Show()
         $script:FreshAgentDashboardForm.BringToFront()
         $script:FreshAgentDashboardForm.Activate()
@@ -182,70 +168,25 @@ function Show-FreshAgentDashboard {
 
     # --- Jeu ---
     $tabGame = New-FreshAgentDashboardTabPage -Title 'Jeu' -TabControl $tabs
-    $script:FreshAgentDashboardActions = $Actions
-
-    $ui.ChkAuto = Add-FreshAgentDashboardCheck -Parent $tabGame -Text 'Detection auto (suggestions kill)' -X 8 -Y 12 -OnChanged {
-        if ($script:FreshAgentDashboardUi._suppress) { return }
-        $a = $script:FreshAgentDashboardActions
-        if ($a.ToggleAutoSuggest) { & $script:FreshAgentDashboardInvokeAction -Action $a.ToggleAutoSuggest -ActionArgs @($script:FreshAgentDashboardUi.ChkAuto.Checked) }
-    }
-    $ui.ChkMon = Add-FreshAgentDashboardCheck -Parent $tabGame -Text 'Surveillance CPU / alertes' -X 8 -Y 40 -OnChanged {
-        if ($script:FreshAgentDashboardUi._suppress) { return }
-        $a = $script:FreshAgentDashboardActions
-        if ($a.ToggleMonitor) { & $script:FreshAgentDashboardInvokeAction -Action $a.ToggleMonitor -ActionArgs @($script:FreshAgentDashboardUi.ChkMon.Checked) }
-    }
-    Add-FreshAgentDashboardButton -Parent $tabGame -Text 'Mode jeu (liste + launchers)' -X 8 -Y 80 -W 240 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.GameModeKill) { & $script:FreshAgentDashboardInvokeAction -Action $a.GameModeKill }
-    } | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabGame -Text 'Fermer launchers inactifs' -X 8 -Y 118 -W 240 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.IdleLaunchers) { & $script:FreshAgentDashboardInvokeAction -Action $a.IdleLaunchers }
-    } | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabGame -Text 'Tuer suggestions en attente' -X 8 -Y 156 -W 240 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.PendingKill) { & $script:FreshAgentDashboardInvokeAction -Action $a.PendingKill }
-    } | Out-Null
+    $ui.ChkAuto = Add-FreshAgentDashboardCheck -Parent $tabGame -Text 'Detection auto (suggestions kill)' -X 8 -Y 12 -ActionKey 'ToggleAutoSuggest'
+    $ui.ChkMon = Add-FreshAgentDashboardCheck -Parent $tabGame -Text 'Surveillance CPU / alertes' -X 8 -Y 40 -ActionKey 'ToggleMonitor'
+    Add-FreshAgentDashboardButton -Parent $tabGame -Text 'Mode jeu (liste + launchers)' -X 8 -Y 80 -W 240 -ActionKey 'GameModeKill' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabGame -Text 'Fermer launchers inactifs' -X 8 -Y 118 -W 240 -ActionKey 'IdleLaunchers' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabGame -Text 'Tuer suggestions en attente' -X 8 -Y 156 -W 240 -ActionKey 'PendingKill' | Out-Null
 
     # --- Skills & profils ---
     $tabSkills = New-FreshAgentDashboardTabPage -Title 'Skills' -TabControl $tabs
-    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Profil Jeu' -X 8 -Y 12 -W 150 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.ProfileGame) { & $script:FreshAgentDashboardInvokeAction -Action $a.ProfileGame }
-    } | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Profil Travail' -X 168 -Y 12 -W 150 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.ProfileWork) { & $script:FreshAgentDashboardInvokeAction -Action $a.ProfileWork }
-    } | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Profil Clean' -X 328 -Y 12 -W 150 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.ProfileClean) { & $script:FreshAgentDashboardInvokeAction -Action $a.ProfileClean }
-    } | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Etat systeme' -X 8 -Y 56 -W 220 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.SkillHealth) { & $script:FreshAgentDashboardInvokeAction -Action $a.SkillHealth }
-    } | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Session jeu (DND)' -X 8 -Y 94 -W 220 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.SkillGameSession) { & $script:FreshAgentDashboardInvokeAction -Action $a.SkillGameSession }
-    } | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Fin session jeu' -X 8 -Y 132 -W 220 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.SkillEndGame) { & $script:FreshAgentDashboardInvokeAction -Action $a.SkillEndGame }
-    } | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Profil Jeu' -X 8 -Y 12 -W 150 -ActionKey 'ProfileGame' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Profil Travail' -X 168 -Y 12 -W 150 -ActionKey 'ProfileWork' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Profil Clean' -X 328 -Y 12 -W 150 -ActionKey 'ProfileClean' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Etat systeme' -X 8 -Y 56 -W 220 -ActionKey 'SkillHealth' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Session jeu (DND)' -X 8 -Y 94 -W 220 -ActionKey 'SkillGameSession' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Fin session jeu' -X 8 -Y 132 -W 220 -ActionKey 'SkillEndGame' | Out-Null
 
     # --- IA ---
     $tabAi = New-FreshAgentDashboardTabPage -Title 'IA' -TabControl $tabs
-    $ui.ChkAi = Add-FreshAgentDashboardCheck -Parent $tabAi -Text 'Intelligence artificielle (Ollama)' -X 8 -Y 12 -OnChanged {
-        if ($script:FreshAgentDashboardUi._suppress) { return }
-        $a = $script:FreshAgentDashboardActions
-        if ($a.SetAiEnabled) { & $script:FreshAgentDashboardInvokeAction -Action $a.SetAiEnabled -ActionArgs @($script:FreshAgentDashboardUi.ChkAi.Checked) }
-    }
-    $ui.ChkRag = Add-FreshAgentDashboardCheck -Parent $tabAi -Text 'RAG guides Fresh Windows' -X 8 -Y 40 -OnChanged {
-        if ($script:FreshAgentDashboardUi._suppress) { return }
-        $a = $script:FreshAgentDashboardActions
-        if ($a.SetRagEnabled) { & $script:FreshAgentDashboardInvokeAction -Action $a.SetRagEnabled -ActionArgs @($script:FreshAgentDashboardUi.ChkRag.Checked) }
-    }
+    $ui.ChkAi = Add-FreshAgentDashboardCheck -Parent $tabAi -Text 'Intelligence artificielle (Ollama)' -X 8 -Y 12 -ActionKey 'SetAiEnabled'
+    $ui.ChkRag = Add-FreshAgentDashboardCheck -Parent $tabAi -Text 'RAG guides Fresh Windows' -X 8 -Y 40 -ActionKey 'SetRagEnabled'
     $ui.LblOllama = New-Object System.Windows.Forms.Label
     $ui.LblOllama.AutoSize = $true
     $ui.LblOllama.Location = New-Object System.Drawing.Point(8, 72)
@@ -257,53 +198,20 @@ function Show-FreshAgentDashboard {
     $ui.LblStt.Text = 'STT : ?'
     $tabAi.Controls.Add($ui.LblStt) | Out-Null
 
-    Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Demarrer Ollama' -X 8 -Y 120 -W 160 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.StartOllama) { & $script:FreshAgentDashboardInvokeAction -Action $a.StartOllama }
-    } | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Telecharger modele' -X 176 -Y 120 -W 160 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.EnsureModel) { & $script:FreshAgentDashboardInvokeAction -Action $a.EnsureModel }
-    } | Out-Null
-    $ui.BtnListen = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Ecouter (STT)' -X 8 -Y 158 -W 160 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.VoiceListen) { & $script:FreshAgentDashboardInvokeAction -Action $a.VoiceListen }
-    }
-    Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Cycle TTS' -X 176 -Y 158 -W 160 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.TtsCycle) { & $script:FreshAgentDashboardInvokeAction -Action $a.TtsCycle }
-    } | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Tester IA (prompt)' -X 8 -Y 196 -W 160 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.AiTest) { & $script:FreshAgentDashboardInvokeAction -Action $a.AiTest }
-    } | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Historique IA' -X 176 -Y 196 -W 160 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.AiHistory) { & $script:FreshAgentDashboardInvokeAction -Action $a.AiHistory }
-    } | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Demarrer Ollama' -X 8 -Y 120 -W 160 -ActionKey 'StartOllama' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Telecharger modele' -X 176 -Y 120 -W 160 -ActionKey 'EnsureModel' | Out-Null
+    $ui.BtnListen = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Ecouter (STT)' -X 8 -Y 158 -W 160 -ActionKey 'VoiceListen'
+    Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Cycle TTS' -X 176 -Y 158 -W 160 -ActionKey 'TtsCycle' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Tester IA (prompt)' -X 8 -Y 196 -W 160 -ActionKey 'AiTest' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Historique IA' -X 176 -Y 196 -W 160 -ActionKey 'AiHistory' | Out-Null
 
     # --- Fresh Windows ---
     $tabFw = New-FreshAgentDashboardTabPage -Title 'Fresh Windows' -TabControl $tabs
-    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'Menu interactif (admin)' -X 8 -Y 12 -W 240 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.FwMenu) { & $script:FreshAgentDashboardInvokeAction -Action $a.FwMenu }
-    } | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'Maintenance WinUtil' -X 8 -Y 50 -W 240 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.FwMaintenance) { & $script:FreshAgentDashboardInvokeAction -Action $a.FwMaintenance }
-    } | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'Mode jeu (launcher admin)' -X 8 -Y 88 -W 240 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.FwGameMode) { & $script:FreshAgentDashboardInvokeAction -Action $a.FwGameMode }
-    } | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'Mettre a jour scripts locaux' -X 8 -Y 126 -W 240 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.SyncScripts) { & $script:FreshAgentDashboardInvokeAction -Action $a.SyncScripts }
-    } | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'PowerShell (sans admin)' -X 8 -Y 164 -W 240 -OnClick {
-        $a = $script:FreshAgentDashboardActions
-        if ($a.OpenPowerShell) { & $script:FreshAgentDashboardInvokeAction -Action $a.OpenPowerShell }
-    } | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'Menu interactif (admin)' -X 8 -Y 12 -W 240 -ActionKey 'FwMenu' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'Maintenance WinUtil' -X 8 -Y 50 -W 240 -ActionKey 'FwMaintenance' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'Mode jeu (launcher admin)' -X 8 -Y 88 -W 240 -ActionKey 'FwGameMode' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'Mettre a jour scripts locaux' -X 8 -Y 126 -W 240 -ActionKey 'SyncScripts' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'PowerShell (sans admin)' -X 8 -Y 164 -W 240 -ActionKey 'OpenPowerShell' | Out-Null
 
     $btnClose = New-Object System.Windows.Forms.Button
     $btnClose.Text = 'Fermer'
@@ -317,9 +225,16 @@ function Show-FreshAgentDashboard {
     $btnQuit.Text = 'Quitter agent'
     $btnQuit.Location = New-Object System.Drawing.Point(424, 378)
     $btnQuit.Size = New-Object System.Drawing.Size(84, 28)
+    $btnQuit.Tag = 'QuitAgent'
     $btnQuit.Add_Click({
-            $a = $script:FreshAgentDashboardActions
-        if ($a.QuitAgent) { & $script:FreshAgentDashboardInvokeAction -Action $a.QuitAgent }
+            param($sender, $e)
+            try {
+                $map = $script:FreshAgentDashboardActions
+                if (-not $map) { return }
+                $sb = $map['QuitAgent']
+                if ($sb -is [scriptblock]) { & $sb }
+            }
+            catch { }
         })
     $form.Controls.Add($btnQuit) | Out-Null
 
@@ -329,7 +244,10 @@ function Show-FreshAgentDashboard {
             if ($form.IsDisposed) { return }
             try {
                 if (-not $script:FreshAgentDashboardGetState) { return }
-                Update-FreshAgentDashboardUi -Ui $script:FreshAgentDashboardUi -State (& $script:FreshAgentDashboardInvokeGetState -GetState $script:FreshAgentDashboardGetState)
+                $st = @{}
+                try { $st = & $script:FreshAgentDashboardGetState } catch { $st = @{} }
+                if (-not $st) { $st = @{} }
+                Update-FreshAgentDashboardUi -Ui $script:FreshAgentDashboardUi -State $st
             }
             catch { }
         })
@@ -341,19 +259,21 @@ function Show-FreshAgentDashboard {
 
     $script:FreshAgentDashboardForm = $form
     $script:FreshAgentDashboardUi = $ui
-    $script:FreshAgentDashboardGetState = if ($GetState -is [scriptblock]) {
-        $GetState
-    }
-    else {
-        (Get-Command Get-FreshAgentDashboardState -CommandType Function -ErrorAction Stop).ScriptBlock
-    }
 
-    Update-FreshAgentDashboardUi -Ui $ui -State (& $script:FreshAgentDashboardInvokeGetState -GetState $GetState)
+    Update-FreshAgentDashboardUi -Ui $ui -State (Get-FreshAgentDashboardStateSafe -GetState $GetState)
     [void]$form.Show($script:HiddenForm)
 }
 
 function Update-FreshAgentDashboardIfOpen {
     if (-not $script:FreshAgentDashboardForm -or $script:FreshAgentDashboardForm.IsDisposed) { return }
     if (-not $script:FreshAgentDashboardGetState) { return }
-    Update-FreshAgentDashboardUi -Ui $script:FreshAgentDashboardUi -State (& $script:FreshAgentDashboardInvokeGetState -GetState $script:FreshAgentDashboardGetState)
+    try {
+        Update-FreshAgentDashboardUi -Ui $script:FreshAgentDashboardUi -State (Get-FreshAgentDashboardStateSafe -GetState $script:FreshAgentDashboardGetState)
+    }
+    catch {
+        try {
+            Update-FreshAgentDashboardUi -Ui $script:FreshAgentDashboardUi -State (& $script:FreshAgentDashboardGetState)
+        }
+        catch { }
+    }
 }
