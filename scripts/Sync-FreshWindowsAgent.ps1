@@ -34,7 +34,12 @@ if ([string]::IsNullOrWhiteSpace($RepoRef)) {
 
 $RepoRawRoot = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef"
 
-foreach ($scriptName in @('GameMode-Common.ps1', 'Invoke-GameModeKill.ps1', 'GameMode-WatchAgent.ps1')) {
+foreach ($scriptName in @(
+        'GameMode-Common.ps1',
+        'Invoke-GameModeKill.ps1',
+        'GameMode-WatchAgent.ps1',
+        'Sync-FreshWindowsAgent.ps1'
+    )) {
     $dest = Join-Path $FreshAppData $scriptName
     $url = "$RepoRawRoot/scripts/$scriptName"
     Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing

@@ -50,7 +50,13 @@ Get-CimInstance Win32_Process |
 
 - Menu systray : **Mettre a jour scripts locaux**
 - Tache planifiee : `FreshWindows-SyncLocalScripts` (dimanche)
-- Script : `scripts/Sync-FreshWindowsAgent.ps1` (registry skills dynamique)
+- Script local : `%LOCALAPPDATA%\FreshWindows\Sync-FreshWindowsAgent.ps1`
+
+**Premiere install** (fichier sync absent) — une ligne :
+
+```powershell
+$fresh = Join-Path $env:LOCALAPPDATA 'FreshWindows'; New-Item -ItemType Directory -Path $fresh -Force | Out-Null; $ref='main'; Invoke-WebRequest -Uri "https://raw.githubusercontent.com/nico2511/fresh_windows/$ref/scripts/Sync-FreshWindowsAgent.ps1" -OutFile (Join-Path $fresh 'Sync-FreshWindowsAgent.ps1') -UseBasicParsing; powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $fresh 'Sync-FreshWindowsAgent.ps1') -RepoRef $ref
+```
 
 ## STT
 

@@ -1154,6 +1154,17 @@ function Open-FreshAgentDashboardPanel {
 
 function Invoke-SyncLocalScripts {
     try {
+        $syncScript = Join-Path $FreshAppData 'Sync-FreshWindowsAgent.ps1'
+        if (-not (Test-Path -LiteralPath $syncScript)) {
+            $url = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/scripts/Sync-FreshWindowsAgent.ps1"
+            Invoke-WebRequest -Uri $url -OutFile $syncScript -UseBasicParsing
+            Write-WatchLog 'Sync-FreshWindowsAgent.ps1 telecharge'
+        }
+        if (Test-Path -LiteralPath $syncScript) {
+            & $psExe -NoProfile -ExecutionPolicy Bypass -File $syncScript -RepoRef $RepoRef
+            Show-Balloon -Title 'Scripts locaux' -Text "Sync Fresh Agent OK (ref $RepoRef)." -Icon Info
+            return
+        }
         $corePath = Join-Path $FreshAppData 'Launcher-Core.ps1'
         $coreUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/scripts/lib/Launcher-Core.ps1"
         Invoke-WebRequest -Uri $coreUrl -OutFile $corePath -UseBasicParsing
