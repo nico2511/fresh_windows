@@ -321,6 +321,29 @@ function Import-FreshAgentModule {
     return $false
 }
 
+function Ensure-FreshAgentSkillsLoaded {
+    param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
+    if (Get-Command Invoke-FreshAgentSkill -ErrorAction SilentlyContinue) {
+        return $true
+    }
+    if (Get-Command Import-FreshAgentStandardModules -ErrorAction SilentlyContinue) {
+        Import-FreshAgentStandardModules -FreshAppData $FreshAppData
+    }
+    else {
+        foreach ($mod in @(
+                'lib/FreshAgent-SkillsEngine.ps1',
+                'lib/FreshAgent-SkillHandlers.ps1',
+                'lib/FreshAgent-GameSession.ps1',
+                'lib/FreshAgent-Inventory.ps1'
+            )) {
+            if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
+                Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
+            }
+        }
+    }
+    return [bool](Get-Command Invoke-FreshAgentSkill -ErrorAction SilentlyContinue)
+}
+
 function Import-FreshAgentStandardModules {
     param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
     foreach ($mod in @(
