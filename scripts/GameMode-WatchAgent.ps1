@@ -128,6 +128,16 @@ elseif (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
 if (-not (Get-Command Invoke-FreshAgentProfile -ErrorAction SilentlyContinue)) {
     Write-WatchLog 'Invoke-FreshAgentProfile indisponible — sync scripts locaux recommande'
 }
+$dashBoot = Join-Path $FreshAppData 'lib\FreshAgent-Dashboard.ps1'
+if ((Test-Path -LiteralPath $dashBoot) -and -not (Get-Command Show-FreshAgentDashboard -ErrorAction SilentlyContinue)) {
+    try {
+        . $dashBoot
+        Write-WatchLog 'Fresh Agent Dashboard charge (boot)'
+    }
+    catch {
+        Write-WatchLog ("Dashboard boot: {0}" -f $_.Exception.Message)
+    }
+}
 if (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue) {
     try {
         $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
@@ -837,14 +847,36 @@ function Update-FreshAgentAiMenu {
     }
 }
 
-function Ensure-FreshAgentDashboardLoaded {
+function Import-FreshAgentDashboardAtScriptScope {
     if (Get-Command Show-FreshAgentDashboard -ErrorAction SilentlyContinue) {
         return $true
     }
-    if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
-        return [bool](Import-FreshAgentModule -RelativePath 'lib/FreshAgent-Dashboard.ps1' -FreshAppData $script:FreshAppData)
+    $candidates = @(
+        (Join-Path $script:FreshAppData 'lib\FreshAgent-Dashboard.ps1')
+    )
+    if ($PSScriptRoot) {
+        $candidates += (Join-Path $PSScriptRoot 'lib\FreshAgent-Dashboard.ps1')
     }
-    return $false
+    foreach ($path in ($candidates | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        try {
+            . $path
+            if (Get-Command Show-FreshAgentDashboard -ErrorAction SilentlyContinue) {
+                return $true
+            }
+        }
+        catch {
+            Write-WatchLog ("Dashboard dot-source: {0}" -f $_.Exception.Message)
+        }
+    }
+    if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
+        Import-FreshAgentModule -RelativePath 'lib/FreshAgent-Dashboard.ps1' -FreshAppData $script:FreshAppData | Out-Null
+    }
+    return [bool](Get-Command Show-FreshAgentDashboard -ErrorAction SilentlyContinue)
+}
+
+function Ensure-FreshAgentDashboardLoaded {
+    Import-FreshAgentDashboardAtScriptScope
 }
 
 function Get-FreshAgentDashboardState {
@@ -942,10 +974,18 @@ function Set-FreshAgentRagEnabledFromUi {
 }
 
 function Open-FreshAgentDashboardPanel {
-    if (-not (Ensure-FreshAgentDashboardLoaded)) {
-        Show-Balloon -Title 'Fresh Agent' -Text 'Panneau absent — sync scripts locaux (FreshAgent-Dashboard.ps1).' -Icon Warning
+    try {
+        if (-not (Ensure-FreshAgentDashboardLoaded)) {
+            Show-Balloon -Title 'Fresh Agent' -Text 'Panneau absent — sync scripts locaux (lib\FreshAgent-Dashboard.ps1) puis redemarrer l agent.' -Icon Warning
+            return
+        }
+    }
+    catch {
+        Write-WatchLog ("Dashboard load: {0}" -f $_.Exception.Message)
+        Show-Balloon -Title 'Fresh Agent' -Text $_.Exception.Message -Icon Error
         return
     }
+    try {
     if (-not $script:FreshAgentDashboardActionMap) {
         $script:FreshAgentDashboardActionMap = @{
             ToggleAutoSuggest = {
@@ -1008,7 +1048,12 @@ function Open-FreshAgentDashboardPanel {
             }
         }
     }
-    Show-FreshAgentDashboard -Actions $script:FreshAgentDashboardActionMap -GetState ${function:Get-FreshAgentDashboardState}
+        Show-FreshAgentDashboard -Actions $script:FreshAgentDashboardActionMap -GetState ${function:Get-FreshAgentDashboardState}
+    }
+    catch {
+        Write-WatchLog ("Dashboard open: {0}" -f $_.Exception.Message)
+        Show-Balloon -Title 'Fresh Agent' -Text $_.Exception.Message -Icon Error
+    }
 }
 
 function Invoke-SyncLocalScripts {
@@ -1044,6 +1089,7 @@ function Invoke-SyncLocalScripts {
             $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
             $script:FreshAgentReady = $true
         }
+        Import-FreshAgentDashboardAtScriptScope | Out-Null
         if (Get-Command Write-FreshAgentLog -ErrorAction SilentlyContinue) {
             Write-FreshAgentLog -Category 'Sync' -Message "Menu sync OK ref=$RepoRef" -FreshAppData $FreshAppData
         }
