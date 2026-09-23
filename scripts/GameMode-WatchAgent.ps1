@@ -72,6 +72,9 @@ try {
 $RepoRef = if ($env:FRESH_WIN_REF) { $env:FRESH_WIN_REF.Trim() } else { 'main' }
 $RepoRawRoot = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef"
 $FreshAppData = Join-Path $env:LOCALAPPDATA 'FreshWindows'
+$script:RepoRef = $RepoRef
+$script:FreshAppData = $FreshAppData
+$script:RepoRawRoot = $RepoRawRoot
 $UserSettingsPath = Join-Path $FreshAppData 'watch-agent-user.json'
 $WatchConfigUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/configs/game-mode-watch.json"
 
@@ -107,25 +110,21 @@ foreach ($faPath in $faConfigCandidates) {
         }
     }
 }
-if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
+if (Get-Command Import-FreshAgentStandardModules -ErrorAction SilentlyContinue) {
+    Import-FreshAgentStandardModules -FreshAppData $FreshAppData
+}
+elseif (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
     foreach ($mod in @(
-            'lib/FreshAgent-SkillsEngine.ps1',
-            'lib/FreshAgent-SkillHandlers.ps1',
-            'lib/FreshAgent-GameSession.ps1',
-            'ai/Ollama-Manager.ps1',
-            'ai/FreshAgent-OllamaBridge.ps1',
-            'ai/Windows-Stt.ps1',
-            'ai/FreshAgent-Tts.ps1',
-            'lib/FreshAgent-Inventory.ps1',
-            'lib/FreshAgent-Rag.ps1',
-            'lib/FreshAgent-History.ps1',
-            'lib/FreshAgent-Profiles.ps1',
-            'lib/FreshAgent-Log.ps1'
+            'lib/FreshAgent-SkillsEngine.ps1', 'lib/FreshAgent-SkillHandlers.ps1',
+            'lib/FreshAgent-Profiles.ps1', 'lib/FreshAgent-GameSession.ps1'
         )) {
         if (-not (Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData)) {
             Write-WatchLog ("Module Fresh Agent absent: {0}" -f $mod)
         }
     }
+}
+if (-not (Get-Command Invoke-FreshAgentProfile -ErrorAction SilentlyContinue)) {
+    Write-WatchLog 'Invoke-FreshAgentProfile indisponible — sync scripts locaux recommande'
 }
 if (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue) {
     try {
@@ -456,6 +455,20 @@ function Test-LocalScriptsStale {
     catch { return $true }
 }
 
+function Ensure-FreshAgentProfileReady {
+    if (Get-Command Invoke-FreshAgentProfile -ErrorAction SilentlyContinue) {
+        return $true
+    }
+    if (Get-Command Import-FreshAgentStandardModules -ErrorAction SilentlyContinue) {
+        Import-FreshAgentStandardModules -FreshAppData $script:FreshAppData
+    }
+    elseif (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
+        Import-FreshAgentModule -RelativePath 'lib/FreshAgent-SkillsEngine.ps1' -FreshAppData $script:FreshAppData | Out-Null
+        Import-FreshAgentModule -RelativePath 'lib/FreshAgent-Profiles.ps1' -FreshAppData $script:FreshAppData | Out-Null
+    }
+    return [bool](Get-Command Invoke-FreshAgentProfile -ErrorAction SilentlyContinue)
+}
+
 function Invoke-FreshAgentSkillMenu {
     param(
         [Parameter(Mandatory)]
@@ -782,12 +795,19 @@ function Invoke-SyncLocalScripts {
                     'ai/FreshAgent-OllamaBridge.ps1',
                     'ai/Windows-Stt.ps1',
                     'ai/FreshAgent-Tts.ps1',
-                    'lib/FreshAgent-Inventory.ps1'
+                    'lib/FreshAgent-Inventory.ps1',
+                    'lib/FreshAgent-Rag.ps1',
+                    'lib/FreshAgent-History.ps1',
+                    'lib/FreshAgent-Profiles.ps1',
+                    'lib/FreshAgent-Log.ps1'
                 )) {
                     Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
                 }
             $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
             $script:FreshAgentReady = $true
+        }
+        if (Get-Command Write-FreshAgentLog -ErrorAction SilentlyContinue) {
+            Write-FreshAgentLog -Category 'Sync' -Message "Menu sync OK ref=$RepoRef" -FreshAppData $FreshAppData
         }
         Show-Balloon -Title 'Scripts locaux' -Text "Mis a jour (ref $RepoRef). Modules Fresh Agent recharges." -Icon Info
     }
@@ -899,11 +919,24 @@ foreach ($pair in @(
     $item.Tag = $pair.Id
     $item.Add_Click({
             param($sender, $e)
-            if (-not $script:FreshAgentReady) { return }
-            $r = Invoke-FreshAgentProfile -ProfileId $sender.Tag -RepoRef $RepoRef -FreshAppData $FreshAppData
-            $text = if ($r.message) { [string]$r.message } else { 'OK' }
-            Show-Balloon -Title 'Profil' -Text $text -Icon Info
-            Update-FreshAgentTrayStatus
+            try {
+                if (-not $script:FreshAgentReady) {
+                    Show-Balloon -Title 'Profil' -Text 'Modules non charges.' -Icon Warning
+                    return
+                }
+                if (-not (Ensure-FreshAgentProfileReady)) {
+                    Show-Balloon -Title 'Profil' -Text 'FreshAgent-Profiles absent. Mettre a jour scripts locaux puis redemarrer l agent.' -Icon Warning
+                    return
+                }
+                $r = Invoke-FreshAgentProfile -ProfileId $sender.Tag -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData
+                $text = if ($r.message) { [string]$r.message } else { 'OK' }
+                Show-Balloon -Title 'Profil' -Text $text -Icon Info
+                Update-FreshAgentTrayStatus
+            }
+            catch {
+                Write-WatchLog ("Profil: {0}" -f $_.Exception.Message)
+                Show-Balloon -Title 'Profil' -Text $_.Exception.Message -Icon Error
+            }
         })
     $miProfiles.DropDownItems.Add($item) | Out-Null
 }
