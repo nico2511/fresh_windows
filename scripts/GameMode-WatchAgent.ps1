@@ -72,7 +72,7 @@ function Enter-FreshWatchAgentSingleInstance {
             }
             else {
                 $pids = ($peers | ForEach-Object { [string]$_.ProcessId }) -join ','
-                Write-WatchLog ("Autre instance active (PID $pids) — exit. Arreter: Stop-Process -Id $pids -Force")
+                Write-WatchLog ('Autre instance active (PID {0}) — exit. Arreter: Stop-Process -Id {0} -Force' -f $pids)
                 exit 0
             }
         }
