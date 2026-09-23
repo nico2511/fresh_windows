@@ -287,6 +287,9 @@ if (Test-Path -LiteralPath $agentAiPath) {
     elseif ($ai.stt.provider -ne 'windows' -and $ai.stt.provider -ne 'cyberScribe') {
         Fail 'agent-ai.json : stt.provider doit etre windows ou cyberScribe'
     }
+    elseif ($ai.stt.provider -eq 'windows' -and $null -eq $ai.stt.listenSeconds) {
+        Fail 'agent-ai.json : stt.listenSeconds manquant (windows)'
+    }
     else {
         Ok ("agent-ai.json (enabled=$($ai.enabled), model=$($ai.ollama.defaultModel), stt=$($ai.stt.provider))")
     }
