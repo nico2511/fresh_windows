@@ -162,9 +162,17 @@ function Invoke-FreshAgentAiTurn {
     $maxRounds = Get-FreshAgentAiMaxToolRounds -AiConfig $AiConfig
     $system = Get-FreshAgentAiSystemPrompt -AiConfig $AiConfig -FreshAppData $FreshAppData
 
+    $userContent = $UserPrompt
+    if (Get-Command Get-FreshAgentRagContextText -ErrorAction SilentlyContinue) {
+        $rag = Get-FreshAgentRagContextText -UserPrompt $UserPrompt -AiConfig $AiConfig -FreshAppData $FreshAppData -RepoRef $RepoRef
+        if ($rag) {
+            $userContent = "$UserPrompt`n`n$rag"
+        }
+    }
+
     $messages = [System.Collections.ArrayList]@(
         @{ role = 'system'; content = $system },
-        @{ role = 'user'; content = $UserPrompt }
+        @{ role = 'user'; content = $userContent }
     )
 
     $executedSkills = @()

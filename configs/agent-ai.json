@@ -39,6 +39,8 @@
   },
   "rag": {
     "enabled": false,
-    "includeInventoryInPrompt": true
+    "includeInventoryInPrompt": true,
+    "topK": 4,
+    "comment": "enabled=true active la recherche guides (index local rag/index.json)"
   }
 }

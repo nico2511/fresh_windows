@@ -179,7 +179,10 @@ function Sync-FreshAgentLocalAssets {
         'ai/FreshAgent-OllamaBridge.ps1',
         'ai/Windows-Stt.ps1',
         'ai/FreshAgent-Tts.ps1',
-        'lib/FreshAgent-Inventory.ps1'
+        'lib/FreshAgent-Inventory.ps1',
+        'lib/FreshAgent-Rag.ps1',
+        'lib/FreshAgent-History.ps1',
+        'lib/FreshAgent-Profiles.ps1'
     )
     foreach ($rel in $scriptPaths) {
         $dest = Join-Path $FreshAppData ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)
@@ -210,7 +213,11 @@ function Sync-FreshAgentLocalAssets {
         'configs/skills/browser/browser_search.json',
         'configs/skills/browser/youtube_search.json',
         'configs/skills/system/refresh_inventory.json',
-        'configs/skills/system/list_machine_inventory.json'
+        'configs/skills/system/list_machine_inventory.json',
+        'configs/skills/system/refresh_rag_index.json',
+        'configs/skills/system/list_services.json',
+        'configs/agent-profiles.json',
+        'configs/services-allowlist.json'
     )
     foreach ($rel in $configPaths) {
         $dest = Join-Path $FreshAppData ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)

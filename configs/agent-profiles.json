@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "profiles": {
+    "game": {
+      "title": "Profil Jeu",
+      "skills": ["game_session"]
+    },
+    "work": {
+      "title": "Profil Travail",
+      "skills": ["end_game_session", "check_system_health"]
+    },
+    "clean": {
+      "title": "Profil Clean",
+      "skills": ["check_system_health", "refresh_inventory"]
+    }
+  }
+}

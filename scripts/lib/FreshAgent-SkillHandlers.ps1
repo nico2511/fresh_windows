@@ -175,3 +175,39 @@ function Invoke-SkillEndGameSession {
     Clear-FreshAgentGameSessionState -FreshAppData $FreshAppData
     return @{ ok = $true; message = ($notes -join ' ') }
 }
+
+function Get-FreshAgentServicesAllowlist {
+    param(
+        [string]$RepoRef = $(if ($env:FRESH_WIN_REF) { $env:FRESH_WIN_REF.Trim() } else { 'main' }),
+        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
+    )
+    $local = Join-Path $FreshAppData 'configs\services-allowlist.json'
+    if (Test-Path -LiteralPath $local) {
+        return Get-Content -LiteralPath $local -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
+    $raw = Get-FreshAgentRepoRawRoot -RepoRef $RepoRef
+    $remote = Invoke-FreshAgentRestJson -Url "$raw/configs/services-allowlist.json"
+    return $remote
+}
+
+function Invoke-SkillListServices {
+    param(
+        [string]$RepoRef = $(if ($env:FRESH_WIN_REF) { $env:FRESH_WIN_REF.Trim() } else { 'main' })
+    )
+    $cfg = Get-FreshAgentServicesAllowlist -RepoRef $RepoRef
+    if (-not $cfg -or -not $cfg.services) {
+        return @{ ok = $false; message = 'Allowlist services introuvable.' }
+    }
+    $lines = @()
+    foreach ($name in @($cfg.services)) {
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
+        if ($svc) {
+            $lines += ("{0}: {1}" -f $svc.Name, $svc.Status)
+        }
+        else {
+            $lines += ("{0}: absent" -f $name)
+        }
+    }
+    return @{ ok = $true; message = ($lines -join ' | ') }
+}

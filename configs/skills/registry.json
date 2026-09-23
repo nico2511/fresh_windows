@@ -45,6 +45,16 @@
       "id": "list_machine_inventory",
       "file": "system/list_machine_inventory.json",
       "enabled": true
+    },
+    {
+      "id": "refresh_rag_index",
+      "file": "system/refresh_rag_index.json",
+      "enabled": true
+    },
+    {
+      "id": "list_services",
+      "file": "system/list_services.json",
+      "enabled": true
     }
   ]
 }
