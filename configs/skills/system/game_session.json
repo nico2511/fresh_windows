@@ -1,0 +1,14 @@
+{
+  "id": "game_session",
+  "title": "Session jeu (DND + mode jeu)",
+  "handler": "Invoke-SkillGameSession",
+  "menuVisible": true,
+  "requiresAdmin": false,
+  "parameters": {
+    "launch": { "type": "string", "required": false, "description": "Alias app a lancer apres prep" }
+  },
+  "ai": {
+    "expose": true,
+    "description": "Active DND (best-effort), Ultimate Performance, mode jeu, optionnellement lance un jeu."
+  }
+}

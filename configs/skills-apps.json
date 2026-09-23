@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "apps": {
+    "steam": {
+      "aliases": ["steam", "jeu steam"],
+      "process": "steam",
+      "paths": [
+        "%ProgramFiles(x86)%\\Steam\\steam.exe",
+        "%ProgramFiles%\\Steam\\steam.exe"
+      ]
+    },
+    "discord": {
+      "aliases": ["discord"],
+      "process": "Discord",
+      "paths": [
+        "%LOCALAPPDATA%\\Discord\\Update.exe"
+      ],
+      "launchArgs": ["--processStart", "Discord.exe"]
+    },
+    "cursor": {
+      "aliases": ["cursor", "ide"],
+      "process": "Cursor",
+      "paths": [
+        "%LOCALAPPDATA%\\Programs\\cursor\\Cursor.exe"
+      ]
+    }
+  }
+}

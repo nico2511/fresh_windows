@@ -215,6 +215,19 @@ function Sync-GameModeLocalScripts {
         Write-Host "-> $scriptName" -ForegroundColor DarkGray
     }
 
+    $configLib = Join-Path $FreshAppData 'lib\FreshAgent-Config.ps1'
+    $configLibUrl = "$RepoRawRoot/scripts/lib/FreshAgent-Config.ps1"
+    try {
+        $libDir = Split-Path $configLib -Parent
+        if (-not (Test-Path -LiteralPath $libDir)) { New-Item -ItemType Directory -Path $libDir -Force | Out-Null }
+        Invoke-WebRequest -Uri $configLibUrl -OutFile $configLib -UseBasicParsing
+        . $configLib
+        Sync-FreshAgentLocalAssets -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $Ref | Out-Null
+    }
+    catch {
+        Write-Host "!! Sync Fresh Agent partiel : $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+
     Set-Content -LiteralPath (Join-Path $FreshAppData 'scripts.ref') -Value $Ref -Encoding UTF8 -NoNewline
 
     $killStub = Join-Path $FreshAppData "Launch-GameModeKill.ps1"

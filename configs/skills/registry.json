@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "skills": [
+    {
+      "id": "check_system_health",
+      "file": "system/check_system_health.json",
+      "enabled": true
+    },
+    {
+      "id": "launch_app",
+      "file": "system/launch_app.json",
+      "enabled": true
+    },
+    {
+      "id": "open_url",
+      "file": "browser/open_url.json",
+      "enabled": true
+    },
+    {
+      "id": "browser_search",
+      "file": "browser/browser_search.json",
+      "enabled": true
+    },
+    {
+      "id": "youtube_search",
+      "file": "browser/youtube_search.json",
+      "enabled": true
+    },
+    {
+      "id": "game_session",
+      "file": "system/game_session.json",
+      "enabled": true
+    },
+    {
+      "id": "end_game_session",
+      "file": "system/end_game_session.json",
+      "enabled": true
+    }
+  ]
+}

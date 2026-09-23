@@ -1,0 +1,14 @@
+{
+  "id": "launch_app",
+  "title": "Lancer une application",
+  "handler": "Invoke-SkillLaunchApp",
+  "menuVisible": false,
+  "requiresAdmin": false,
+  "parameters": {
+    "name": { "type": "string", "required": true, "description": "Alias ou nom app (skills-apps.json)" }
+  },
+  "ai": {
+    "expose": true,
+    "description": "Lance une application connue par alias."
+  }
+}

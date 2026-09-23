@@ -1,0 +1,11 @@
+{
+  "id": "end_game_session",
+  "title": "Fin session jeu",
+  "handler": "Invoke-SkillEndGameSession",
+  "menuVisible": true,
+  "requiresAdmin": false,
+  "ai": {
+    "expose": true,
+    "description": "Restaure Focus Assist / toasts et plan alimentation apres session jeu."
+  }
+}

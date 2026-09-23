@@ -1,0 +1,14 @@
+{
+  "id": "youtube_search",
+  "title": "Recherche YouTube",
+  "handler": "Invoke-SkillYoutubeSearch",
+  "menuVisible": false,
+  "requiresAdmin": false,
+  "parameters": {
+    "query": { "type": "string", "required": true }
+  },
+  "ai": {
+    "expose": true,
+    "description": "Ouvre une recherche YouTube dans le navigateur."
+  }
+}

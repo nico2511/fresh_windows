@@ -1,0 +1,15 @@
+{
+  "id": "browser_search",
+  "title": "Recherche web",
+  "handler": "Invoke-SkillBrowserSearch",
+  "menuVisible": false,
+  "requiresAdmin": false,
+  "parameters": {
+    "query": { "type": "string", "required": true },
+    "engine": { "type": "string", "required": false }
+  },
+  "ai": {
+    "expose": true,
+    "description": "Recherche sur le web (moteur configurable)."
+  }
+}
