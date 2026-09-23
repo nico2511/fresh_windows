@@ -154,6 +154,14 @@ Config : `configs/game-mode-kill.json` (domaines, protections, familles de launc
 
 Scripts locaux : `%LOCALAPPDATA%\FreshWindows\` + marqueur `scripts.ref`. Agent au logon via la tâche `FreshWindows-WatchAgent`.
 
+### Fresh Agent (systray)
+
+Core **sans IA obligatoire** : skills, session jeu, monitoring. Couche IA optionnelle (Ollama, tool calling sur le registry skills), STT **Windows Speech**, TTS Windows/Piper, RAG guides.
+
+- Doc : [guides/fresh-agent.md](guides/fresh-agent.md)
+- Sync complet : `scripts/Sync-FreshWindowsAgent.ps1` ou menu systray / tâche `FreshWindows-SyncLocalScripts`
+- Overrides user : `agent-ai.user.json`, `skills-apps.user.json`, `inventory.json` (non écrasés)
+
 ---
 
 ## Tâches planifiées
@@ -162,7 +170,7 @@ Scripts locaux : `%LOCALAPPDATA%\FreshWindows\` + marqueur `scripts.ref`. Agent 
 |-------|-------|--------|
 | `FreshWindows-WingetUpgrade` | Quotidien 12:00 | `winget upgrade --all` |
 | `FreshWindows-WinUtilReapply` | Dimanche 12:00 | Mode `maintenance` |
-| `FreshWindows-SyncLocalScripts` | Dimanche 12:30 | Resync scripts mode jeu |
+| `FreshWindows-SyncLocalScripts` | Dimanche 12:30 | Resync agent (mode jeu + Fresh Agent + skills) |
 
 La ref `FRESH_WIN_REF` est figée dans la tâche à l’enregistrement. Logs : `%LOCALAPPDATA%\FreshWindows\logs\`.
 

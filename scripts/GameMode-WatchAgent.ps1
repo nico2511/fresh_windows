@@ -119,7 +119,8 @@ if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
             'lib/FreshAgent-Inventory.ps1',
             'lib/FreshAgent-Rag.ps1',
             'lib/FreshAgent-History.ps1',
-            'lib/FreshAgent-Profiles.ps1'
+            'lib/FreshAgent-Profiles.ps1',
+            'lib/FreshAgent-Log.ps1'
         )) {
         if (-not (Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData)) {
             Write-WatchLog ("Module Fresh Agent absent: {0}" -f $mod)
