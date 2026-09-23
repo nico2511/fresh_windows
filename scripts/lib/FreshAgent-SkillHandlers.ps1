@@ -53,7 +53,8 @@ function Invoke-SkillCheckSystemHealth {
     $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" -ErrorAction SilentlyContinue
     $diskFree = if ($disk) { [math]::Round($disk.FreeSpace / 1GB, 1) } else { $null }
     $power = Get-ActivePowerSchemeGuid
-    $msg = "CPU ~$([math]::Round($cpuLoad))% | RAM $freeRam Go libres / $totalRam Go ($usedPct% utilise) | C: $diskFree Go libres | Plan $power"
+    $msg = 'CPU ~{0}% | RAM {1} Go libres / {2} Go ({3}% utilise) | C: {4} Go libres | Plan {5}' -f `
+        [math]::Round($cpuLoad), $freeRam, $totalRam, $usedPct, $diskFree, $power
     return @{ ok = $true; message = $msg }
 }
 
