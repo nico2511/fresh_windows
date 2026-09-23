@@ -232,6 +232,7 @@ function Sync-FreshAgentLocalAssets {
         'lib/FreshAgent-GameSession.ps1',
         'ai/Ollama-Manager.ps1',
         'ai/FreshAgent-OllamaBridge.ps1',
+        'ai/FreshAgent-BackgroundWorker.ps1',
         'ai/Windows-Stt.ps1',
         'ai/FreshAgent-Tts.ps1',
         'lib/FreshAgent-Inventory.ps1',

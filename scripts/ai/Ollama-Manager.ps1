@@ -50,10 +50,14 @@ function Start-OllamaServer {
 
     $existing = Get-Process -Name ollama -ErrorAction SilentlyContinue
     if (-not $existing) {
-        Start-Process -FilePath $OllamaExe -ArgumentList 'serve' -WindowStyle Hidden
+        Start-Process -FilePath $OllamaExe -ArgumentList 'serve' -WindowStyle Hidden | Out-Null
+    }
+    else {
+        # Processus present mais API parfois injoignable (tray sans serve) — retenter serve.
+        Start-Process -FilePath $OllamaExe -ArgumentList 'serve' -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
     }
 
-    $deadline = (Get-Date).AddSeconds(45)
+    $deadline = (Get-Date).AddSeconds(60)
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 800
         if (Test-OllamaApi) {
