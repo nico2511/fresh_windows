@@ -28,6 +28,12 @@ Agent **Fresh Windows** dans la barre des taches : mode jeu, skills, IA optionne
 
 Le sync **ne supprime pas** les fichiers user ci-dessus.
 
+## Panneau (UI)
+
+- **Clic gauche** sur l’icone systray : fenetre **Fresh Agent** (onglets Jeu / Skills / IA / Fresh Windows).
+- Cases a cocher : IA, RAG, detection auto, surveillance — sans sous-menus.
+- **Clic droit** : menu contextuel complet (raccourci « Ouvrir le panneau » en tete).
+
 ## Sync
 
 - Menu systray : **Mettre a jour scripts locaux**
