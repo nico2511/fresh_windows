@@ -252,7 +252,7 @@ foreach (`$n in `$need) {
     $watchStub = Join-Path $FreshAppData "Launch-GameModeWatch.ps1"
     @"
 #Requires -Version 5.1
-`$ErrorActionPreference = 'Stop'
+`$ErrorActionPreference = 'Continue'
 `$dir = if (`$PSScriptRoot) { `$PSScriptRoot } else { Split-Path -Parent `$MyInvocation.MyCommand.Path }
 `$log = Join-Path `$dir 'watch-agent.log'
 function Write-WatchBootLog([string]`$Message) {
@@ -273,11 +273,13 @@ foreach (`$n in `$need) {
         Invoke-WebRequest -Uri ("https://raw.githubusercontent.com/nico2511/fresh_windows/`$ref/scripts/`$n") -OutFile `$p -UseBasicParsing
     }
 }
+Write-WatchBootLog 'WatchAgent invoke start'
 try {
     & (Join-Path `$dir 'GameMode-WatchAgent.ps1')
+    Write-WatchBootLog 'WatchAgent invoke end (exit normal)'
 }
 catch {
-    Write-WatchBootLog (`$_ | Out-String)
+    Write-WatchBootLog ('WatchAgent invoke erreur: ' + (`$_ | Out-String))
     throw
 }
 "@ | Set-Content -LiteralPath $watchStub -Encoding UTF8
