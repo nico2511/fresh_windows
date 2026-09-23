@@ -28,6 +28,18 @@ Agent **Fresh Windows** dans la barre des taches : mode jeu, skills, IA optionne
 
 Le sync **ne supprime pas** les fichiers user ci-dessus.
 
+## Une seule instance / agent invisible
+
+- Log : `%LOCALAPPDATA%\FreshWindows\watch-agent.log` — chercher `Mutex acquis`, `NotifyIcon visible`, ou `Autre instance active (PID ...)`.
+- Si relance bloquee sans icone : tuer les processus fantomes puis relancer :
+
+```powershell
+Get-CimInstance Win32_Process |
+  Where-Object { $_.CommandLine -match 'GameMode-WatchAgent|Launch-GameModeWatch' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+& "$env:LOCALAPPDATA\FreshWindows\Start-WatchAgent.cmd"
+```
+
 ## Panneau (UI)
 
 - **Clic gauche** sur l’icone systray : fenetre **Fresh Agent** (onglets Jeu / Skills / IA / Fresh Windows).
