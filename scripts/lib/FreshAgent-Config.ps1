@@ -7,6 +7,24 @@ function Get-FreshAgentAppDataRoot {
     return Join-Path $env:LOCALAPPDATA 'FreshWindows'
 }
 
+function Set-FreshScriptUtf8Bom {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($Path)
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+            $text = $utf8NoBom.GetString($bytes, 3, $bytes.Length - 3)
+        }
+        else {
+            $text = $utf8NoBom.GetString($bytes)
+        }
+        $utf8Bom = New-Object System.Text.UTF8Encoding $true
+        [System.IO.File]::WriteAllText($Path, $text, $utf8Bom)
+    }
+    catch { }
+}
+
 function Get-FreshAgentRepoRawRoot {
     param([string]$RepoRef)
     if (-not $RepoRef) {
@@ -251,6 +269,7 @@ function Sync-FreshAgentLocalAssets {
         $url = "$RepoRawRoot/scripts/$($rel -replace '\\', '/')"
         try {
             Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+            Set-FreshScriptUtf8Bom -Path $dest
             Write-Host "-> scripts/$rel" -ForegroundColor DarkGray
         }
         catch {
@@ -317,6 +336,9 @@ function Import-FreshAgentModule {
     foreach ($path in ($candidates | Select-Object -Unique)) {
         if (-not (Test-Path -LiteralPath $path)) { continue }
         try {
+            if (Get-Command Set-FreshScriptUtf8Bom -ErrorAction SilentlyContinue) {
+                Set-FreshScriptUtf8Bom -Path $path
+            }
             $known = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
             Get-ChildItem -Path Function: | ForEach-Object { [void]$known.Add($_.Name) }
             . $path
