@@ -193,7 +193,8 @@ function Initialize-WatchAgentSystrayEarly {
     }
     $script:NotifyIcon.Text = 'Fresh Agent (demarrage...)'
     $earlyMenu = New-Object System.Windows.Forms.ContextMenuStrip
-    $null = $earlyMenu.Items.Add('Chargement des modules...')
+    $miLoadEarly = $earlyMenu.Items.Add('Chargement des modules...')
+    $miLoadEarly.Enabled = $false
     $miQuitEarly = $earlyMenu.Items.Add('Quitter')
     $miQuitEarly.Add_Click({
             $script:NotifyIcon.Visible = $false
@@ -206,12 +207,10 @@ function Initialize-WatchAgentSystrayEarly {
     Write-WatchLog 'NotifyIcon visible (early)'
     try { Hide-WatchConsole } catch { }
     try {
-        [void]$script:HiddenForm.Show()
-        $script:HiddenForm.Hide()
         [System.Windows.Forms.Application]::DoEvents()
     }
     catch {
-        Write-WatchLog ("Early form: {0}" -f $_.Exception.Message)
+        Write-WatchLog ("Early DoEvents: {0}" -f $_.Exception.Message)
     }
 }
 
@@ -1353,15 +1352,12 @@ function Stop-PendingSuggestedProcesses {
     Show-Balloon -Title 'Suggestions' -Text ("$n processus fermes.") -Icon Info
 }
 
-# --- UI (formulaire cache obligatoire pour le message loop WinForms) ---
-$ErrorActionPreference = 'Continue'
-if (-not $script:NotifyIcon) {
-    Initialize-WatchAgentSystrayEarly
-}
-Write-WatchLog 'Init UI (menu complet)'
-Update-FreshAgentTrayStatus
+function Install-WatchAgentFullTrayMenu {
+    if ($script:WatchFullMenuInstalled) { return }
+    Write-WatchLog 'Init UI (menu complet)'
+    Update-FreshAgentTrayStatus
 
-$menu = New-Object System.Windows.Forms.ContextMenuStrip
+    $menu = New-Object System.Windows.Forms.ContextMenuStrip
 
 $miOpenPanel = New-Object System.Windows.Forms.ToolStripMenuItem
 $miOpenPanel.Text = 'Ouvrir le panneau Fresh Agent...'
@@ -1621,31 +1617,56 @@ $script:NotifyIcon.Add_MouseClick({
     })
 $script:NotifyIcon.Add_MouseDoubleClick({ Open-FreshAgentDashboardPanel })
 
-$miAuto.Text = if ($script:UserSettings.autoSuggestKill) { 'Détection auto : ON' } else { 'Détection auto : OFF' }
-$miMon.Text = if ($script:UserSettings.monitorEnabled) { 'Surveillance : ON' } else { 'Surveillance : OFF' }
+    if ($script:WatchMenuAutoItem) {
+        $script:WatchMenuAutoItem.Text = if ($script:UserSettings.autoSuggestKill) { 'Détection auto : ON' } else { 'Détection auto : OFF' }
+    }
+    if ($script:WatchMenuMonItem) {
+        $script:WatchMenuMonItem.Text = if ($script:UserSettings.monitorEnabled) { 'Surveillance : ON' } else { 'Surveillance : OFF' }
+    }
+    $script:WatchFullMenuInstalled = $true
+    Write-WatchLog 'Menu complet installe'
+}
 
-$script:WatchBootTimer = New-Object System.Windows.Forms.Timer
-$script:WatchBootTimer.Interval = 400
-$script:WatchBootTimer.Add_Tick({
-        $script:WatchBootTimer.Stop()
-        $script:WatchBootTimer.Dispose()
-        Invoke-FreshWatchAgentModuleBoot
-        Invoke-FreshAgentDeferredBoot
+function Start-WatchAgentTimers {
+    if ($script:WatchBootTimer) { return }
+    $script:WatchBootTimer = New-Object System.Windows.Forms.Timer
+    $script:WatchBootTimer.Interval = 400
+    $script:WatchBootTimer.Add_Tick({
+            $script:WatchBootTimer.Stop()
+            $script:WatchBootTimer.Dispose()
+            $script:WatchBootTimer = $null
+            Invoke-FreshWatchAgentModuleBoot
+            Invoke-FreshAgentDeferredBoot
+        })
+    $script:WatchBootTimer.Start()
+
+    $pollMs = [math]::Max(5000, [int]$script:WatchRules.pollIntervalSeconds * 1000)
+    $script:WatchPollTimer = New-Object System.Windows.Forms.Timer
+    $script:WatchPollTimer.Interval = $pollMs
+    $script:WatchPollTimer.Add_Tick({ Invoke-WatchTick })
+    $script:WatchPollTimer.Start()
+}
+
+# --- UI (formulaire cache obligatoire pour le message loop WinForms) ---
+$ErrorActionPreference = 'Continue'
+if (-not $script:NotifyIcon) {
+    Initialize-WatchAgentSystrayEarly
+}
+$script:WatchFullMenuInstalled = $false
+
+$null = $script:HiddenForm.Add_Load({
+        try {
+            Install-WatchAgentFullTrayMenu
+            Start-WatchAgentTimers
+            Show-Balloon -Title 'Fresh Windows' -Text 'Agent actif — clic gauche = panneau, clic droit = menu.' -Icon Info
+        }
+        catch {
+            Write-WatchLog ("Form Load: {0}" -f $_.Exception.Message)
+        }
     })
-$script:WatchBootTimer.Start()
-
-$pollMs = [math]::Max(5000, [int]$script:WatchRules.pollIntervalSeconds * 1000)
-$timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = $pollMs
-$timer.Add_Tick({ Invoke-WatchTick })
-$timer.Start()
-
-Show-Balloon -Title 'Fresh Windows' -Text 'Agent actif — clic gauche = panneau, clic droit = menu.' -Icon Info
 
 Write-WatchLog 'Application.Run(form)'
 try {
-    [void]$script:HiddenForm.Show()
-    $script:HiddenForm.Hide()
     [System.Windows.Forms.Application]::Run($script:HiddenForm)
 }
 catch {
