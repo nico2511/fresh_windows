@@ -176,6 +176,7 @@ function Sync-FreshAgentLocalAssets {
         'lib/FreshAgent-SkillHandlers.ps1',
         'lib/FreshAgent-GameSession.ps1',
         'ai/Ollama-Manager.ps1',
+        'ai/FreshAgent-OllamaBridge.ps1',
         'ai/Windows-Stt.ps1'
     )
     foreach ($rel in $scriptPaths) {

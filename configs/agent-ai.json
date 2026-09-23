@@ -9,8 +9,11 @@
     ],
     "autoStart": true,
     "pullOnEnable": true,
-    "keepAliveMinutes": 0
+    "keepAliveMinutes": 0,
+    "toolCallMaxRounds": 4,
+    "chatTimeoutSec": 120
   },
+  "systemPrompt": "",
   "stt": {
     "provider": "windows",
     "comment": "windows = reconnaissance Windows (Speech API). cyberScribe desactive par defaut.",

@@ -110,6 +110,7 @@ if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
             'lib/FreshAgent-SkillHandlers.ps1',
             'lib/FreshAgent-GameSession.ps1',
             'ai/Ollama-Manager.ps1',
+            'ai/FreshAgent-OllamaBridge.ps1',
             'ai/Windows-Stt.ps1'
         )) {
         if (-not (Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData)) {
@@ -425,6 +426,97 @@ function Invoke-FreshAgentSkillMenu {
     }
 }
 
+function Show-FreshAgentAiPromptDialog {
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = 'Fresh Agent — Tester l IA'
+    $form.Size = New-Object System.Drawing.Size(480, 200)
+    $form.StartPosition = 'CenterScreen'
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.TopMost = $true
+
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = 'Demande (ex: mets du lofi sur YouTube, etat systeme) :'
+    $label.AutoSize = $true
+    $label.Location = New-Object System.Drawing.Point(12, 12)
+    $form.Controls.Add($label)
+
+    $textBox = New-Object System.Windows.Forms.TextBox
+    $textBox.Location = New-Object System.Drawing.Point(12, 36)
+    $textBox.Size = New-Object System.Drawing.Size(440, 80)
+    $textBox.Multiline = $true
+    $textBox.ScrollBars = 'Vertical'
+    $form.Controls.Add($textBox)
+
+    $ok = New-Object System.Windows.Forms.Button
+    $ok.Text = 'Envoyer'
+    $ok.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $ok.Location = New-Object System.Drawing.Point(296, 126)
+    $form.AcceptButton = $ok
+    $form.Controls.Add($ok)
+
+    $cancel = New-Object System.Windows.Forms.Button
+    $cancel.Text = 'Annuler'
+    $cancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $cancel.Location = New-Object System.Drawing.Point(377, 126)
+    $form.CancelButton = $cancel
+    $form.Controls.Add($cancel)
+
+    $result = $form.ShowDialog()
+    if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+        return $textBox.Text.Trim()
+    }
+    return $null
+}
+
+function Start-FreshAgentAiPromptBackground {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Prompt
+    )
+    if ([string]::IsNullOrWhiteSpace($Prompt)) { return }
+    New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null
+    $promptFile = Join-Path $FreshAppData 'ai-prompt.pending.txt'
+    Set-Content -LiteralPath $promptFile -Value $Prompt -Encoding UTF8
+
+    Show-Balloon -Title 'Fresh Agent IA' -Text 'Analyse en cours (Ollama)...' -Icon Info
+
+    $fresh = $FreshAppData.Replace("'", "''")
+    $repo = $RepoRef.Replace("'", "''")
+    $inner = @"
+`$ErrorActionPreference='Continue'
+Add-Type -AssemblyName System.Windows.Forms
+`$fresh='$fresh'
+`$repo='$repo'
+. (Join-Path `$fresh 'lib\FreshAgent-Config.ps1')
+. (Join-Path `$fresh 'lib\FreshAgent-SkillsEngine.ps1')
+. (Join-Path `$fresh 'lib\FreshAgent-SkillHandlers.ps1')
+. (Join-Path `$fresh 'lib\FreshAgent-GameSession.ps1')
+. (Join-Path `$fresh 'ai\Ollama-Manager.ps1')
+. (Join-Path `$fresh 'ai\FreshAgent-OllamaBridge.ps1')
+`$log=Join-Path `$fresh 'watch-agent.log'
+function Log([string]`$m){ try { Add-Content -LiteralPath `$log -Value ((Get-Date -Format o)+' AI '+`$m) -Encoding UTF8 } catch {} }
+try {
+  `$prompt = Get-Content -LiteralPath (Join-Path `$fresh 'ai-prompt.pending.txt') -Raw -Encoding UTF8
+  `$cfg = Get-FreshAgentAiConfig -RepoRef `$repo -FreshAppData `$fresh
+  if (-not `$cfg.enabled) { throw 'IA desactivee — active IA : ON dans le menu.' }
+  `$r = Invoke-FreshAgentAiTurn -UserPrompt `$prompt.Trim() -AiConfig `$cfg -RepoRef `$repo -FreshAppData `$fresh
+  `$text = if (`$r.message) { [string]`$r.message } else { 'Termine.' }
+  if (`$r.skills -and `$r.skills.Count -gt 0) { `$text += "`nSkills: " + (`$r.skills -join ', ') }
+  Log `$text
+  [System.Windows.Forms.MessageBox]::Show(`$text, 'Fresh Agent IA')
+} catch {
+  Log `$_.Exception.Message
+  [System.Windows.Forms.MessageBox]::Show(`$_.Exception.Message, 'Fresh Agent IA', 'OK', 'Error')
+}
+"@
+    $psExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+    Start-Process -FilePath $psExe -WindowStyle Hidden -ArgumentList @(
+        '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-Command', $inner
+    ) | Out-Null
+}
+
 function Start-FreshAgentBackgroundWork {
     param(
         [ValidateSet('StartOllama', 'EnsureModel')]
@@ -497,10 +589,11 @@ function Invoke-SyncLocalScripts {
                     'lib/FreshAgent-SkillHandlers.ps1',
                     'lib/FreshAgent-GameSession.ps1',
                     'ai/Ollama-Manager.ps1',
+                    'ai/FreshAgent-OllamaBridge.ps1',
                     'ai/Windows-Stt.ps1'
                 )) {
-                Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
-            }
+                    Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
+                }
             $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
             $script:FreshAgentReady = $true
         }
@@ -652,6 +745,24 @@ $miAiListen = New-Object System.Windows.Forms.ToolStripMenuItem
 $miAiListen.Text = 'Ecouter (STT Windows — bientot)'
 $miAiListen.Enabled = $false
 $miAi.DropDownItems.Add($miAiListen) | Out-Null
+
+$miAiTest = New-Object System.Windows.Forms.ToolStripMenuItem
+$miAiTest.Text = 'Tester l IA (tool calling)...'
+$miAiTest.Add_Click({
+    if (-not $script:FreshAgentReady) {
+        Show-Balloon -Title 'IA' -Text 'Modules non charges.' -Icon Warning
+        return
+    }
+    if (-not (Get-Command Invoke-FreshAgentAiTurn -ErrorAction SilentlyContinue)) {
+        Show-Balloon -Title 'IA' -Text 'Bridge Ollama absent — sync scripts locaux.' -Icon Warning
+        return
+    }
+    $prompt = Show-FreshAgentAiPromptDialog
+    if ($prompt) {
+        Start-FreshAgentAiPromptBackground -Prompt $prompt
+    }
+})
+$miAi.DropDownItems.Add($miAiTest) | Out-Null
 
 if ($script:FreshAgentReady) {
     Update-FreshAgentAiMenu -MiAiRoot $miAi -MiAiToggle $miAiToggle -MiOllamaState $miOllamaState -MiSttState $miSttState
