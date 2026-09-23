@@ -456,14 +456,15 @@ function Test-LocalScriptsStale {
 }
 
 function Ensure-FreshAgentProfileReady {
+    if (Get-Command Ensure-FreshAgentSkillsLoaded -ErrorAction SilentlyContinue) {
+        if (-not (Ensure-FreshAgentSkillsLoaded -FreshAppData $script:FreshAppData)) {
+            return $false
+        }
+    }
     if (Get-Command Invoke-FreshAgentProfile -ErrorAction SilentlyContinue) {
         return $true
     }
-    if (Get-Command Import-FreshAgentStandardModules -ErrorAction SilentlyContinue) {
-        Import-FreshAgentStandardModules -FreshAppData $script:FreshAppData
-    }
-    elseif (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
-        Import-FreshAgentModule -RelativePath 'lib/FreshAgent-SkillsEngine.ps1' -FreshAppData $script:FreshAppData | Out-Null
+    if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
         Import-FreshAgentModule -RelativePath 'lib/FreshAgent-Profiles.ps1' -FreshAppData $script:FreshAppData | Out-Null
     }
     return [bool](Get-Command Invoke-FreshAgentProfile -ErrorAction SilentlyContinue)
@@ -480,13 +481,19 @@ function Invoke-FreshAgentSkillMenu {
         return
     }
     try {
-        $r = Invoke-FreshAgentSkill -SkillId $SkillId -Parameters $Parameters -RepoRef $RepoRef -FreshAppData $FreshAppData
+        if (Get-Command Ensure-FreshAgentSkillsLoaded -ErrorAction SilentlyContinue) {
+            if (-not (Ensure-FreshAgentSkillsLoaded -FreshAppData $script:FreshAppData)) {
+                Show-Balloon -Title 'Fresh Agent' -Text 'Skills Engine absent — sync scripts locaux puis redemarrer l agent.' -Icon Warning
+                return
+            }
+        }
+        $r = Invoke-FreshAgentSkill -SkillId $SkillId -Parameters $Parameters -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData
         $text = if ($r.message) { [string]$r.message } else { 'Termine.' }
         $icon = if ($r.ok) { 'Info' } else { 'Warning' }
         Show-Balloon -Title 'Fresh Agent' -Text $text -Icon $icon
         if (Get-Command Invoke-FreshAgentSpeakSkillResult -ErrorAction SilentlyContinue) {
-            $cfg = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
-            Invoke-FreshAgentSpeakSkillResult -Result $r -AiConfig $cfg -FreshAppData $FreshAppData
+            $cfg = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData
+            Invoke-FreshAgentSpeakSkillResult -Result $r -AiConfig $cfg -FreshAppData $script:FreshAppData
         }
     }
     catch {

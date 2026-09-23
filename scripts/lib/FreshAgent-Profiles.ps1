@@ -20,6 +20,14 @@ function Invoke-FreshAgentProfile {
         [string]$RepoRef,
         [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
     )
+    if (Get-Command Ensure-FreshAgentSkillsLoaded -ErrorAction SilentlyContinue) {
+        if (-not (Ensure-FreshAgentSkillsLoaded -FreshAppData $FreshAppData)) {
+            return @{ ok = $false; message = 'Skills Engine absent. Mettre a jour scripts locaux (lib/FreshAgent-SkillsEngine.ps1).' }
+        }
+    }
+    elseif (-not (Get-Command Invoke-FreshAgentSkill -ErrorAction SilentlyContinue)) {
+        return @{ ok = $false; message = 'Invoke-FreshAgentSkill indisponible — sync scripts locaux.' }
+    }
     $cfg = Get-FreshAgentProfilesConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
     if (-not $cfg -or -not $cfg.profiles) {
         return @{ ok = $false; message = 'Profils indisponibles.' }
