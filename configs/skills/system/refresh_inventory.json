@@ -1,0 +1,11 @@
+{
+  "id": "refresh_inventory",
+  "title": "Rafraichir inventaire machine",
+  "handler": "Invoke-SkillRefreshInventory",
+  "menuVisible": false,
+  "requiresAdmin": false,
+  "ai": {
+    "expose": true,
+    "description": "Rescanne jeux Steam, navigateurs et ecrit inventory.json local."
+  }
+}

@@ -35,6 +35,16 @@
       "id": "end_game_session",
       "file": "system/end_game_session.json",
       "enabled": true
+    },
+    {
+      "id": "refresh_inventory",
+      "file": "system/refresh_inventory.json",
+      "enabled": true
+    },
+    {
+      "id": "list_machine_inventory",
+      "file": "system/list_machine_inventory.json",
+      "enabled": true
     }
   ]
 }
