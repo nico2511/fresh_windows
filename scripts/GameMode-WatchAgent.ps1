@@ -116,7 +116,10 @@ if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
             'ai/FreshAgent-OllamaBridge.ps1',
             'ai/Windows-Stt.ps1',
             'ai/FreshAgent-Tts.ps1',
-            'lib/FreshAgent-Inventory.ps1'
+            'lib/FreshAgent-Inventory.ps1',
+            'lib/FreshAgent-Rag.ps1',
+            'lib/FreshAgent-History.ps1',
+            'lib/FreshAgent-Profiles.ps1'
         )) {
         if (-not (Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData)) {
             Write-WatchLog ("Module Fresh Agent absent: {0}" -f $mod)
@@ -138,6 +141,18 @@ if (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue) {
             }
             catch {
                 Write-WatchLog ("Inventaire: {0}" -f $_.Exception.Message)
+            }
+        }
+        if ($script:FreshAgentAi.rag -and $script:FreshAgentAi.rag.enabled -and (Get-Command Build-FreshAgentRagIndex -ErrorAction SilentlyContinue)) {
+            try {
+                $ragPath = Get-FreshAgentRagIndexPath -FreshAppData $FreshAppData
+                if (-not (Test-Path -LiteralPath $ragPath)) {
+                    Build-FreshAgentRagIndex -RepoRef $RepoRef -FreshAppData $FreshAppData | Out-Null
+                    Write-WatchLog 'Index RAG initialise'
+                }
+            }
+            catch {
+                Write-WatchLog ("RAG: {0}" -f $_.Exception.Message)
             }
         }
     }
@@ -256,8 +271,26 @@ function Mark-Alert {
     $script:LastAlerts[$Key] = Get-Date
 }
 
+function Update-FreshAgentTrayStatus {
+    if (-not $script:NotifyIcon) { return }
+    $parts = [System.Collections.ArrayList]@('Fresh Agent')
+    try {
+        if ($script:FreshAgentAi -and $script:FreshAgentAi.enabled) { [void]$parts.Add('IA') }
+        if ($script:FreshAgentAi -and $script:FreshAgentAi.rag -and $script:FreshAgentAi.rag.enabled) { [void]$parts.Add('RAG') }
+        if ($script:VoiceListenActive) { [void]$parts.Add('MIC') }
+        if (Get-Command Get-FreshAgentGameSessionState -ErrorAction SilentlyContinue) {
+            if (Get-FreshAgentGameSessionState -FreshAppData $FreshAppData) { [void]$parts.Add('Jeu') }
+        }
+    }
+    catch { }
+    $text = ($parts -join ' | ')
+    if ($text.Length -gt 63) { $text = $text.Substring(0, 63) }
+    $script:NotifyIcon.Text = $text
+}
+
 function Invoke-WatchTick {
     $script:UserSettings = Get-WatchUserSettings
+    Update-FreshAgentTrayStatus
     if (-not $script:UserSettings.monitorEnabled) { return }
 
     if (-not $script:GameModeCfg) {
@@ -518,6 +551,7 @@ Add-Type -AssemblyName System.Windows.Forms
 . (Join-Path `$fresh 'ai\FreshAgent-OllamaBridge.ps1')
 . (Join-Path `$fresh 'lib\FreshAgent-Inventory.ps1')
 . (Join-Path `$fresh 'ai\FreshAgent-Tts.ps1')
+. (Join-Path `$fresh 'lib\FreshAgent-History.ps1')
 `$log=Join-Path `$fresh 'watch-agent.log'
 function Log([string]`$m){ try { Add-Content -LiteralPath `$log -Value ((Get-Date -Format o)+' AI '+`$m) -Encoding UTF8 } catch {} }
 try {
@@ -530,6 +564,9 @@ try {
   Log `$text
   if (Get-Command Invoke-FreshAgentSpeak -ErrorAction SilentlyContinue) {
     Invoke-FreshAgentSpeak -Text `$text -AiConfig `$cfg -FreshAppData `$fresh | Out-Null
+  }
+  if (Get-Command Add-FreshAgentAiHistoryEntry -ErrorAction SilentlyContinue) {
+    Add-FreshAgentAiHistoryEntry -Prompt `$prompt.Trim() -Response `$text -Skills @(`$r.skills) -FreshAppData `$fresh
   }
   [System.Windows.Forms.MessageBox]::Show(`$text, 'Fresh Agent IA')
 } catch {
@@ -659,8 +696,27 @@ function Invoke-FreshAgentTtsCycleMenu {
     }
 }
 
+function Invoke-FreshAgentAiHistoryMenu {
+    if (-not (Get-Command Get-FreshAgentAiHistoryRecent -ErrorAction SilentlyContinue)) {
+        Show-Balloon -Title 'Historique' -Text 'Module historique absent.' -Icon Warning
+        return
+    }
+    $items = Get-FreshAgentAiHistoryRecent -Count 5 -FreshAppData $FreshAppData
+    if (-not $items -or $items.Count -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show('Aucun echange IA enregistre.', 'Fresh Agent') | Out-Null
+        return
+    }
+    $lines = @()
+    foreach ($it in $items) {
+        $p = [string]$it.prompt
+        if ($p.Length -gt 80) { $p = $p.Substring(0, 77) + '...' }
+        $lines += ("[{0}] {1}" -f $it.at, $p)
+    }
+    [System.Windows.Forms.MessageBox]::Show(($lines -join "`n"), 'Historique IA (5 derniers)') | Out-Null
+}
+
 function Update-FreshAgentAiMenu {
-    param($MiAiRoot, $MiAiToggle, $MiOllamaState, $MiSttState, $MiAiListen, $MiTtsCycle)
+    param($MiAiRoot, $MiAiToggle, $MiOllamaState, $MiSttState, $MiAiListen, $MiTtsCycle, $MiRagToggle)
     if (-not $MiAiRoot) { return }
     $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
     $enabled = $false
@@ -695,6 +751,14 @@ function Update-FreshAgentAiMenu {
         $MiTtsCycle.Text = "TTS : $($p.ToUpper()) (clic = cycle)"
         $MiTtsCycle.Enabled = $true
     }
+    if ($MiRagToggle) {
+        $ragOn = $false
+        if ($script:FreshAgentAi.rag -and $null -ne $script:FreshAgentAi.rag.enabled) {
+            $ragOn = [bool]$script:FreshAgentAi.rag.enabled
+        }
+        $MiRagToggle.Text = if ($ragOn) { 'RAG guides : ON' } else { 'RAG guides : OFF' }
+    }
+    Update-FreshAgentTrayStatus
 }
 
 function Invoke-SyncLocalScripts {
@@ -776,9 +840,10 @@ catch {
     Write-WatchLog ("Icone: {0}" -f $_.Exception.Message)
     $script:NotifyIcon.Icon = [System.Drawing.SystemIcons]::Application
 }
-$script:NotifyIcon.Text = 'Fresh Windows'
+$script:NotifyIcon.Text = 'Fresh Agent'
 $script:NotifyIcon.Visible = $true
 Write-WatchLog 'NotifyIcon visible'
+Update-FreshAgentTrayStatus
 Hide-WatchConsole
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
@@ -820,6 +885,28 @@ $miSkillGame.Add_Click({ Invoke-FreshAgentSkillMenu -SkillId 'game_session' })
 $miSkillEndGame = $menu.Items.Add('Fin session jeu')
 $miSkillEndGame.Add_Click({ Invoke-FreshAgentSkillMenu -SkillId 'end_game_session' })
 
+$miProfiles = New-Object System.Windows.Forms.ToolStripMenuItem
+$miProfiles.Text = 'Profils'
+$null = $menu.Items.Add($miProfiles)
+foreach ($pair in @(
+        @{ Id = 'game'; Label = 'Jeu (session)' },
+        @{ Id = 'work'; Label = 'Travail (fin session + sante)' },
+        @{ Id = 'clean'; Label = 'Clean (sante + inventaire)' }
+    )) {
+    $item = New-Object System.Windows.Forms.ToolStripMenuItem
+    $item.Text = $pair.Label
+    $item.Tag = $pair.Id
+    $item.Add_Click({
+            param($sender, $e)
+            if (-not $script:FreshAgentReady) { return }
+            $r = Invoke-FreshAgentProfile -ProfileId $sender.Tag -RepoRef $RepoRef -FreshAppData $FreshAppData
+            $text = if ($r.message) { [string]$r.message } else { 'OK' }
+            Show-Balloon -Title 'Profil' -Text $text -Icon Info
+            Update-FreshAgentTrayStatus
+        })
+    $miProfiles.DropDownItems.Add($item) | Out-Null
+}
+
 $menu.Items.Add('-') | Out-Null
 
 $miAi = New-Object System.Windows.Forms.ToolStripMenuItem
@@ -837,7 +924,7 @@ $miAiToggle.Add_Click({
     $next = -not [bool]$cur.enabled
     Set-FreshAgentAiUserConfig -Patch @{ enabled = $next } -FreshAppData $FreshAppData
     $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
-    Update-FreshAgentAiMenu -MiAiRoot $miAi -MiAiToggle $miAiToggle -MiOllamaState $miOllamaState -MiSttState $miSttState -MiAiListen $miAiListen -MiTtsCycle $miTtsCycle
+    Update-FreshAgentAiMenu -MiAiRoot $miAi -MiAiToggle $miAiToggle -MiOllamaState $miOllamaState -MiSttState $miSttState -MiAiListen $miAiListen -MiTtsCycle $miTtsCycle -MiRagToggle $miRagToggle
     if ($next -and $script:FreshAgentAi.ollama.autoStart) {
         Start-FreshAgentBackgroundWork -Action EnsureModel -BusyText 'Demarrage Ollama + modele...'
     }
@@ -879,6 +966,26 @@ $miTtsCycle.Text = 'TTS : OFF (clic = cycle)'
 $miTtsCycle.Add_Click({ Invoke-FreshAgentTtsCycleMenu })
 $miAi.DropDownItems.Add($miTtsCycle) | Out-Null
 
+$miRagToggle = New-Object System.Windows.Forms.ToolStripMenuItem
+$miRagToggle.Text = 'RAG guides : OFF'
+$miRagToggle.Add_Click({
+    if (-not $script:FreshAgentReady) { return }
+    $cur = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
+    $ragOn = -not [bool]$cur.rag.enabled
+    Set-FreshAgentAiUserConfig -Patch @{ rag = @{ enabled = $ragOn } } -FreshAppData $FreshAppData
+    $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
+    if ($ragOn -and (Get-Command Build-FreshAgentRagIndex -ErrorAction SilentlyContinue)) {
+        try { Build-FreshAgentRagIndex -RepoRef $RepoRef -FreshAppData $FreshAppData | Out-Null } catch { }
+    }
+    Update-FreshAgentAiMenu -MiAiRoot $miAi -MiAiToggle $miAiToggle -MiOllamaState $miOllamaState -MiSttState $miSttState -MiAiListen $miAiListen -MiTtsCycle $miTtsCycle -MiRagToggle $miRagToggle
+})
+$miAi.DropDownItems.Add($miRagToggle) | Out-Null
+
+$miAiHistory = New-Object System.Windows.Forms.ToolStripMenuItem
+$miAiHistory.Text = 'Historique IA (5 derniers)'
+$miAiHistory.Add_Click({ Invoke-FreshAgentAiHistoryMenu })
+$miAi.DropDownItems.Add($miAiHistory) | Out-Null
+
 $miAiTest = New-Object System.Windows.Forms.ToolStripMenuItem
 $miAiTest.Text = 'Tester l IA (tool calling)...'
 $miAiTest.Add_Click({
@@ -898,7 +1005,7 @@ $miAiTest.Add_Click({
 $miAi.DropDownItems.Add($miAiTest) | Out-Null
 
 if ($script:FreshAgentReady) {
-    Update-FreshAgentAiMenu -MiAiRoot $miAi -MiAiToggle $miAiToggle -MiOllamaState $miOllamaState -MiSttState $miSttState -MiAiListen $miAiListen -MiTtsCycle $miTtsCycle
+    Update-FreshAgentAiMenu -MiAiRoot $miAi -MiAiToggle $miAiToggle -MiOllamaState $miOllamaState -MiSttState $miSttState -MiAiListen $miAiListen -MiTtsCycle $miTtsCycle -MiRagToggle $miRagToggle
 }
 else {
     $miAi.Enabled = $false

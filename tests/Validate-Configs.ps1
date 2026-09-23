@@ -312,6 +312,20 @@ else {
     Fail 'skills/registry.json manquant'
 }
 
+$profilesPath = Join-Path $configs 'agent-profiles.json'
+if (Test-Path -LiteralPath $profilesPath) {
+    $prof = Get-Content -LiteralPath $profilesPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not $prof.profiles) { Fail 'agent-profiles.json : profiles manquant' }
+    else { Ok 'agent-profiles.json' }
+}
+
+$svcPath = Join-Path $configs 'services-allowlist.json'
+if (Test-Path -LiteralPath $svcPath) {
+    $svc = Get-Content -LiteralPath $svcPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not $svc.services -or @($svc.services).Count -lt 1) { Fail 'services-allowlist.json vide' }
+    else { Ok 'services-allowlist.json' }
+}
+
 Write-Host ""
 if ($failed -gt 0) {
     Write-Host ("{0} echec(s)" -f $failed) -ForegroundColor Red

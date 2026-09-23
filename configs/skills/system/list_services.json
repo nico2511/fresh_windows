@@ -1,0 +1,11 @@
+{
+  "id": "list_services",
+  "title": "Lister services (allowlist)",
+  "handler": "Invoke-SkillListServices",
+  "menuVisible": false,
+  "requiresAdmin": false,
+  "ai": {
+    "expose": true,
+    "description": "Liste les services Windows de l allowlist et leur statut."
+  }
+}

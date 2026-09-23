@@ -1,0 +1,11 @@
+{
+  "id": "refresh_rag_index",
+  "title": "Rafraichir index RAG",
+  "handler": "Invoke-SkillRefreshRagIndex",
+  "menuVisible": false,
+  "requiresAdmin": false,
+  "ai": {
+    "expose": true,
+    "description": "Reindexe les guides Fresh Windows pour le RAG."
+  }
+}
