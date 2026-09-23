@@ -355,6 +355,27 @@ function Ensure-FreshAgentSkillsLoaded {
     return [bool](Get-Command Invoke-FreshAgentSkill -ErrorAction SilentlyContinue)
 }
 
+function Ensure-FreshAgentAiBridgeLoaded {
+    param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
+    if (Get-Command Invoke-FreshAgentAiTurn -ErrorAction SilentlyContinue) {
+        return $true
+    }
+    if (-not (Ensure-FreshAgentSkillsLoaded -FreshAppData $FreshAppData)) {
+        return $false
+    }
+    foreach ($mod in @(
+            'lib/FreshAgent-Inventory.ps1',
+            'lib/FreshAgent-Rag.ps1',
+            'ai/Ollama-Manager.ps1',
+            'ai/FreshAgent-OllamaBridge.ps1'
+        )) {
+        if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
+            Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
+        }
+    }
+    return [bool](Get-Command Invoke-FreshAgentAiTurn -ErrorAction SilentlyContinue)
+}
+
 function Import-FreshAgentStandardModules {
     param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
     foreach ($mod in @(
@@ -374,4 +395,5 @@ function Import-FreshAgentStandardModules {
         )) {
         Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
     }
+    Ensure-FreshAgentAiBridgeLoaded -FreshAppData $FreshAppData | Out-Null
 }

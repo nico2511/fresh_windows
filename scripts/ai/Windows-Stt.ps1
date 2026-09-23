@@ -200,6 +200,9 @@ function Invoke-FreshAgentProcessVoiceTranscript {
     }
 
     if ($AiConfig -and $AiConfig.enabled -and ($route -eq 'ai' -or $route -eq 'auto')) {
+        if (Get-Command Ensure-FreshAgentAiBridgeLoaded -ErrorAction SilentlyContinue) {
+            Ensure-FreshAgentAiBridgeLoaded -FreshAppData $FreshAppData | Out-Null
+        }
         if (Get-Command Invoke-FreshAgentAiTurn -ErrorAction SilentlyContinue) {
             return Invoke-FreshAgentAiTurn -UserPrompt $Transcript -AiConfig $AiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
         }

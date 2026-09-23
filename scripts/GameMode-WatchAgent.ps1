@@ -138,6 +138,14 @@ if ((Test-Path -LiteralPath $dashBoot) -and -not (Get-Command Show-FreshAgentDas
         Write-WatchLog ("Dashboard boot: {0}" -f $_.Exception.Message)
     }
 }
+if (Get-Command Ensure-FreshAgentAiBridgeLoaded -ErrorAction SilentlyContinue) {
+    if (Ensure-FreshAgentAiBridgeLoaded -FreshAppData $FreshAppData) {
+        Write-WatchLog 'Fresh Agent IA bridge charge (boot)'
+    }
+    else {
+        Write-WatchLog 'Fresh Agent IA bridge absent — sync ai\ et lib\ recommande'
+    }
+}
 if (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue) {
     try {
         $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
@@ -879,6 +887,34 @@ function Ensure-FreshAgentDashboardLoaded {
     Import-FreshAgentDashboardAtScriptScope
 }
 
+function Test-FreshAgentAiBridgeReady {
+    if (-not $script:FreshAgentReady) {
+        Show-Balloon -Title 'IA' -Text 'Modules non charges.' -Icon Warning
+        return $false
+    }
+    if (Get-Command Ensure-FreshAgentAiBridgeLoaded -ErrorAction SilentlyContinue) {
+        if (Ensure-FreshAgentAiBridgeLoaded -FreshAppData $script:FreshAppData) {
+            return $true
+        }
+    }
+    elseif (Get-Command Invoke-FreshAgentAiTurn -ErrorAction SilentlyContinue) {
+        return $true
+    }
+    $missing = @()
+    foreach ($rel in @(
+            'lib\FreshAgent-SkillsEngine.ps1',
+            'ai\Ollama-Manager.ps1',
+            'ai\FreshAgent-OllamaBridge.ps1'
+        )) {
+        if (-not (Test-Path -LiteralPath (Join-Path $script:FreshAppData $rel))) {
+            $missing += $rel
+        }
+    }
+    $detail = if ($missing.Count -gt 0) { "Fichiers manquants: $($missing -join ', ')" } else { 'Sync scripts locaux puis redemarrer l agent.' }
+    Show-Balloon -Title 'IA' -Text "Bridge Ollama absent — $detail" -Icon Warning
+    return $false
+}
+
 function Get-FreshAgentDashboardState {
     $st = Get-WatchUserSettings
     $aiOn = $false
@@ -1024,11 +1060,7 @@ function Open-FreshAgentDashboardPanel {
             VoiceListen       = { Invoke-FreshAgentVoiceListenMenu }
             TtsCycle          = { Invoke-FreshAgentTtsCycleMenu }
             AiTest            = {
-                if (-not $script:FreshAgentReady) { return }
-                if (-not (Get-Command Invoke-FreshAgentAiTurn -ErrorAction SilentlyContinue)) {
-                    Show-Balloon -Title 'IA' -Text 'Bridge Ollama absent.' -Icon Warning
-                    return
-                }
+                if (-not (Test-FreshAgentAiBridgeReady)) { return }
                 $prompt = Show-FreshAgentAiPromptDialog
                 if ($prompt) { Start-FreshAgentAiPromptBackground -Prompt $prompt }
             }
@@ -1090,6 +1122,9 @@ function Invoke-SyncLocalScripts {
             $script:FreshAgentReady = $true
         }
         Import-FreshAgentDashboardAtScriptScope | Out-Null
+        if (Get-Command Ensure-FreshAgentAiBridgeLoaded -ErrorAction SilentlyContinue) {
+            Ensure-FreshAgentAiBridgeLoaded -FreshAppData $FreshAppData | Out-Null
+        }
         if (Get-Command Write-FreshAgentLog -ErrorAction SilentlyContinue) {
             Write-FreshAgentLog -Category 'Sync' -Message "Menu sync OK ref=$RepoRef" -FreshAppData $FreshAppData
         }
@@ -1321,10 +1356,7 @@ $miAiTest.Add_Click({
         Show-Balloon -Title 'IA' -Text 'Modules non charges.' -Icon Warning
         return
     }
-    if (-not (Get-Command Invoke-FreshAgentAiTurn -ErrorAction SilentlyContinue)) {
-        Show-Balloon -Title 'IA' -Text 'Bridge Ollama absent — sync scripts locaux.' -Icon Warning
-        return
-    }
+    if (-not (Test-FreshAgentAiBridgeReady)) { return }
     $prompt = Show-FreshAgentAiPromptDialog
     if ($prompt) {
         Start-FreshAgentAiPromptBackground -Prompt $prompt
