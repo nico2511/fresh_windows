@@ -6,6 +6,7 @@
   Prefs: %LOCALAPPDATA%\FreshWindows\watch-agent-user.json
   Lancer avec powershell.exe -STA (sinon l'icone n'apparait pas).
 #>
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction SilentlyContinue
 $ErrorActionPreference = 'Continue'
 $WatchLog = Join-Path $env:LOCALAPPDATA 'FreshWindows\watch-agent.log'
 
