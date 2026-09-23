@@ -287,21 +287,56 @@ function Import-FreshAgentModule {
         [string]$RelativePath,
         [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
     )
-    $candidates = @(
-        (Join-Path $FreshAppData ($RelativePath -replace '/', [IO.Path]::DirectorySeparatorChar))
-    )
+    $rel = $RelativePath -replace '/', [IO.Path]::DirectorySeparatorChar
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    [void]$candidates.Add((Join-Path $FreshAppData $rel))
+
     if ($PSScriptRoot) {
-        $candidates += Join-Path $PSScriptRoot ($RelativePath -replace '/', [IO.Path]::DirectorySeparatorChar)
+        [void]$candidates.Add((Join-Path $PSScriptRoot $rel))
         $parent = Split-Path $PSScriptRoot -Parent
         if ($parent) {
-            $candidates += Join-Path $parent ($RelativePath -replace '/', [IO.Path]::DirectorySeparatorChar)
+            [void]$candidates.Add((Join-Path $parent $rel))
+        }
+        $leaf = Split-Path $PSScriptRoot -Leaf
+        if ($leaf -eq 'lib' -and $rel -like 'lib\*') {
+            [void]$candidates.Add((Join-Path $PSScriptRoot ($rel -replace '^lib\\', '')))
+        }
+        if ($leaf -eq 'scripts' -and $rel -like 'lib\*') {
+            [void]$candidates.Add((Join-Path $PSScriptRoot ($rel -replace '^lib\\', 'lib\')))
+        }
+        if ($rel -like 'ai\*') {
+            [void]$candidates.Add((Join-Path $FreshAppData ($rel -replace '^ai\\', 'ai\')))
+            if ($parent) {
+                [void]$candidates.Add((Join-Path $parent ('scripts\' + $rel)))
+            }
         }
     }
-    foreach ($path in $candidates) {
+
+    foreach ($path in ($candidates | Select-Object -Unique)) {
         if (Test-Path -LiteralPath $path) {
             . $path
             return $true
         }
     }
     return $false
+}
+
+function Import-FreshAgentStandardModules {
+    param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
+    foreach ($mod in @(
+            'lib/FreshAgent-SkillsEngine.ps1',
+            'lib/FreshAgent-SkillHandlers.ps1',
+            'lib/FreshAgent-GameSession.ps1',
+            'lib/FreshAgent-Inventory.ps1',
+            'lib/FreshAgent-Rag.ps1',
+            'lib/FreshAgent-History.ps1',
+            'lib/FreshAgent-Profiles.ps1',
+            'lib/FreshAgent-Log.ps1',
+            'ai/Ollama-Manager.ps1',
+            'ai/FreshAgent-OllamaBridge.ps1',
+            'ai/Windows-Stt.ps1',
+            'ai/FreshAgent-Tts.ps1'
+        )) {
+        Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
+    }
 }
