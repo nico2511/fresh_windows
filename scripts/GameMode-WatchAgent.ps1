@@ -95,6 +95,8 @@ $script:FreshAgentAi = $null
 $script:VoiceListenActive = $false
 $script:MiAiListenItem = $null
 $script:MiAiListenLabel = $null
+$script:FaBgResultPending = $false
+$script:FaBgResultLastAt = $null
 $faConfigCandidates = @(
     (Join-Path $FreshAppData 'lib\FreshAgent-Config.ps1'),
     (Join-Path $PSScriptRoot 'lib\FreshAgent-Config.ps1')
@@ -291,6 +293,7 @@ function Update-FreshAgentTrayStatus {
 function Invoke-WatchTick {
     $script:UserSettings = Get-WatchUserSettings
     Update-FreshAgentTrayStatus
+    Invoke-FreshAgentBackgroundResultPoll
     if (-not $script:UserSettings.monitorEnabled) { return }
 
     if (-not $script:GameModeCfg) {
@@ -545,25 +548,55 @@ function Show-FreshAgentAiPromptDialog {
     return $null
 }
 
+function Start-FreshAgentDetachedPs1 {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ScriptContent,
+        [switch]$Sta
+    )
+    $dir = Join-Path $script:FreshAppData 'temp'
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    $path = Join-Path $dir ("fa-bg-{0}.ps1" -f ([guid]::NewGuid().ToString('n')))
+    Set-Content -LiteralPath $path -Value $ScriptContent -Encoding UTF8
+    $psExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass')
+    if ($Sta) { $argList += '-STA' }
+    $argList += @('-File', $path)
+    Start-Process -FilePath $psExe -WindowStyle Hidden -ArgumentList $argList | Out-Null
+}
+
+function Test-FreshAgentOllamaWorkerReady {
+    $worker = Join-Path $script:FreshAppData 'ai\FreshAgent-BackgroundWorker.ps1'
+    $mgr = Join-Path $script:FreshAppData 'ai\Ollama-Manager.ps1'
+    if ((Test-Path -LiteralPath $worker) -and (Test-Path -LiteralPath $mgr)) {
+        return $true
+    }
+    if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
+        Import-FreshAgentModule -RelativePath 'ai/Ollama-Manager.ps1' -FreshAppData $script:FreshAppData | Out-Null
+        Import-FreshAgentModule -RelativePath 'ai/FreshAgent-BackgroundWorker.ps1' -FreshAppData $script:FreshAppData | Out-Null
+    }
+    return ((Test-Path -LiteralPath $worker) -and (Test-Path -LiteralPath $mgr))
+}
+
 function Start-FreshAgentAiPromptBackground {
     param(
         [Parameter(Mandatory)]
         [string]$Prompt
     )
     if ([string]::IsNullOrWhiteSpace($Prompt)) { return }
-    New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null
-    $promptFile = Join-Path $FreshAppData 'ai-prompt.pending.txt'
+    New-Item -ItemType Directory -Path $script:FreshAppData -Force | Out-Null
+    $promptFile = Join-Path $script:FreshAppData 'ai-prompt.pending.txt'
     Set-Content -LiteralPath $promptFile -Value $Prompt -Encoding UTF8
 
     Show-Balloon -Title 'Fresh Agent IA' -Text 'Analyse en cours (Ollama)...' -Icon Info
 
-    $fresh = $FreshAppData.Replace("'", "''")
-    $repo = $RepoRef.Replace("'", "''")
-    $inner = @"
-`$ErrorActionPreference='Continue'
+    $fresh = $script:FreshAppData
+    $repo = $script:RepoRef
+    $scriptBody = @"
+`$ErrorActionPreference = 'Continue'
 Add-Type -AssemblyName System.Windows.Forms
-`$fresh='$fresh'
-`$repo='$repo'
+`$fresh = '$($fresh.Replace("'", "''"))'
+`$repo = '$($repo.Replace("'", "''"))'
 . (Join-Path `$fresh 'lib\FreshAgent-Config.ps1')
 . (Join-Path `$fresh 'lib\FreshAgent-SkillsEngine.ps1')
 . (Join-Path `$fresh 'lib\FreshAgent-SkillHandlers.ps1')
@@ -571,10 +604,11 @@ Add-Type -AssemblyName System.Windows.Forms
 . (Join-Path `$fresh 'ai\Ollama-Manager.ps1')
 . (Join-Path `$fresh 'ai\FreshAgent-OllamaBridge.ps1')
 . (Join-Path `$fresh 'lib\FreshAgent-Inventory.ps1')
+. (Join-Path `$fresh 'lib\FreshAgent-Rag.ps1')
 . (Join-Path `$fresh 'ai\FreshAgent-Tts.ps1')
 . (Join-Path `$fresh 'lib\FreshAgent-History.ps1')
-`$log=Join-Path `$fresh 'watch-agent.log'
-function Log([string]`$m){ try { Add-Content -LiteralPath `$log -Value ((Get-Date -Format o)+' AI '+`$m) -Encoding UTF8 } catch {} }
+`$log = Join-Path `$fresh 'watch-agent.log'
+function Log([string]`$m) { try { Add-Content -LiteralPath `$log -Value ((Get-Date -Format o) + ' AI ' + `$m) -Encoding UTF8 } catch {} }
 try {
   `$prompt = Get-Content -LiteralPath (Join-Path `$fresh 'ai-prompt.pending.txt') -Raw -Encoding UTF8
   `$cfg = Get-FreshAgentAiConfig -RepoRef `$repo -FreshAppData `$fresh
@@ -590,15 +624,13 @@ try {
     Add-FreshAgentAiHistoryEntry -Prompt `$prompt.Trim() -Response `$text -Skills @(`$r.skills) -FreshAppData `$fresh
   }
   [System.Windows.Forms.MessageBox]::Show(`$text, 'Fresh Agent IA')
-} catch {
+}
+catch {
   Log `$_.Exception.Message
   [System.Windows.Forms.MessageBox]::Show(`$_.Exception.Message, 'Fresh Agent IA', 'OK', 'Error')
 }
 "@
-    $psExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-    Start-Process -FilePath $psExe -WindowStyle Hidden -ArgumentList @(
-        '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-Command', $inner
-    ) | Out-Null
+    Start-FreshAgentDetachedPs1 -ScriptContent $scriptBody -Sta
 }
 
 function Start-FreshAgentBackgroundWork {
@@ -608,30 +640,44 @@ function Start-FreshAgentBackgroundWork {
         [string]$BusyTitle = 'Fresh Agent',
         [string]$BusyText = 'Operation en cours...'
     )
+    if (-not (Test-FreshAgentOllamaWorkerReady)) {
+        Show-Balloon -Title $BusyTitle -Text 'Scripts Ollama absents (dossier ai\). Menu Fresh Windows → Mettre a jour scripts locaux.' -Icon Warning
+        return
+    }
     Show-Balloon -Title $BusyTitle -Text $BusyText -Icon Info
-    $fresh = $FreshAppData.Replace("'", "''")
-    $repo = $RepoRef.Replace("'", "''")
-    $inner = @"
-`$ErrorActionPreference='Continue'
-`$fresh='$fresh'
-`$repo='$repo'
-. (Join-Path `$fresh 'lib\FreshAgent-Config.ps1')
-. (Join-Path `$fresh 'ai\Ollama-Manager.ps1')
-`$log=Join-Path `$fresh 'watch-agent.log'
-function Log([string]`$m){ try { Add-Content -LiteralPath `$log -Value ((Get-Date -Format o)+' '+`$m) -Encoding UTF8 } catch {} }
-try {
-  if ('$Action' -eq 'StartOllama') { Start-OllamaServer | Out-Null; Log 'Ollama demarre' }
-  else {
-    `$cfg = Get-FreshAgentAiConfig -RepoRef `$repo -FreshAppData `$fresh
-    Ensure-OllamaReady -AiConfig `$cfg -OnProgress { param(`$m) Log `$m }
-    Log 'Modele pret'
-  }
-} catch { Log `$_.Exception.Message }
-"@
+    $script:FaBgResultPending = $true
+    $script:FaBgResultLastAt = $null
+    $worker = Join-Path $script:FreshAppData 'ai\FreshAgent-BackgroundWorker.ps1'
     $psExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
     Start-Process -FilePath $psExe -WindowStyle Hidden -ArgumentList @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $inner
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $worker,
+        '-Action', $Action,
+        '-FreshAppData', $script:FreshAppData,
+        '-RepoRef', $script:RepoRef
     ) | Out-Null
+}
+
+function Invoke-FreshAgentBackgroundResultPoll {
+    if (-not $script:FaBgResultPending) { return }
+    $path = Join-Path $script:FreshAppData 'fa-bg-result.json'
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    try {
+        $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($raw.at -and $raw.at -eq $script:FaBgResultLastAt) { return }
+        $script:FaBgResultLastAt = [string]$raw.at
+        $script:FaBgResultPending = $false
+        $msg = if ($raw.message) { [string]$raw.message } else { 'Operation terminee.' }
+        $icon = if ($raw.ok) { 'Info' } else { 'Error' }
+        Show-Balloon -Title 'Fresh Agent' -Text $msg -Icon $icon
+        if ($script:FreshAgentAiMenu) {
+            $m = $script:FreshAgentAiMenu
+            Update-FreshAgentAiMenu -MiAiRoot $m.Root -MiAiToggle $m.Toggle -MiOllamaState $m.OllamaState `
+                -MiSttState $m.SttState -MiAiListen $m.Listen -MiTtsCycle $m.TtsCycle -MiRagToggle $m.RagToggle
+        }
+    }
+    catch {
+        Write-WatchLog ("BgResult: {0}" -f $_.Exception.Message)
+    }
 }
 
 function Invoke-FreshAgentVoiceListenMenu {
@@ -800,6 +846,7 @@ function Invoke-SyncLocalScripts {
                     'lib/FreshAgent-GameSession.ps1',
                     'ai/Ollama-Manager.ps1',
                     'ai/FreshAgent-OllamaBridge.ps1',
+                    'ai/FreshAgent-BackgroundWorker.ps1',
                     'ai/Windows-Stt.ps1',
                     'ai/FreshAgent-Tts.ps1',
                     'lib/FreshAgent-Inventory.ps1',
@@ -1045,6 +1092,15 @@ $miAiTest.Add_Click({
 })
 $miAi.DropDownItems.Add($miAiTest) | Out-Null
 
+$script:FreshAgentAiMenu = @{
+    Root        = $miAi
+    Toggle      = $miAiToggle
+    OllamaState = $miOllamaState
+    SttState    = $miSttState
+    Listen      = $miAiListen
+    TtsCycle    = $miTtsCycle
+    RagToggle   = $miRagToggle
+}
 if ($script:FreshAgentReady) {
     Update-FreshAgentAiMenu -MiAiRoot $miAi -MiAiToggle $miAiToggle -MiOllamaState $miOllamaState -MiSttState $miSttState -MiAiListen $miAiListen -MiTtsCycle $miTtsCycle -MiRagToggle $miRagToggle
 }
