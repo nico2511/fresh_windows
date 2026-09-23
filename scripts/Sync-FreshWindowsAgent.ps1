@@ -34,6 +34,21 @@ if ([string]::IsNullOrWhiteSpace($RepoRef)) {
 
 $RepoRawRoot = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef"
 
+function Set-FreshScriptUtf8Bom {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        $text = $utf8NoBom.GetString($bytes, 3, $bytes.Length - 3)
+    }
+    else {
+        $text = $utf8NoBom.GetString($bytes)
+    }
+    $utf8Bom = New-Object System.Text.UTF8Encoding $true
+    [System.IO.File]::WriteAllText($Path, $text, $utf8Bom)
+}
+
 foreach ($scriptName in @(
         'GameMode-Common.ps1',
         'Invoke-GameModeKill.ps1',
@@ -43,17 +58,20 @@ foreach ($scriptName in @(
     $dest = Join-Path $FreshAppData $scriptName
     $url = "$RepoRawRoot/scripts/$scriptName"
     Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+    Set-FreshScriptUtf8Bom -Path $dest
 }
 
 $configLib = Join-Path $FreshAppData 'lib\FreshAgent-Config.ps1'
 $configUrl = "$RepoRawRoot/scripts/lib/FreshAgent-Config.ps1"
 New-Item -ItemType Directory -Path (Split-Path $configLib -Parent) -Force | Out-Null
 Invoke-WebRequest -Uri $configUrl -OutFile $configLib -UseBasicParsing
+Set-FreshScriptUtf8Bom -Path $configLib
 . $configLib
 
 $logLib = Join-Path $FreshAppData 'lib\FreshAgent-Log.ps1'
 try {
     Invoke-WebRequest -Uri "$RepoRawRoot/scripts/lib/FreshAgent-Log.ps1" -OutFile $logLib -UseBasicParsing
+    Set-FreshScriptUtf8Bom -Path $logLib
     . $logLib
 }
 catch { }
