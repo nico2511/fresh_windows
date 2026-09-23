@@ -674,13 +674,13 @@ function Start-FreshAgentAiPromptBackground {
 
     Show-Balloon -Title 'Fresh Agent IA' -Text 'Analyse en cours (Ollama)...' -Icon Info
 
-    $fresh = $script:FreshAppData
-    $repo = $script:RepoRef
+    $freshEsc = $script:FreshAppData.Replace("'", "''")
+    $repoEsc = $script:RepoRef.Replace("'", "''")
     $scriptBody = @"
 `$ErrorActionPreference = 'Continue'
 Add-Type -AssemblyName System.Windows.Forms
-`$fresh = '$($fresh.Replace("'", "''"))'
-`$repo = '$($repo.Replace("'", "''"))'
+`$fresh = '$freshEsc'
+`$repo = '$repoEsc'
 . (Join-Path `$fresh 'lib\FreshAgent-Config.ps1')
 . (Join-Path `$fresh 'lib\FreshAgent-SkillsEngine.ps1')
 . (Join-Path `$fresh 'lib\FreshAgent-SkillHandlers.ps1')
