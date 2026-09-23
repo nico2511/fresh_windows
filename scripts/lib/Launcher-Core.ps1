@@ -252,6 +252,7 @@ foreach (`$n in `$need) {
     $watchStub = Join-Path $FreshAppData "Launch-GameModeWatch.ps1"
     @"
 #Requires -Version 5.1
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction SilentlyContinue
 `$ErrorActionPreference = 'Continue'
 `$dir = if (`$PSScriptRoot) { `$PSScriptRoot } else { Split-Path -Parent `$MyInvocation.MyCommand.Path }
 `$log = Join-Path `$dir 'watch-agent.log'
