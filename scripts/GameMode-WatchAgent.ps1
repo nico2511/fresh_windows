@@ -249,6 +249,20 @@ try {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
     [System.Windows.Forms.Application]::EnableVisualStyles()
+    try {
+        [System.Windows.Forms.Application]::SetUnhandledExceptionMode(
+            [System.Windows.Forms.UnhandledExceptionMode]::CatchException)
+        [System.Windows.Forms.Application]::add_ThreadException({
+                param($sender, $e)
+                try {
+                    Write-WatchLog ('UI ThreadException: {0}' -f $e.Exception.Message)
+                }
+                catch { }
+            })
+    }
+    catch {
+        Write-WatchLog ("ThreadException hook: {0}" -f $_.Exception.Message)
+    }
     Write-WatchLog 'WinForms charge'
 }
 catch {

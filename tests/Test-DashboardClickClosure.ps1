@@ -1,15 +1,19 @@
 #Requires -Version 5.1
-# Valide dispatch dashboard : Tag ActionKey + $script:FreshAgentDashboardActions
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 
-. (Join-Path $PSScriptRoot '..\scripts\lib\FreshAgent-Dashboard.ps1')
-
+$script:WatchAgentSessionState = $ExecutionContext.SessionState
 $script:Clicked = $false
 $script:Toggled = $null
+
+function Invoke-GameModeKillNow { $script:Clicked = $true }
+function Set-Toggle([bool]$On) { $script:Toggled = $On }
+
+. (Join-Path $PSScriptRoot '..\scripts\lib\FreshAgent-Dashboard.ps1')
+
 $script:FreshAgentDashboardActions = @{
-    GameModeKill      = { $script:Clicked = $true }
-    ToggleAutoSuggest = { param([bool]$On) $script:Toggled = $On }
+    GameModeKill      = { Invoke-GameModeKillNow }
+    ToggleAutoSuggest = { param([bool]$On) Set-Toggle -On $On }
 }
 $script:FreshAgentDashboardUi = @{ _suppress = $false }
 
@@ -31,6 +35,6 @@ $timer.Start()
 [void]$form.Show()
 [System.Windows.Forms.Application]::Run($form)
 
-if (-not $script:Clicked) { Write-Error 'Button ActionKey dispatch failed' }
-if ($script:Toggled -ne $true) { Write-Error 'Checkbox ActionKey dispatch failed' }
-Write-Host 'OK dashboard Tag ActionKey clicks'
+if (-not $script:Clicked) { Write-Error 'Button SessionState dispatch failed' }
+if ($script:Toggled -ne $true) { Write-Error 'Checkbox SessionState dispatch failed' }
+Write-Host 'OK dashboard SessionState action dispatch'

@@ -16,6 +16,54 @@ function New-FreshAgentDashboardTabPage {
     return $page
 }
 
+# Dispatcher publie sur $script: : les handlers WinForms ne resolvent pas Function:.
+$script:FreshAgentDashboardRunTagged = {
+    param(
+        $Sender,
+        [bool]$WithCheckedArg = $false
+    )
+    $key = ''
+    try {
+        if (-not $Sender) { return }
+        $key = [string]$Sender.Tag
+        if ([string]::IsNullOrWhiteSpace($key)) { return }
+        $map = $script:FreshAgentDashboardActions
+        if (-not $map) { return }
+        $sb = $map[$key]
+        if (-not ($sb -is [scriptblock])) { return }
+
+        $invokeArgs = @()
+        if ($WithCheckedArg) {
+            $invokeArgs = @([bool]$Sender.Checked)
+        }
+
+        $ss = $script:WatchAgentSessionState
+        if ($ss) {
+            $null = $ss.InvokeCommand.InvokeScript($false, $sb, $null, $invokeArgs)
+        }
+        else {
+            if ($invokeArgs.Count -gt 0) { & $sb @invokeArgs } else { & $sb }
+        }
+    }
+    catch {
+        $msg = $_.Exception.Message
+        try {
+            if (Get-Command Write-WatchLog -ErrorAction SilentlyContinue) {
+                Write-WatchLog ("Dashboard action '{0}': {1}" -f $key, $msg)
+            }
+        }
+        catch { }
+        try {
+            [System.Windows.Forms.MessageBox]::Show(
+                ("Action '{0}' : {1}" -f $key, $msg),
+                'Fresh Agent',
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+        }
+        catch { }
+    }
+}
+
 function Add-FreshAgentDashboardButton {
     param(
         [System.Windows.Forms.Control]$Parent,
@@ -34,12 +82,8 @@ function Add-FreshAgentDashboardButton {
     $btn.Add_Click({
             param($sender, $e)
             try {
-                $key = [string]$sender.Tag
-                if ([string]::IsNullOrWhiteSpace($key)) { return }
-                $map = $script:FreshAgentDashboardActions
-                if (-not $map) { return }
-                $sb = $map[$key]
-                if ($sb -is [scriptblock]) { & $sb }
+                $run = $script:FreshAgentDashboardRunTagged
+                if ($run -is [scriptblock]) { & $run $sender $false }
             }
             catch { }
         })
@@ -64,12 +108,8 @@ function Add-FreshAgentDashboardCheck {
             param($sender, $e)
             try {
                 if ($script:FreshAgentDashboardUi -and $script:FreshAgentDashboardUi._suppress) { return }
-                $key = [string]$sender.Tag
-                if ([string]::IsNullOrWhiteSpace($key)) { return }
-                $map = $script:FreshAgentDashboardActions
-                if (-not $map) { return }
-                $sb = $map[$key]
-                if ($sb -is [scriptblock]) { & $sb ([bool]$sender.Checked) }
+                $run = $script:FreshAgentDashboardRunTagged
+                if ($run -is [scriptblock]) { & $run $sender $true }
             }
             catch { }
         })
@@ -229,10 +269,8 @@ function Show-FreshAgentDashboard {
     $btnQuit.Add_Click({
             param($sender, $e)
             try {
-                $map = $script:FreshAgentDashboardActions
-                if (-not $map) { return }
-                $sb = $map['QuitAgent']
-                if ($sb -is [scriptblock]) { & $sb }
+                $run = $script:FreshAgentDashboardRunTagged
+                if ($run -is [scriptblock]) { & $run $sender $false }
             }
             catch { }
         })
