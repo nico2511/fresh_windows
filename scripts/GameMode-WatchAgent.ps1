@@ -444,7 +444,8 @@ function Invoke-WatchTick {
             if ($ramMb -ge $ramMin -or $ramPct -ge $ramPctThr) {
                 $key = "ram:$id"
                 if (Test-AlertCooldown -Key $key -CooldownSec $cooldown) {
-                    Show-Balloon -Title 'RAM elevee' -Text ("$name ~$([math]::Round($ramMb)) Mo ($([math]::Round($ramPct))% systeme).") -Icon Warning
+                    $ramLine = '{0} ~{1} Mo ({2}% systeme).' -f $name, [math]::Round($ramMb), [math]::Round($ramPct)
+                    Show-Balloon -Title 'RAM elevee' -Text $ramLine -Icon Warning
                     Mark-Alert -Key $key
                 }
             }
@@ -487,9 +488,8 @@ function Invoke-WatchTick {
                         if (Get-Process -Name $_ -ErrorAction SilentlyContinue) { $_ }
                     }
                     $extra = if ($hogs.Count) { "`nSuspects : $($hogs -join ', ')" } else { '' }
-                    Show-Balloon -Title 'Disque sature' -Text (
-                        "Disque ~$([math]::Round($disk))% (hors session jeu).$extra"
-                    ) -Icon Warning
+                    $diskLine = 'Disque ~{0}% (hors session jeu).{1}' -f [math]::Round($disk), $extra
+                    Show-Balloon -Title 'Disque sature' -Text $diskLine -Icon Warning
                     Mark-Alert -Key $key
                     $script:DiskHighSince = $null
                 }
