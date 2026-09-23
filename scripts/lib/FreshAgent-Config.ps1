@@ -239,7 +239,8 @@ function Sync-FreshAgentLocalAssets {
         'lib/FreshAgent-Rag.ps1',
         'lib/FreshAgent-History.ps1',
         'lib/FreshAgent-Profiles.ps1',
-        'lib/FreshAgent-Log.ps1'
+        'lib/FreshAgent-Log.ps1',
+        'lib/FreshAgent-Dashboard.ps1'
     )
     foreach ($rel in $scriptPaths) {
         $dest = Join-Path $FreshAppData ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)
@@ -356,6 +357,7 @@ function Import-FreshAgentStandardModules {
             'lib/FreshAgent-History.ps1',
             'lib/FreshAgent-Profiles.ps1',
             'lib/FreshAgent-Log.ps1',
+            'lib/FreshAgent-Dashboard.ps1',
             'ai/Ollama-Manager.ps1',
             'ai/FreshAgent-OllamaBridge.ps1',
             'ai/Windows-Stt.ps1',

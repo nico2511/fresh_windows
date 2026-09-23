@@ -294,6 +294,9 @@ function Invoke-WatchTick {
     $script:UserSettings = Get-WatchUserSettings
     Update-FreshAgentTrayStatus
     Invoke-FreshAgentBackgroundResultPoll
+    if (Get-Command Update-FreshAgentDashboardIfOpen -ErrorAction SilentlyContinue) {
+        Update-FreshAgentDashboardIfOpen
+    }
     if (-not $script:UserSettings.monitorEnabled) { return }
 
     if (-not $script:GameModeCfg) {
@@ -674,6 +677,9 @@ function Invoke-FreshAgentBackgroundResultPoll {
             Update-FreshAgentAiMenu -MiAiRoot $m.Root -MiAiToggle $m.Toggle -MiOllamaState $m.OllamaState `
                 -MiSttState $m.SttState -MiAiListen $m.Listen -MiTtsCycle $m.TtsCycle -MiRagToggle $m.RagToggle
         }
+        if (Get-Command Update-FreshAgentDashboardIfOpen -ErrorAction SilentlyContinue) {
+            Update-FreshAgentDashboardIfOpen
+        }
     }
     catch {
         Write-WatchLog ("BgResult: {0}" -f $_.Exception.Message)
@@ -826,6 +832,183 @@ function Update-FreshAgentAiMenu {
         $MiRagToggle.Text = if ($ragOn) { 'RAG guides : ON' } else { 'RAG guides : OFF' }
     }
     Update-FreshAgentTrayStatus
+    if (Get-Command Update-FreshAgentDashboardIfOpen -ErrorAction SilentlyContinue) {
+        Update-FreshAgentDashboardIfOpen
+    }
+}
+
+function Ensure-FreshAgentDashboardLoaded {
+    if (Get-Command Show-FreshAgentDashboard -ErrorAction SilentlyContinue) {
+        return $true
+    }
+    if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
+        return [bool](Import-FreshAgentModule -RelativePath 'lib/FreshAgent-Dashboard.ps1' -FreshAppData $script:FreshAppData)
+    }
+    return $false
+}
+
+function Get-FreshAgentDashboardState {
+    $st = Get-WatchUserSettings
+    $aiOn = $false
+    $ragOn = $false
+    $ollamaOk = $false
+    $sttMsg = 'STT : —'
+    $listenOk = $false
+    if ($script:FreshAgentReady -and (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue)) {
+        $cfg = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData
+        if ($cfg) {
+            if ($null -ne $cfg.enabled) { $aiOn = [bool]$cfg.enabled }
+            if ($cfg.rag -and $null -ne $cfg.rag.enabled) { $ragOn = [bool]$cfg.rag.enabled }
+        }
+        if (Get-Command Test-OllamaApi -ErrorAction SilentlyContinue) {
+            $base = if ($cfg.ollama.baseUrl) { $cfg.ollama.baseUrl } else { 'http://127.0.0.1:11434' }
+            $ollamaOk = Test-OllamaApi -BaseUrl $base
+        }
+        if (Get-Command Get-WindowsSttStatusMessage -ErrorAction SilentlyContinue) {
+            $sttMsg = Get-WindowsSttStatusMessage
+        }
+        if (Get-Command Test-FreshAgentWindowsSttEnabled -ErrorAction SilentlyContinue) {
+            $listenOk = (Test-FreshAgentWindowsSttEnabled -AiConfig $cfg) -and -not $script:VoiceListenActive
+        }
+    }
+    $summary = if ($script:NotifyIcon) { $script:NotifyIcon.Text } else { 'Fresh Agent' }
+    return @{
+        AutoSuggestKill  = [bool]$st.autoSuggestKill
+        MonitorEnabled   = [bool]$st.monitorEnabled
+        AiEnabled        = $aiOn
+        RagEnabled       = $ragOn
+        OllamaOk         = $ollamaOk
+        SttMessage       = $sttMsg
+        ListenEnabled    = $listenOk
+        FreshAgentReady  = [bool]$script:FreshAgentReady
+        TraySummary      = $summary
+    }
+}
+
+function Invoke-FreshAgentProfileFromUi {
+    param([string]$ProfileId)
+    try {
+        if (-not $script:FreshAgentReady) {
+            Show-Balloon -Title 'Profil' -Text 'Modules non charges.' -Icon Warning
+            return
+        }
+        if (-not (Ensure-FreshAgentProfileReady)) {
+            Show-Balloon -Title 'Profil' -Text 'FreshAgent-Profiles absent — sync scripts locaux.' -Icon Warning
+            return
+        }
+        $r = Invoke-FreshAgentProfile -ProfileId $ProfileId -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData
+        $text = if ($r.message) { [string]$r.message } else { 'OK' }
+        Show-Balloon -Title 'Profil' -Text $text -Icon Info
+        Update-FreshAgentTrayStatus
+    }
+    catch {
+        Show-Balloon -Title 'Profil' -Text $_.Exception.Message -Icon Error
+    }
+}
+
+function Set-FreshAgentAiEnabledFromUi {
+    param([bool]$Enabled)
+    if (-not $script:FreshAgentReady) {
+        Show-Balloon -Title 'IA' -Text 'Modules non charges.' -Icon Warning
+        return
+    }
+    Set-FreshAgentAiUserConfig -Patch @{ enabled = $Enabled } -FreshAppData $script:FreshAppData
+    $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData
+    if ($script:FreshAgentAiMenu) {
+        $m = $script:FreshAgentAiMenu
+        Update-FreshAgentAiMenu -MiAiRoot $m.Root -MiAiToggle $m.Toggle -MiOllamaState $m.OllamaState `
+            -MiSttState $m.SttState -MiAiListen $m.Listen -MiTtsCycle $m.TtsCycle -MiRagToggle $m.RagToggle
+    }
+    if ($Enabled -and $script:FreshAgentAi.ollama.autoStart) {
+        Start-FreshAgentBackgroundWork -Action EnsureModel -BusyText 'Demarrage Ollama + modele...'
+    }
+    Update-FreshAgentDashboardIfOpen
+}
+
+function Set-FreshAgentRagEnabledFromUi {
+    param([bool]$Enabled)
+    if (-not $script:FreshAgentReady) { return }
+    Set-FreshAgentAiUserConfig -Patch @{ rag = @{ enabled = $Enabled } } -FreshAppData $script:FreshAppData
+    $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData
+    if ($Enabled -and (Get-Command Build-FreshAgentRagIndex -ErrorAction SilentlyContinue)) {
+        try { Build-FreshAgentRagIndex -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData | Out-Null } catch { }
+    }
+    if ($script:FreshAgentAiMenu) {
+        $m = $script:FreshAgentAiMenu
+        Update-FreshAgentAiMenu -MiAiRoot $m.Root -MiAiToggle $m.Toggle -MiOllamaState $m.OllamaState `
+            -MiSttState $m.SttState -MiAiListen $m.Listen -MiTtsCycle $m.TtsCycle -MiRagToggle $m.RagToggle
+    }
+    Update-FreshAgentDashboardIfOpen
+}
+
+function Open-FreshAgentDashboardPanel {
+    if (-not (Ensure-FreshAgentDashboardLoaded)) {
+        Show-Balloon -Title 'Fresh Agent' -Text 'Panneau absent — sync scripts locaux (FreshAgent-Dashboard.ps1).' -Icon Warning
+        return
+    }
+    if (-not $script:FreshAgentDashboardActionMap) {
+        $script:FreshAgentDashboardActionMap = @{
+            ToggleAutoSuggest = {
+                param([bool]$On)
+                $s = Get-WatchUserSettings
+                $s.autoSuggestKill = $On
+                Set-WatchUserSettings -Settings $s
+                $script:UserSettings = $s
+                if ($script:WatchMenuAutoItem) {
+                    $script:WatchMenuAutoItem.Text = if ($On) { 'Detection auto : ON' } else { 'Detection auto : OFF' }
+                }
+            }
+            ToggleMonitor     = {
+                param([bool]$On)
+                $s = Get-WatchUserSettings
+                $s.monitorEnabled = $On
+                Set-WatchUserSettings -Settings $s
+                $script:UserSettings = $s
+                if ($script:WatchMenuMonItem) {
+                    $script:WatchMenuMonItem.Text = if ($On) { 'Surveillance : ON' } else { 'Surveillance : OFF' }
+                }
+            }
+            GameModeKill      = { Invoke-GameModeKillNow }
+            IdleLaunchers     = { Invoke-IdleLaunchersOnly }
+            PendingKill       = { Stop-PendingSuggestedProcesses }
+            ProfileGame       = { Invoke-FreshAgentProfileFromUi -ProfileId 'game' }
+            ProfileWork       = { Invoke-FreshAgentProfileFromUi -ProfileId 'work' }
+            ProfileClean      = { Invoke-FreshAgentProfileFromUi -ProfileId 'clean' }
+            SkillHealth       = { Invoke-FreshAgentSkillMenu -SkillId 'check_system_health' }
+            SkillGameSession  = { Invoke-FreshAgentSkillMenu -SkillId 'game_session' }
+            SkillEndGame      = { Invoke-FreshAgentSkillMenu -SkillId 'end_game_session' }
+            SetAiEnabled      = { param([bool]$On) Set-FreshAgentAiEnabledFromUi -Enabled $On }
+            SetRagEnabled     = { param([bool]$On) Set-FreshAgentRagEnabledFromUi -Enabled $On }
+            StartOllama       = { Start-FreshAgentBackgroundWork -Action StartOllama -BusyText 'Demarrage Ollama...' }
+            EnsureModel       = { Start-FreshAgentBackgroundWork -Action EnsureModel -BusyText 'Telechargement modele...' }
+            VoiceListen       = { Invoke-FreshAgentVoiceListenMenu }
+            TtsCycle          = { Invoke-FreshAgentTtsCycleMenu }
+            AiTest            = {
+                if (-not $script:FreshAgentReady) { return }
+                if (-not (Get-Command Invoke-FreshAgentAiTurn -ErrorAction SilentlyContinue)) {
+                    Show-Balloon -Title 'IA' -Text 'Bridge Ollama absent.' -Icon Warning
+                    return
+                }
+                $prompt = Show-FreshAgentAiPromptDialog
+                if ($prompt) { Start-FreshAgentAiPromptBackground -Prompt $prompt }
+            }
+            AiHistory         = { Invoke-FreshAgentAiHistoryMenu }
+            FwMenu            = { try { Start-FreshWindowsElevated -RepoRef $script:RepoRef } catch { Show-Balloon -Title 'Fresh Windows' -Text $_.Exception.Message -Icon Error } }
+            FwMaintenance     = { try { Start-FreshWindowsElevated -SilentMode 'maintenance' -RepoRef $script:RepoRef } catch { Show-Balloon -Title 'Fresh Windows' -Text $_.Exception.Message -Icon Error } }
+            FwGameMode        = { try { Start-FreshWindowsElevated -SilentMode 'game-mode' -RepoRef $script:RepoRef } catch { Show-Balloon -Title 'Fresh Windows' -Text $_.Exception.Message -Icon Error } }
+            SyncScripts       = { Invoke-SyncLocalScripts }
+            OpenPowerShell    = { try { Start-FreshWindowsPowerShell } catch { Show-Balloon -Title 'PowerShell' -Text $_.Exception.Message -Icon Error } }
+            QuitAgent         = {
+                $script:NotifyIcon.Visible = $false
+                if ($script:FreshAgentDashboardForm -and -not $script:FreshAgentDashboardForm.IsDisposed) {
+                    $script:FreshAgentDashboardForm.Close()
+                }
+                if ($script:HiddenForm) { $script:HiddenForm.Close() }
+                [System.Windows.Forms.Application]::Exit()
+            }
+        }
+    }
+    Show-FreshAgentDashboard -Actions $script:FreshAgentDashboardActionMap -GetState ${function:Get-FreshAgentDashboardState}
 }
 
 function Invoke-SyncLocalScripts {
@@ -853,7 +1036,8 @@ function Invoke-SyncLocalScripts {
                     'lib/FreshAgent-Rag.ps1',
                     'lib/FreshAgent-History.ps1',
                     'lib/FreshAgent-Profiles.ps1',
-                    'lib/FreshAgent-Log.ps1'
+                    'lib/FreshAgent-Log.ps1',
+                    'lib/FreshAgent-Dashboard.ps1'
                 )) {
                     Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
                 }
@@ -922,6 +1106,14 @@ Update-FreshAgentTrayStatus
 Hide-WatchConsole
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
+
+$miOpenPanel = New-Object System.Windows.Forms.ToolStripMenuItem
+$miOpenPanel.Text = 'Ouvrir le panneau Fresh Agent...'
+$miOpenPanel.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+$null = $menu.Items.Add($miOpenPanel)
+$miOpenPanel.Add_Click({ Open-FreshAgentDashboardPanel })
+$menu.Items.Add('-') | Out-Null
+
 $miKill = $menu.Items.Add('Mode jeu (liste + launchers inactifs)')
 $miKill.Add_Click({ Invoke-GameModeKillNow })
 
@@ -932,6 +1124,7 @@ $miPending = $menu.Items.Add('Tuer suggestions en attente')
 $miPending.Add_Click({ Stop-PendingSuggestedProcesses })
 
 $miAuto = $menu.Items.Add('Détection auto : ON')
+$script:WatchMenuAutoItem = $miAuto
 $miAuto.Add_Click({
     $s = Get-WatchUserSettings
     $s.autoSuggestKill = -not $s.autoSuggestKill
@@ -941,6 +1134,7 @@ $miAuto.Add_Click({
 })
 
 $miMon = $menu.Items.Add('Surveillance : ON')
+$script:WatchMenuMonItem = $miMon
 $miMon.Add_Click({
     $s = Get-WatchUserSettings
     $s.monitorEnabled = -not $s.monitorEnabled
@@ -1165,6 +1359,13 @@ $miExit.Add_Click({
 })
 
 $script:NotifyIcon.ContextMenuStrip = $menu
+$script:NotifyIcon.Add_MouseClick({
+        param($sender, $e)
+        if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+            Open-FreshAgentDashboardPanel
+        }
+    })
+$script:NotifyIcon.Add_MouseDoubleClick({ Open-FreshAgentDashboardPanel })
 
 $miAuto.Text = if ($script:UserSettings.autoSuggestKill) { 'Détection auto : ON' } else { 'Détection auto : OFF' }
 $miMon.Text = if ($script:UserSettings.monitorEnabled) { 'Surveillance : ON' } else { 'Surveillance : OFF' }
@@ -1175,7 +1376,7 @@ $timer.Interval = $pollMs
 $timer.Add_Tick({ Invoke-WatchTick })
 $timer.Start()
 
-Show-Balloon -Title 'Fresh Windows' -Text 'Agent actif. Clic droit sur l icone (fleche ^ si cachee).' -Icon Info
+Show-Balloon -Title 'Fresh Windows' -Text 'Agent actif — clic gauche = panneau, clic droit = menu.' -Icon Info
 
 Write-WatchLog 'Application.Run(form)'
 try {

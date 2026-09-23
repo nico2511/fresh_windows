@@ -27,6 +27,7 @@ REQUIRED_LIB = [
     "scripts/lib/FreshAgent-SkillsEngine.ps1",
     "scripts/lib/FreshAgent-SkillHandlers.ps1",
     "scripts/lib/FreshAgent-Profiles.ps1",
+    "scripts/lib/FreshAgent-Dashboard.ps1",
 ]
 
 
