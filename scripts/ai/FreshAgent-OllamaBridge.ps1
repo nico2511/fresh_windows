@@ -23,11 +23,32 @@ Ne invente pas de noms d outils. Si tu ne peux pas agir, explique pourquoi.
 }
 
 function Get-FreshAgentAiSystemPrompt {
-    param($AiConfig)
-    if ($AiConfig.systemPrompt -and -not [string]::IsNullOrWhiteSpace([string]$AiConfig.systemPrompt)) {
-        return [string]$AiConfig.systemPrompt
+    param(
+        $AiConfig,
+        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
+    )
+    $base = if ($AiConfig.systemPrompt -and -not [string]::IsNullOrWhiteSpace([string]$AiConfig.systemPrompt)) {
+        [string]$AiConfig.systemPrompt
     }
-    return Get-FreshAgentDefaultSystemPrompt
+    else {
+        Get-FreshAgentDefaultSystemPrompt
+    }
+
+    $includeInv = $false
+    if ($AiConfig.rag -and $null -ne $AiConfig.rag.includeInventoryInPrompt) {
+        $includeInv = [bool]$AiConfig.rag.includeInventoryInPrompt
+    }
+    elseif ($AiConfig.rag -and $AiConfig.rag.enabled) {
+        $includeInv = $true
+    }
+
+    if ($includeInv -and (Get-Command Get-FreshAgentInventoryContextText -ErrorAction SilentlyContinue)) {
+        $ctx = Get-FreshAgentInventoryContextText -FreshAppData $FreshAppData
+        if ($ctx) {
+            $base = "$base`n`n$ctx"
+        }
+    }
+    return $base
 }
 
 function Get-FreshAgentAiMaxToolRounds {
@@ -139,7 +160,7 @@ function Invoke-FreshAgentAiTurn {
 
     $timeout = Get-FreshAgentAiChatTimeout -AiConfig $AiConfig
     $maxRounds = Get-FreshAgentAiMaxToolRounds -AiConfig $AiConfig
-    $system = Get-FreshAgentAiSystemPrompt -AiConfig $AiConfig
+    $system = Get-FreshAgentAiSystemPrompt -AiConfig $AiConfig -FreshAppData $FreshAppData
 
     $messages = [System.Collections.ArrayList]@(
         @{ role = 'system'; content = $system },

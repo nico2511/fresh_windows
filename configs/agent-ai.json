@@ -25,9 +25,20 @@
   },
   "tts": {
     "provider": "off",
-    "comment": "off | windows | piper"
+    "comment": "off | windows | piper",
+    "speakSkillResults": true,
+    "windows": {
+      "culture": "fr-FR",
+      "rate": 0,
+      "volume": 100
+    },
+    "piper": {
+      "exe": "%LOCALAPPDATA%\\Programs\\Piper\\piper.exe",
+      "model": "%LOCALAPPDATA%\\FreshWindows\\piper\\fr_FR-siwis-medium.onnx"
+    }
   },
   "rag": {
-    "enabled": false
+    "enabled": false,
+    "includeInventoryInPrompt": true
   }
 }

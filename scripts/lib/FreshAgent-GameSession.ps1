@@ -37,12 +37,20 @@ function Get-WindowsFocusAssistSnapshot {
     $snap = @{
         pushToastEnabled = $null
         regPath          = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\PushNotifications'
+        focusAssistType  = $null
+        focusAssistPath  = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\FocusAssist'
     }
     try {
         if (Test-Path -LiteralPath $snap.regPath) {
             $v = Get-ItemProperty -LiteralPath $snap.regPath -Name ToastEnabled -ErrorAction SilentlyContinue
             if ($null -ne $v.ToastEnabled) {
                 $snap.pushToastEnabled = [int]$v.ToastEnabled
+            }
+        }
+        if (Test-Path -LiteralPath $snap.focusAssistPath) {
+            $fa = Get-ItemProperty -LiteralPath $snap.focusAssistPath -Name FocusAssistType -ErrorAction SilentlyContinue
+            if ($null -ne $fa.FocusAssistType) {
+                $snap.focusAssistType = [int]$fa.FocusAssistType
             }
         }
     }
@@ -61,6 +69,11 @@ function Set-WindowsFocusAssistBestEffort {
         if ($Enable) {
             Set-ItemProperty -LiteralPath $regPath -Name ToastEnabled -Value 0 -Type DWord -Force
             $notes += 'Toasts desactives (best-effort DND).'
+            $faPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\FocusAssist'
+            if (Test-Path -LiteralPath $faPath) {
+                Set-ItemProperty -LiteralPath $faPath -Name FocusAssistType -Value 2 -Type DWord -Force
+                $notes += 'Focus Assist: alarmes seulement (si cle supportee).'
+            }
         }
         else {
             Set-ItemProperty -LiteralPath $regPath -Name ToastEnabled -Value 1 -Type DWord -Force
@@ -83,6 +96,14 @@ function Restore-WindowsFocusAssistSnapshot {
             if (-not $regPath) { $regPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\PushNotifications' }
             Set-ItemProperty -LiteralPath $regPath -Name ToastEnabled -Value ([int]$Snapshot.pushToastEnabled) -Type DWord -Force
             $notes += 'Toasts restaures depuis snapshot.'
+        }
+        if ($null -ne $Snapshot.focusAssistType) {
+            $faPath = $Snapshot.focusAssistPath
+            if (-not $faPath) { $faPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\FocusAssist' }
+            if (Test-Path -LiteralPath $faPath) {
+                Set-ItemProperty -LiteralPath $faPath -Name FocusAssistType -Value ([int]$Snapshot.focusAssistType) -Type DWord -Force
+                $notes += 'Focus Assist restaure.'
+            }
         }
     }
     catch {

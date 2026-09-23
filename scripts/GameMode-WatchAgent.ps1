@@ -114,7 +114,9 @@ if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
             'lib/FreshAgent-GameSession.ps1',
             'ai/Ollama-Manager.ps1',
             'ai/FreshAgent-OllamaBridge.ps1',
-            'ai/Windows-Stt.ps1'
+            'ai/Windows-Stt.ps1',
+            'ai/FreshAgent-Tts.ps1',
+            'lib/FreshAgent-Inventory.ps1'
         )) {
         if (-not (Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData)) {
             Write-WatchLog ("Module Fresh Agent absent: {0}" -f $mod)
@@ -126,6 +128,18 @@ if (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue) {
         $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
         $script:FreshAgentReady = $true
         Write-WatchLog 'Fresh Agent modules charges'
+        if (Get-Command Build-FreshAgentMachineInventory -ErrorAction SilentlyContinue) {
+            try {
+                $invPath = Get-FreshAgentInventoryPath -FreshAppData $FreshAppData
+                if (-not (Test-Path -LiteralPath $invPath)) {
+                    Build-FreshAgentMachineInventory -FreshAppData $FreshAppData | Out-Null
+                    Write-WatchLog 'Inventaire machine initialise'
+                }
+            }
+            catch {
+                Write-WatchLog ("Inventaire: {0}" -f $_.Exception.Message)
+            }
+        }
     }
     catch {
         Write-WatchLog ("Fresh Agent config: {0}" -f $_.Exception.Message)
@@ -423,6 +437,10 @@ function Invoke-FreshAgentSkillMenu {
         $text = if ($r.message) { [string]$r.message } else { 'Termine.' }
         $icon = if ($r.ok) { 'Info' } else { 'Warning' }
         Show-Balloon -Title 'Fresh Agent' -Text $text -Icon $icon
+        if (Get-Command Invoke-FreshAgentSpeakSkillResult -ErrorAction SilentlyContinue) {
+            $cfg = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
+            Invoke-FreshAgentSpeakSkillResult -Result $r -AiConfig $cfg -FreshAppData $FreshAppData
+        }
     }
     catch {
         Show-Balloon -Title 'Fresh Agent' -Text $_.Exception.Message -Icon Error
@@ -498,6 +516,8 @@ Add-Type -AssemblyName System.Windows.Forms
 . (Join-Path `$fresh 'lib\FreshAgent-GameSession.ps1')
 . (Join-Path `$fresh 'ai\Ollama-Manager.ps1')
 . (Join-Path `$fresh 'ai\FreshAgent-OllamaBridge.ps1')
+. (Join-Path `$fresh 'lib\FreshAgent-Inventory.ps1')
+. (Join-Path `$fresh 'ai\FreshAgent-Tts.ps1')
 `$log=Join-Path `$fresh 'watch-agent.log'
 function Log([string]`$m){ try { Add-Content -LiteralPath `$log -Value ((Get-Date -Format o)+' AI '+`$m) -Encoding UTF8 } catch {} }
 try {
@@ -508,6 +528,9 @@ try {
   `$text = if (`$r.message) { [string]`$r.message } else { 'Termine.' }
   if (`$r.skills -and `$r.skills.Count -gt 0) { `$text += "`nSkills: " + (`$r.skills -join ', ') }
   Log `$text
+  if (Get-Command Invoke-FreshAgentSpeak -ErrorAction SilentlyContinue) {
+    Invoke-FreshAgentSpeak -Text `$text -AiConfig `$cfg -FreshAppData `$fresh | Out-Null
+  }
   [System.Windows.Forms.MessageBox]::Show(`$text, 'Fresh Agent IA')
 } catch {
   Log `$_.Exception.Message
@@ -601,6 +624,9 @@ function Invoke-FreshAgentVoiceListenMenu {
         $text = if ($result.message) { [string]$result.message } else { 'Commande vocale executee.' }
         $icon = if ($result.ok) { 'Info' } else { 'Warning' }
         Show-Balloon -Title 'Fresh Agent' -Text $text -Icon $icon
+        if (Get-Command Invoke-FreshAgentSpeakSkillResult -ErrorAction SilentlyContinue) {
+            Invoke-FreshAgentSpeakSkillResult -Result $result -AiConfig $cfg -FreshAppData $FreshAppData
+        }
     }
     catch {
         Write-WatchLog ("STT: {0}" -f $_.Exception.Message)
@@ -614,8 +640,27 @@ function Invoke-FreshAgentVoiceListenMenu {
     }
 }
 
+function Invoke-FreshAgentTtsCycleMenu {
+    if (-not $script:FreshAgentReady) { return }
+    $cfg = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
+    $cur = 'off'
+    if (Get-Command Get-FreshAgentTtsProvider -ErrorAction SilentlyContinue) {
+        $cur = Get-FreshAgentTtsProvider -AiConfig $cfg
+    }
+    $order = @('off', 'windows', 'piper')
+    $idx = [array]::IndexOf($order, $cur)
+    if ($idx -lt 0) { $idx = 0 }
+    $next = $order[($idx + 1) % $order.Count]
+    Set-FreshAgentAiUserConfig -Patch @{ tts = @{ provider = $next } } -FreshAppData $FreshAppData
+    $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
+    Show-Balloon -Title 'TTS' -Text ("TTS : {0}" -f $next.ToUpper()) -Icon Info
+    if ($next -ne 'off' -and (Get-Command Invoke-FreshAgentSpeak -ErrorAction SilentlyContinue)) {
+        Invoke-FreshAgentSpeak -Text 'TTS Fresh Agent active.' -AiConfig $script:FreshAgentAi -FreshAppData $FreshAppData | Out-Null
+    }
+}
+
 function Update-FreshAgentAiMenu {
-    param($MiAiRoot, $MiAiToggle, $MiOllamaState, $MiSttState, $MiAiListen)
+    param($MiAiRoot, $MiAiToggle, $MiOllamaState, $MiSttState, $MiAiListen, $MiTtsCycle)
     if (-not $MiAiRoot) { return }
     $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
     $enabled = $false
@@ -645,6 +690,11 @@ function Update-FreshAgentAiMenu {
         $script:MiAiListenLabel = $label
         $script:MiAiListenItem = $MiAiListen
     }
+    if ($MiTtsCycle -and (Get-Command Get-FreshAgentTtsProvider -ErrorAction SilentlyContinue)) {
+        $p = Get-FreshAgentTtsProvider -AiConfig $script:FreshAgentAi
+        $MiTtsCycle.Text = "TTS : $($p.ToUpper()) (clic = cycle)"
+        $MiTtsCycle.Enabled = $true
+    }
 }
 
 function Invoke-SyncLocalScripts {
@@ -665,7 +715,9 @@ function Invoke-SyncLocalScripts {
                     'lib/FreshAgent-GameSession.ps1',
                     'ai/Ollama-Manager.ps1',
                     'ai/FreshAgent-OllamaBridge.ps1',
-                    'ai/Windows-Stt.ps1'
+                    'ai/Windows-Stt.ps1',
+                    'ai/FreshAgent-Tts.ps1',
+                    'lib/FreshAgent-Inventory.ps1'
                 )) {
                     Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
                 }
@@ -785,7 +837,7 @@ $miAiToggle.Add_Click({
     $next = -not [bool]$cur.enabled
     Set-FreshAgentAiUserConfig -Patch @{ enabled = $next } -FreshAppData $FreshAppData
     $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
-    Update-FreshAgentAiMenu -MiAiRoot $miAi -MiAiToggle $miAiToggle -MiOllamaState $miOllamaState -MiSttState $miSttState -MiAiListen $miAiListen
+    Update-FreshAgentAiMenu -MiAiRoot $miAi -MiAiToggle $miAiToggle -MiOllamaState $miOllamaState -MiSttState $miSttState -MiAiListen $miAiListen -MiTtsCycle $miTtsCycle
     if ($next -and $script:FreshAgentAi.ollama.autoStart) {
         Start-FreshAgentBackgroundWork -Action EnsureModel -BusyText 'Demarrage Ollama + modele...'
     }
@@ -822,6 +874,11 @@ $miAiListen.Enabled = $false
 $miAiListen.Add_Click({ Invoke-FreshAgentVoiceListenMenu })
 $miAi.DropDownItems.Add($miAiListen) | Out-Null
 
+$miTtsCycle = New-Object System.Windows.Forms.ToolStripMenuItem
+$miTtsCycle.Text = 'TTS : OFF (clic = cycle)'
+$miTtsCycle.Add_Click({ Invoke-FreshAgentTtsCycleMenu })
+$miAi.DropDownItems.Add($miTtsCycle) | Out-Null
+
 $miAiTest = New-Object System.Windows.Forms.ToolStripMenuItem
 $miAiTest.Text = 'Tester l IA (tool calling)...'
 $miAiTest.Add_Click({
@@ -841,7 +898,7 @@ $miAiTest.Add_Click({
 $miAi.DropDownItems.Add($miAiTest) | Out-Null
 
 if ($script:FreshAgentReady) {
-    Update-FreshAgentAiMenu -MiAiRoot $miAi -MiAiToggle $miAiToggle -MiOllamaState $miOllamaState -MiSttState $miSttState -MiAiListen $miAiListen
+    Update-FreshAgentAiMenu -MiAiRoot $miAi -MiAiToggle $miAiToggle -MiOllamaState $miOllamaState -MiSttState $miSttState -MiAiListen $miAiListen -MiTtsCycle $miTtsCycle
 }
 else {
     $miAi.Enabled = $false

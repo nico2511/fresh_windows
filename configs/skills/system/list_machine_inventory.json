@@ -1,0 +1,11 @@
+{
+  "id": "list_machine_inventory",
+  "title": "Lister inventaire machine",
+  "handler": "Invoke-SkillListMachineInventory",
+  "menuVisible": false,
+  "requiresAdmin": false,
+  "ai": {
+    "expose": true,
+    "description": "Resume jeux Steam detectes et navigateur par defaut."
+  }
+}
