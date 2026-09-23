@@ -209,8 +209,8 @@ function Sync-GameModeLocalScripts {
         $dest = Join-Path $FreshAppData $scriptName
         $url  = "$RepoRawRoot/scripts/$scriptName"
         Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
-        if (Get-Command ConvertTo-Utf8BomFile -ErrorAction SilentlyContinue) {
-            ConvertTo-Utf8BomFile -Path $dest
+        if (Get-Command Set-FreshScriptUtf8Bom -ErrorAction SilentlyContinue) {
+            Set-FreshScriptUtf8Bom -Path $dest
         }
         Write-Host "-> $scriptName" -ForegroundColor DarkGray
     }

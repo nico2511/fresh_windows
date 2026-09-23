@@ -79,6 +79,20 @@ catch { }
 Sync-FreshAgentLocalAssets -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef | Out-Null
 Set-Content -LiteralPath (Join-Path $FreshAppData 'scripts.ref') -Value $RepoRef -Encoding UTF8 -NoNewline
 
+$coreLib = Join-Path $FreshAppData 'lib\Launcher-Core.ps1'
+$coreUrl = "$RepoRawRoot/scripts/lib/Launcher-Core.ps1"
+try {
+    New-Item -ItemType Directory -Path (Split-Path $coreLib -Parent) -Force | Out-Null
+    Invoke-WebRequest -Uri $coreUrl -OutFile $coreLib -UseBasicParsing
+    Set-FreshScriptUtf8Bom -Path $coreLib
+    . $coreLib
+    Sync-GameModeLocalScripts -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef | Out-Null
+    Write-Host '-> Launch-GameModeWatch.ps1 + Start-WatchAgent.cmd' -ForegroundColor DarkGray
+}
+catch {
+    Write-Host "!! Stub watch agent : $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
 if (Get-Command Write-FreshAgentLog -ErrorAction SilentlyContinue) {
     Write-FreshAgentLog -Category 'Sync' -Message "Sync-FreshWindowsAgent.ps1 termine (ref $RepoRef)" -FreshAppData $FreshAppData
 }
