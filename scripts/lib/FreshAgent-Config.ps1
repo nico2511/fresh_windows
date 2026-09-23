@@ -315,9 +315,18 @@ function Import-FreshAgentModule {
     }
 
     foreach ($path in ($candidates | Select-Object -Unique)) {
-        if (Test-Path -LiteralPath $path) {
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        try {
+            $known = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+            Get-ChildItem -Path Function: | ForEach-Object { [void]$known.Add($_.Name) }
             . $path
+            Get-ChildItem -Path Function: | Where-Object { -not $known.Contains($_.Name) } | ForEach-Object {
+                Set-Item -Path ("script:\function:{0}" -f $_.Name) -Value $_.ScriptBlock -Force
+            }
             return $true
+        }
+        catch {
+            return $false
         }
     }
     return $false
