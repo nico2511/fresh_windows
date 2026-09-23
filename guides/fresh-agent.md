@@ -62,9 +62,30 @@ $fresh = Join-Path $env:LOCALAPPDATA 'FreshWindows'; New-Item -ItemType Director
 
 Defaut : **API Windows** (`System.Speech`), pas CyberScribe. Menu **Ecouter**.
 
+## Developpement local (clone Git)
+
+Mettre a jour `main`, copier le repo vers AppData, tester :
+
+```powershell
+cd D:\Git\FreshWindows
+git pull origin main
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Dev-SyncFreshAgentFromRepo.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Parse-Scripts.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Run-AllTests.ps1
+```
+
+Puis relancer l’agent (tuer l’instance precedente si besoin) :
+
+```powershell
+Get-CimInstance Win32_Process |
+  Where-Object { $_.CommandLine -match 'GameMode-WatchAgent|Launch-GameModeWatch' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+& "$env:LOCALAPPDATA\FreshWindows\Start-WatchAgent.cmd"
+```
+
 ## Tests
 
 ```powershell
-powershell -NoProfile -File .\tests\Run-AllTests.ps1
-powershell -NoProfile -File .\tests\Validate-SkillsRegistry.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Run-AllTests.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Validate-SkillsRegistry.ps1
 ```

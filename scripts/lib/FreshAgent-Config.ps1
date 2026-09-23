@@ -339,11 +339,13 @@ function Import-FreshAgentModule {
             if (Get-Command Set-FreshScriptUtf8Bom -ErrorAction SilentlyContinue) {
                 Set-FreshScriptUtf8Bom -Path $path
             }
-            $known = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
-            Get-ChildItem -Path Function: | ForEach-Object { [void]$known.Add($_.Name) }
-            . $path
-            Get-ChildItem -Path Function: | Where-Object { -not $known.Contains($_.Name) } | ForEach-Object {
-                Set-Item -Path ("script:\function:{0}" -f $_.Name) -Value $_.ScriptBlock -Force
+            $escaped = $path.Replace("'", "''")
+            $dot = [scriptblock]::Create(". '$escaped'")
+            if ($script:WatchAgentSessionState) {
+                $null = $script:WatchAgentSessionState.InvokeCommand.InvokeScript($false, $dot, $null, @())
+            }
+            else {
+                $null = $ExecutionContext.InvokeCommand.InvokeScript($false, $dot, $null, @())
             }
             return $true
         }

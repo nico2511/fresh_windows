@@ -230,6 +230,15 @@ function Sync-GameModeLocalScripts {
 
     Set-Content -LiteralPath (Join-Path $FreshAppData 'scripts.ref') -Value $Ref -Encoding UTF8 -NoNewline
 
+    Publish-FreshGameModeWatchStubs -FreshAppData $FreshAppData | Out-Null
+    return $true
+}
+
+function Publish-FreshGameModeWatchStubs {
+    param([Parameter(Mandatory)][string]$FreshAppData)
+
+    New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null
+
     $killStub = Join-Path $FreshAppData "Launch-GameModeKill.ps1"
     @"
 #Requires -Version 5.1
