@@ -117,15 +117,14 @@ function Invoke-WindowsSttListenInteractive {
     try {
         $engine = New-WindowsSpeechRecognitionEngine -AiConfig $AiConfig
 
-        $handler = [System.Speech.Recognition.SpeechRecognizedEventHandler]{
-            param($sender, $e)
-            if ($null -eq $e -or $null -eq $e.Result) { return }
-            if ($e.Result.Rejected) { return }
-            if ($e.Result.Confidence -lt $minConfidence) { return }
-            $script:SttListenResult = $e.Result.Text
-            $script:SttListenDone = $true
-        }
-        $engine.Add_SpeechRecognized($handler)
+        $engine.Add_SpeechRecognized({
+                param($sender, $e)
+                if ($null -eq $e -or $null -eq $e.Result) { return }
+                if ($e.Result.Rejected) { return }
+                if ($e.Result.Confidence -lt $minConfidence) { return }
+                $script:SttListenResult = $e.Result.Text
+                $script:SttListenDone = $true
+            })
 
         $engine.RecognizeAsync([System.Speech.Recognition.RecognizeMode]::Single)
 
