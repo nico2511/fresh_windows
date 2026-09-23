@@ -1135,6 +1135,7 @@ function Open-FreshAgentDashboardPanel {
             OpenPowerShell    = { try { Start-FreshWindowsPowerShell } catch { Show-Balloon -Title 'PowerShell' -Text $_.Exception.Message -Icon Error } }
             QuitAgent         = {
                 $script:NotifyIcon.Visible = $false
+                Exit-FreshWatchAgentSingleInstance
                 if ($script:FreshAgentDashboardForm -and -not $script:FreshAgentDashboardForm.IsDisposed) {
                     $script:FreshAgentDashboardForm.Close()
                 }
