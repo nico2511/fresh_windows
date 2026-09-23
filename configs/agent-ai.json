@@ -17,7 +17,11 @@
   "stt": {
     "provider": "windows",
     "comment": "windows = reconnaissance Windows (Speech API). cyberScribe desactive par defaut.",
-    "pushToTalk": false
+    "pushToTalk": true,
+    "listenSeconds": 20,
+    "culture": "fr-FR",
+    "route": "auto",
+    "minConfidence": 0.42
   },
   "tts": {
     "provider": "off",

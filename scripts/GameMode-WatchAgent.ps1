@@ -89,6 +89,9 @@ else {
 
 $script:FreshAgentReady = $false
 $script:FreshAgentAi = $null
+$script:VoiceListenActive = $false
+$script:MiAiListenItem = $null
+$script:MiAiListenLabel = $null
 $faConfigCandidates = @(
     (Join-Path $FreshAppData 'lib\FreshAgent-Config.ps1'),
     (Join-Path $PSScriptRoot 'lib\FreshAgent-Config.ps1')
@@ -550,8 +553,69 @@ try {
     ) | Out-Null
 }
 
+function Invoke-FreshAgentVoiceListenMenu {
+    if ($script:VoiceListenActive) {
+        Show-Balloon -Title 'STT' -Text 'Ecoute deja en cours.' -Icon Warning
+        return
+    }
+    if (-not $script:FreshAgentReady) {
+        Show-Balloon -Title 'STT' -Text 'Modules non charges.' -Icon Warning
+        return
+    }
+    if (-not (Get-Command Invoke-WindowsSttListenInteractive -ErrorAction SilentlyContinue)) {
+        Show-Balloon -Title 'STT' -Text 'Module Windows-Stt absent — sync scripts locaux.' -Icon Warning
+        return
+    }
+
+    $cfg = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
+    if (-not (Test-FreshAgentWindowsSttEnabled -AiConfig $cfg)) {
+        Show-Balloon -Title 'STT' -Text 'STT Windows indisponible (micro / langue).' -Icon Warning
+        return
+    }
+
+    $script:VoiceListenActive = $true
+    $prevText = $script:MiAiListenLabel
+    if ($script:MiAiListenItem) {
+        $script:MiAiListenItem.Text = 'Ecoute en cours... (parlez)'
+    }
+    try {
+        Show-Balloon -Title 'STT' -Text 'Parlez maintenant (Windows Speech)...' -Icon Info
+        Write-WatchLog 'STT listen start'
+        $transcript = Invoke-WindowsSttListenInteractive -AiConfig $cfg
+        if ([string]::IsNullOrWhiteSpace($transcript)) {
+            Show-Balloon -Title 'STT' -Text 'Rien entendu (timeout ou confiance faible).' -Icon Warning
+            Write-WatchLog 'STT listen empty'
+            return
+        }
+        Write-WatchLog ("STT entendu: {0}" -f $transcript)
+        Show-Balloon -Title 'STT' -Text ("Entendu: {0}" -f $transcript) -Icon Info
+
+        $useBackgroundAi = $cfg.enabled -and (Get-Command Start-FreshAgentAiPromptBackground -ErrorAction SilentlyContinue)
+        $route = if ($cfg.stt.route) { [string]$cfg.stt.route } else { 'auto' }
+        if ($useBackgroundAi -and ($route -eq 'ai' -or $route -eq 'auto')) {
+            Start-FreshAgentAiPromptBackground -Prompt $transcript
+            return
+        }
+
+        $result = Invoke-FreshAgentProcessVoiceTranscript -Transcript $transcript -AiConfig $cfg -RepoRef $RepoRef -FreshAppData $FreshAppData
+        $text = if ($result.message) { [string]$result.message } else { 'Commande vocale executee.' }
+        $icon = if ($result.ok) { 'Info' } else { 'Warning' }
+        Show-Balloon -Title 'Fresh Agent' -Text $text -Icon $icon
+    }
+    catch {
+        Write-WatchLog ("STT: {0}" -f $_.Exception.Message)
+        Show-Balloon -Title 'STT' -Text $_.Exception.Message -Icon Error
+    }
+    finally {
+        $script:VoiceListenActive = $false
+        if ($script:MiAiListenItem -and $prevText) {
+            $script:MiAiListenItem.Text = $prevText
+        }
+    }
+}
+
 function Update-FreshAgentAiMenu {
-    param($MiAiRoot, $MiAiToggle, $MiOllamaState, $MiSttState)
+    param($MiAiRoot, $MiAiToggle, $MiOllamaState, $MiSttState, $MiAiListen)
     if (-not $MiAiRoot) { return }
     $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
     $enabled = $false
@@ -570,6 +634,17 @@ function Update-FreshAgentAiMenu {
         $sttMsg = Get-WindowsSttStatusMessage
     }
     $MiSttState.Text = $sttMsg
+    if ($MiAiListen) {
+        $listenOk = $false
+        if (Get-Command Test-FreshAgentWindowsSttEnabled -ErrorAction SilentlyContinue) {
+            $listenOk = Test-FreshAgentWindowsSttEnabled -AiConfig $script:FreshAgentAi
+        }
+        $MiAiListen.Enabled = $listenOk -and -not $script:VoiceListenActive
+        $label = if ($listenOk) { 'Ecouter (commande vocale Windows)' } else { 'Ecouter (STT indisponible)' }
+        $MiAiListen.Text = $label
+        $script:MiAiListenLabel = $label
+        $script:MiAiListenItem = $MiAiListen
+    }
 }
 
 function Invoke-SyncLocalScripts {
@@ -710,7 +785,7 @@ $miAiToggle.Add_Click({
     $next = -not [bool]$cur.enabled
     Set-FreshAgentAiUserConfig -Patch @{ enabled = $next } -FreshAppData $FreshAppData
     $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
-    Update-FreshAgentAiMenu -MiAiRoot $miAi -MiAiToggle $miAiToggle -MiOllamaState $miOllamaState -MiSttState $miSttState
+    Update-FreshAgentAiMenu -MiAiRoot $miAi -MiAiToggle $miAiToggle -MiOllamaState $miOllamaState -MiSttState $miSttState -MiAiListen $miAiListen
     if ($next -and $script:FreshAgentAi.ollama.autoStart) {
         Start-FreshAgentBackgroundWork -Action EnsureModel -BusyText 'Demarrage Ollama + modele...'
     }
@@ -742,8 +817,9 @@ $miSttState.Enabled = $false
 $miAi.DropDownItems.Add($miSttState) | Out-Null
 
 $miAiListen = New-Object System.Windows.Forms.ToolStripMenuItem
-$miAiListen.Text = 'Ecouter (STT Windows — bientot)'
+$miAiListen.Text = 'Ecouter (commande vocale Windows)'
 $miAiListen.Enabled = $false
+$miAiListen.Add_Click({ Invoke-FreshAgentVoiceListenMenu })
 $miAi.DropDownItems.Add($miAiListen) | Out-Null
 
 $miAiTest = New-Object System.Windows.Forms.ToolStripMenuItem
@@ -765,7 +841,7 @@ $miAiTest.Add_Click({
 $miAi.DropDownItems.Add($miAiTest) | Out-Null
 
 if ($script:FreshAgentReady) {
-    Update-FreshAgentAiMenu -MiAiRoot $miAi -MiAiToggle $miAiToggle -MiOllamaState $miOllamaState -MiSttState $miSttState
+    Update-FreshAgentAiMenu -MiAiRoot $miAi -MiAiToggle $miAiToggle -MiOllamaState $miOllamaState -MiSttState $miSttState -MiAiListen $miAiListen
 }
 else {
     $miAi.Enabled = $false
