@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Agent barre des taches Fresh Windows.
@@ -696,7 +696,7 @@ function Log([string]`$m) { try { Add-Content -LiteralPath `$log -Value ((Get-Da
 try {
   `$prompt = Get-Content -LiteralPath (Join-Path `$fresh 'ai-prompt.pending.txt') -Raw -Encoding UTF8
   `$cfg = Get-FreshAgentAiConfig -RepoRef `$repo -FreshAppData `$fresh
-  if (-not `$cfg.enabled) { throw 'IA desactivee — active IA : ON dans le menu.' }
+  if (-not `$cfg.enabled) { throw 'IA desactivee - active IA : ON dans le menu.' }
   `$r = Invoke-FreshAgentAiTurn -UserPrompt `$prompt.Trim() -AiConfig `$cfg -RepoRef `$repo -FreshAppData `$fresh
   `$text = if (`$r.message) { [string]`$r.message } else { 'Termine.' }
   if (`$r.skills -and `$r.skills.Count -gt 0) { `$text += ([Environment]::NewLine + 'Skills: ' + (`$r.skills -join ', ')) }
