@@ -34,11 +34,11 @@ Le sync **ne supprime pas** les fichiers user ci-dessus.
 - Si relance bloquee sans icone : tuer les processus fantomes puis relancer :
 
 ```powershell
-Get-CimInstance Win32_Process |
-  Where-Object { $_.CommandLine -match 'GameMode-WatchAgent|Launch-GameModeWatch' } |
-  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\FreshWindows\Stop-FreshWatchAgent.ps1"
 & "$env:LOCALAPPDATA\FreshWindows\Start-WatchAgent.cmd"
 ```
+
+(Equivalent manuel : `Get-CimInstance Win32_Process` + `Stop-Process` sur les lignes de commande `GameMode-WatchAgent|Launch-GameModeWatch`.)
 
 ## Panneau (UI)
 
@@ -77,9 +77,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Run-AllTests.ps1
 Puis relancer l’agent (tuer l’instance precedente si besoin) :
 
 ```powershell
-Get-CimInstance Win32_Process |
-  Where-Object { $_.CommandLine -match 'GameMode-WatchAgent|Launch-GameModeWatch' } |
-  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\FreshWindows\Stop-FreshWatchAgent.ps1"
 & "$env:LOCALAPPDATA\FreshWindows\Start-WatchAgent.cmd"
 ```
 

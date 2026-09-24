@@ -29,7 +29,7 @@ New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null
 
 foreach ($name in @(
         'GameMode-Common.ps1', 'Invoke-GameModeKill.ps1', 'GameMode-WatchAgent.ps1',
-        'Sync-FreshWindowsAgent.ps1', 'Dev-SyncFreshAgentFromRepo.ps1'
+        'Stop-FreshWatchAgent.ps1', 'Sync-FreshWindowsAgent.ps1', 'Dev-SyncFreshAgentFromRepo.ps1'
     )) {
     $src = Join-Path $scriptsSrc $name
     if (Test-Path -LiteralPath $src) {

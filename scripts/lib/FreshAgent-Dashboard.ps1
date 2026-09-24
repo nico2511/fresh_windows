@@ -16,6 +16,37 @@ function New-FreshAgentDashboardTabPage {
     return $page
 }
 
+function Write-FreshAgentUiLog {
+    param([string]$Message)
+    try {
+        if (Get-Command Write-WatchLog -ErrorAction SilentlyContinue) {
+            Write-WatchLog $Message
+        }
+    }
+    catch { }
+}
+
+function Invoke-FreshAgentDashboardClickHandler {
+    param(
+        $Sender,
+        [string]$Source = 'control'
+    )
+    Write-FreshAgentUiLog ("Dashboard click begin ({0})" -f $Source)
+    try {
+        $run = $script:FreshAgentDashboardRunTagged
+        if (-not ($run -is [scriptblock])) {
+            Write-FreshAgentUiLog ("Dashboard click: RunTagged absent ({0})" -f $Source)
+            return
+        }
+        $withChecked = ($Sender -is [System.Windows.Forms.CheckBox])
+        & $run $Sender $withChecked
+    }
+    catch {
+        Write-FreshAgentUiLog ("Dashboard click error ({0}): {1}" -f $Source, $_.Exception.ToString())
+    }
+    Write-FreshAgentUiLog ("Dashboard click end ({0})" -f $Source)
+}
+
 # Dispatcher publie sur $script: : les handlers WinForms ne resolvent pas Function:.
 $script:FreshAgentDashboardRunTagged = {
     param(
@@ -24,13 +55,27 @@ $script:FreshAgentDashboardRunTagged = {
     )
     $key = ''
     try {
-        if (-not $Sender) { return }
+        if (-not $Sender) {
+            Write-FreshAgentUiLog 'Dashboard RunTagged: sender null'
+            return
+        }
         $key = [string]$Sender.Tag
-        if ([string]::IsNullOrWhiteSpace($key)) { return }
+        if ([string]::IsNullOrWhiteSpace($key)) {
+            Write-FreshAgentUiLog 'Dashboard RunTagged: Tag vide'
+            return
+        }
+        Write-FreshAgentUiLog ("Dashboard RunTagged begin key={0} checkedArg={1}" -f $key, $WithCheckedArg)
         $map = $script:FreshAgentDashboardActions
-        if (-not $map) { return }
+        if (-not $map) {
+            Write-FreshAgentUiLog ("Dashboard RunTagged: Actions map null (key={0})" -f $key)
+            return
+        }
+        $mapCount = @($map.Keys).Count
         $sb = $map[$key]
-        if (-not ($sb -is [scriptblock])) { return }
+        if (-not ($sb -is [scriptblock])) {
+            Write-FreshAgentUiLog ("Dashboard RunTagged: pas de scriptblock pour key={0} (map keys={1})" -f $key, $mapCount)
+            return
+        }
 
         $invokeArgs = @()
         if ($WithCheckedArg) {
@@ -44,18 +89,14 @@ $script:FreshAgentDashboardRunTagged = {
         else {
             if ($invokeArgs.Count -gt 0) { & $sb @invokeArgs } else { & $sb }
         }
+        Write-FreshAgentUiLog ("Dashboard RunTagged OK key={0}" -f $key)
     }
     catch {
-        $msg = $_.Exception.Message
-        try {
-            if (Get-Command Write-WatchLog -ErrorAction SilentlyContinue) {
-                Write-WatchLog ("Dashboard action '{0}': {1}" -f $key, $msg)
-            }
-        }
-        catch { }
+        $msg = $_.Exception.ToString()
+        Write-FreshAgentUiLog ("Dashboard RunTagged FAIL key={0}: {1}" -f $key, $msg)
         try {
             [System.Windows.Forms.MessageBox]::Show(
-                ("Action '{0}' : {1}" -f $key, $msg),
+                ("Action '{0}' : {1}" -f $key, $_.Exception.Message),
                 'Fresh Agent',
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
@@ -81,11 +122,7 @@ function Add-FreshAgentDashboardButton {
     $btn.Tag = $ActionKey
     $btn.Add_Click({
             param($sender, $e)
-            try {
-                $run = $script:FreshAgentDashboardRunTagged
-                if ($run -is [scriptblock]) { & $run $sender $false }
-            }
-            catch { }
+            Invoke-FreshAgentDashboardClickHandler -Sender $sender -Source ('btn:' + [string]$sender.Tag)
         })
     $Parent.Controls.Add($btn) | Out-Null
     return $btn
@@ -106,12 +143,8 @@ function Add-FreshAgentDashboardCheck {
     $cb.Tag = $ActionKey
     $cb.Add_CheckedChanged({
             param($sender, $e)
-            try {
-                if ($script:FreshAgentDashboardUi -and $script:FreshAgentDashboardUi._suppress) { return }
-                $run = $script:FreshAgentDashboardRunTagged
-                if ($run -is [scriptblock]) { & $run $sender $true }
-            }
-            catch { }
+            if ($script:FreshAgentDashboardUi -and $script:FreshAgentDashboardUi._suppress) { return }
+            Invoke-FreshAgentDashboardClickHandler -Sender $sender -Source ('chk:' + [string]$sender.Tag)
         })
     $Parent.Controls.Add($cb) | Out-Null
     return $cb
@@ -153,8 +186,17 @@ function Get-FreshAgentDashboardStateSafe {
     if ($GetState -is [scriptblock]) { $sb = $GetState }
     elseif ($GetState -is [System.Management.Automation.CommandInfo]) { $sb = $GetState.ScriptBlock }
     if (-not $sb) { return @{} }
-    try { return & $sb }
-    catch { return @{} }
+    try {
+        $ss = $script:WatchAgentSessionState
+        if ($ss) {
+            return $ss.InvokeCommand.InvokeScript($false, $sb, $null, @())
+        }
+        return & $sb
+    }
+    catch {
+        Write-FreshAgentUiLog ("GetState safe: {0}" -f $_.Exception.ToString())
+        return @{}
+    }
 }
 
 function Show-FreshAgentDashboard {
@@ -171,6 +213,8 @@ function Show-FreshAgentDashboard {
 
     $script:FreshAgentDashboardActions = $Actions
     $script:FreshAgentDashboardGetState = $GetState
+    $actionKeys = @($Actions.Keys) -join ','
+    Write-FreshAgentUiLog ("Show-FreshAgentDashboard: {0} actions enregistrees [{1}]" -f @($Actions.Keys).Count, $actionKeys)
 
     if ($script:FreshAgentDashboardForm -and -not $script:FreshAgentDashboardForm.IsDisposed) {
         Update-FreshAgentDashboardUi -Ui $script:FreshAgentDashboardUi -State (Get-FreshAgentDashboardStateSafe -GetState $GetState)
@@ -268,11 +312,7 @@ function Show-FreshAgentDashboard {
     $btnQuit.Tag = 'QuitAgent'
     $btnQuit.Add_Click({
             param($sender, $e)
-            try {
-                $run = $script:FreshAgentDashboardRunTagged
-                if ($run -is [scriptblock]) { & $run $sender $false }
-            }
-            catch { }
+            Invoke-FreshAgentDashboardClickHandler -Sender $sender -Source 'btn:QuitAgent'
         })
     $form.Controls.Add($btnQuit) | Out-Null
 
@@ -282,12 +322,13 @@ function Show-FreshAgentDashboard {
             if ($form.IsDisposed) { return }
             try {
                 if (-not $script:FreshAgentDashboardGetState) { return }
-                $st = @{}
-                try { $st = & $script:FreshAgentDashboardGetState } catch { $st = @{} }
+                $st = Get-FreshAgentDashboardStateSafe -GetState $script:FreshAgentDashboardGetState
                 if (-not $st) { $st = @{} }
                 Update-FreshAgentDashboardUi -Ui $script:FreshAgentDashboardUi -State $st
             }
-            catch { }
+            catch {
+                Write-FreshAgentUiLog ("Dashboard refresh tick: {0}" -f $_.Exception.ToString())
+            }
         })
     $refreshTimer.Start()
     $form.Add_FormClosed({
