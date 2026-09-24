@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
   Panneau Fresh Agent (clic gauche systray) — toggles et actions sans menu imbrique.
-  Les handlers WinForms doivent invoquer des ScriptBlock via Tag / $script: (pas de Function: lookup).
+  Les handlers WinForms ne resolvent PAS Function: — uniquement $script: ScriptBlock.
 #>
 
 function New-FreshAgentDashboardTabPage {
@@ -16,141 +16,21 @@ function New-FreshAgentDashboardTabPage {
     return $page
 }
 
-function Write-FreshAgentUiLog {
+# Log UI via $script: (jamais Function: depuis un handler WinForms).
+$script:FreshAgentUiLog = {
     param([string]$Message)
     try {
-        if (Get-Command Write-WatchLog -ErrorAction SilentlyContinue) {
-            Write-WatchLog $Message
+        $log = Join-Path $env:LOCALAPPDATA 'FreshWindows\watch-agent.log'
+        $dir = Split-Path $log
+        if (-not (Test-Path -LiteralPath $dir)) {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
         }
+        Add-Content -LiteralPath $log -Value ('{0} {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message) -Encoding UTF8
     }
     catch { }
 }
 
-function Invoke-FreshAgentDashboardClickHandler {
-    param(
-        $Sender,
-        [string]$Source = 'control'
-    )
-    Write-FreshAgentUiLog ("Dashboard click begin ({0})" -f $Source)
-    try {
-        $run = $script:FreshAgentDashboardRunTagged
-        if (-not ($run -is [scriptblock])) {
-            Write-FreshAgentUiLog ("Dashboard click: RunTagged absent ({0})" -f $Source)
-            return
-        }
-        $withChecked = ($Sender -is [System.Windows.Forms.CheckBox])
-        & $run $Sender $withChecked
-    }
-    catch {
-        Write-FreshAgentUiLog ("Dashboard click error ({0}): {1}" -f $Source, $_.Exception.ToString())
-    }
-    Write-FreshAgentUiLog ("Dashboard click end ({0})" -f $Source)
-}
-
-# Dispatcher publie sur $script: : les handlers WinForms ne resolvent pas Function:.
-$script:FreshAgentDashboardRunTagged = {
-    param(
-        $Sender,
-        [bool]$WithCheckedArg = $false
-    )
-    $key = ''
-    try {
-        if (-not $Sender) {
-            Write-FreshAgentUiLog 'Dashboard RunTagged: sender null'
-            return
-        }
-        $key = [string]$Sender.Tag
-        if ([string]::IsNullOrWhiteSpace($key)) {
-            Write-FreshAgentUiLog 'Dashboard RunTagged: Tag vide'
-            return
-        }
-        Write-FreshAgentUiLog ("Dashboard RunTagged begin key={0} checkedArg={1}" -f $key, $WithCheckedArg)
-        $map = $script:FreshAgentDashboardActions
-        if (-not $map) {
-            Write-FreshAgentUiLog ("Dashboard RunTagged: Actions map null (key={0})" -f $key)
-            return
-        }
-        $mapCount = @($map.Keys).Count
-        $sb = $map[$key]
-        if (-not ($sb -is [scriptblock])) {
-            Write-FreshAgentUiLog ("Dashboard RunTagged: pas de scriptblock pour key={0} (map keys={1})" -f $key, $mapCount)
-            return
-        }
-
-        $invokeArgs = @()
-        if ($WithCheckedArg) {
-            $invokeArgs = @([bool]$Sender.Checked)
-        }
-
-        $ss = $script:WatchAgentSessionState
-        if ($ss) {
-            $null = $ss.InvokeCommand.InvokeScript($false, $sb, $null, $invokeArgs)
-        }
-        else {
-            if ($invokeArgs.Count -gt 0) { & $sb @invokeArgs } else { & $sb }
-        }
-        Write-FreshAgentUiLog ("Dashboard RunTagged OK key={0}" -f $key)
-    }
-    catch {
-        $msg = $_.Exception.ToString()
-        Write-FreshAgentUiLog ("Dashboard RunTagged FAIL key={0}: {1}" -f $key, $msg)
-        try {
-            [System.Windows.Forms.MessageBox]::Show(
-                ("Action '{0}' : {1}" -f $key, $_.Exception.Message),
-                'Fresh Agent',
-                [System.Windows.Forms.MessageBoxButtons]::OK,
-                [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
-        }
-        catch { }
-    }
-}
-
-function Add-FreshAgentDashboardButton {
-    param(
-        [System.Windows.Forms.Control]$Parent,
-        [string]$Text,
-        [int]$X,
-        [int]$Y,
-        [int]$W = 220,
-        [int]$H = 32,
-        [Parameter(Mandatory)][string]$ActionKey
-    )
-    $btn = New-Object System.Windows.Forms.Button
-    $btn.Text = $Text
-    $btn.Location = New-Object System.Drawing.Point($X, $Y)
-    $btn.Size = New-Object System.Drawing.Size($W, $H)
-    $btn.Tag = $ActionKey
-    $btn.Add_Click({
-            param($sender, $e)
-            Invoke-FreshAgentDashboardClickHandler -Sender $sender -Source ('btn:' + [string]$sender.Tag)
-        })
-    $Parent.Controls.Add($btn) | Out-Null
-    return $btn
-}
-
-function Add-FreshAgentDashboardCheck {
-    param(
-        [System.Windows.Forms.Control]$Parent,
-        [string]$Text,
-        [int]$X,
-        [int]$Y,
-        [Parameter(Mandatory)][string]$ActionKey
-    )
-    $cb = New-Object System.Windows.Forms.CheckBox
-    $cb.Text = $Text
-    $cb.AutoSize = $true
-    $cb.Location = New-Object System.Drawing.Point($X, $Y)
-    $cb.Tag = $ActionKey
-    $cb.Add_CheckedChanged({
-            param($sender, $e)
-            if ($script:FreshAgentDashboardUi -and $script:FreshAgentDashboardUi._suppress) { return }
-            Invoke-FreshAgentDashboardClickHandler -Sender $sender -Source ('chk:' + [string]$sender.Tag)
-        })
-    $Parent.Controls.Add($cb) | Out-Null
-    return $cb
-}
-
-function Update-FreshAgentDashboardUi {
+$script:FreshAgentDashboardUpdateUi = {
     param(
         [hashtable]$Ui,
         [hashtable]$State
@@ -180,7 +60,7 @@ function Update-FreshAgentDashboardUi {
     }
 }
 
-function Get-FreshAgentDashboardStateSafe {
+$script:FreshAgentDashboardGetStateSafe = {
     param($GetState)
     $sb = $null
     if ($GetState -is [scriptblock]) { $sb = $GetState }
@@ -194,9 +74,193 @@ function Get-FreshAgentDashboardStateSafe {
         return & $sb
     }
     catch {
-        Write-FreshAgentUiLog ("GetState safe: {0}" -f $_.Exception.ToString())
+        $log = $script:FreshAgentUiLog
+        if ($log -is [scriptblock]) {
+            & $log ("GetState safe: {0}" -f $_.Exception.ToString())
+        }
         return @{}
     }
+}
+
+# Dispatcher publie sur $script: : les handlers WinForms ne resolvent pas Function:.
+$script:FreshAgentDashboardRunTagged = {
+    param(
+        $Sender,
+        [bool]$WithCheckedArg = $false
+    )
+    $key = ''
+    $log = $script:FreshAgentUiLog
+    try {
+        if (-not $Sender) {
+            if ($log -is [scriptblock]) { & $log 'Dashboard RunTagged: sender null' }
+            return
+        }
+        $key = [string]$Sender.Tag
+        if ([string]::IsNullOrWhiteSpace($key)) {
+            if ($log -is [scriptblock]) { & $log 'Dashboard RunTagged: Tag vide' }
+            return
+        }
+        if ($log -is [scriptblock]) {
+            & $log ("Dashboard RunTagged begin key={0} checkedArg={1}" -f $key, $WithCheckedArg)
+        }
+        $map = $script:FreshAgentDashboardActions
+        if (-not $map) {
+            if ($log -is [scriptblock]) {
+                & $log ("Dashboard RunTagged: Actions map null (key={0})" -f $key)
+            }
+            return
+        }
+        $mapCount = @($map.Keys).Count
+        $sb = $map[$key]
+        if (-not ($sb -is [scriptblock])) {
+            if ($log -is [scriptblock]) {
+                & $log ("Dashboard RunTagged: pas de scriptblock pour key={0} (map keys={1})" -f $key, $mapCount)
+            }
+            return
+        }
+
+        $invokeArgs = @()
+        if ($WithCheckedArg) {
+            $invokeArgs = @([bool]$Sender.Checked)
+        }
+
+        $ss = $script:WatchAgentSessionState
+        if ($ss) {
+            $null = $ss.InvokeCommand.InvokeScript($false, $sb, $null, $invokeArgs)
+        }
+        else {
+            if ($invokeArgs.Count -gt 0) { & $sb @invokeArgs } else { & $sb }
+        }
+        if ($log -is [scriptblock]) {
+            & $log ("Dashboard RunTagged OK key={0}" -f $key)
+        }
+    }
+    catch {
+        $msg = $_.Exception.ToString()
+        if ($log -is [scriptblock]) {
+            & $log ("Dashboard RunTagged FAIL key={0}: {1}" -f $key, $msg)
+        }
+        try {
+            [System.Windows.Forms.MessageBox]::Show(
+                ("Action '{0}' : {1}" -f $key, $_.Exception.Message),
+                'Fresh Agent',
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+        }
+        catch { }
+    }
+}
+
+$script:FreshAgentDashboardClickHandler = {
+    param(
+        $Sender,
+        [string]$Source = 'control'
+    )
+    $log = $script:FreshAgentUiLog
+    if ($log -is [scriptblock]) {
+        & $log ("Dashboard click begin ({0})" -f $Source)
+    }
+    try {
+        $run = $script:FreshAgentDashboardRunTagged
+        if (-not ($run -is [scriptblock])) {
+            if ($log -is [scriptblock]) {
+                & $log ("Dashboard click: RunTagged absent ({0})" -f $Source)
+            }
+            return
+        }
+        $withChecked = ($Sender -is [System.Windows.Forms.CheckBox])
+        & $run $Sender $withChecked
+    }
+    catch {
+        if ($log -is [scriptblock]) {
+            & $log ("Dashboard click error ({0}): {1}" -f $Source, $_.Exception.ToString())
+        }
+    }
+    if ($log -is [scriptblock]) {
+        & $log ("Dashboard click end ({0})" -f $Source)
+    }
+}
+
+function Write-FreshAgentUiLog {
+    param([string]$Message)
+    $sb = $script:FreshAgentUiLog
+    if ($sb -is [scriptblock]) { & $sb $Message }
+}
+
+function Invoke-FreshAgentDashboardClickHandler {
+    param(
+        $Sender,
+        [string]$Source = 'control'
+    )
+    $sb = $script:FreshAgentDashboardClickHandler
+    if ($sb -is [scriptblock]) { & $sb $Sender $Source }
+}
+
+function Update-FreshAgentDashboardUi {
+    param(
+        [hashtable]$Ui,
+        [hashtable]$State
+    )
+    $sb = $script:FreshAgentDashboardUpdateUi
+    if ($sb -is [scriptblock]) { & $sb $Ui $State }
+}
+
+function Get-FreshAgentDashboardStateSafe {
+    param($GetState)
+    $sb = $script:FreshAgentDashboardGetStateSafe
+    if ($sb -is [scriptblock]) { return & $sb $GetState }
+    return @{}
+}
+
+function Add-FreshAgentDashboardButton {
+    param(
+        [System.Windows.Forms.Control]$Parent,
+        [string]$Text,
+        [int]$X,
+        [int]$Y,
+        [int]$W = 220,
+        [int]$H = 32,
+        [Parameter(Mandatory)][string]$ActionKey
+    )
+    $btn = New-Object System.Windows.Forms.Button
+    $btn.Text = $Text
+    $btn.Location = New-Object System.Drawing.Point($X, $Y)
+    $btn.Size = New-Object System.Drawing.Size($W, $H)
+    $btn.Tag = $ActionKey
+    $btn.Add_Click({
+            param($sender, $e)
+            $h = $script:FreshAgentDashboardClickHandler
+            if ($h -is [scriptblock]) {
+                & $h $sender ('btn:' + [string]$sender.Tag)
+            }
+        })
+    $Parent.Controls.Add($btn) | Out-Null
+    return $btn
+}
+
+function Add-FreshAgentDashboardCheck {
+    param(
+        [System.Windows.Forms.Control]$Parent,
+        [string]$Text,
+        [int]$X,
+        [int]$Y,
+        [Parameter(Mandatory)][string]$ActionKey
+    )
+    $cb = New-Object System.Windows.Forms.CheckBox
+    $cb.Text = $Text
+    $cb.AutoSize = $true
+    $cb.Location = New-Object System.Drawing.Point($X, $Y)
+    $cb.Tag = $ActionKey
+    $cb.Add_CheckedChanged({
+            param($sender, $e)
+            if ($script:FreshAgentDashboardUi -and $script:FreshAgentDashboardUi._suppress) { return }
+            $h = $script:FreshAgentDashboardClickHandler
+            if ($h -is [scriptblock]) {
+                & $h $sender ('chk:' + [string]$sender.Tag)
+            }
+        })
+    $Parent.Controls.Add($cb) | Out-Null
+    return $cb
 }
 
 function Show-FreshAgentDashboard {
@@ -214,10 +278,17 @@ function Show-FreshAgentDashboard {
     $script:FreshAgentDashboardActions = $Actions
     $script:FreshAgentDashboardGetState = $GetState
     $actionKeys = @($Actions.Keys) -join ','
-    Write-FreshAgentUiLog ("Show-FreshAgentDashboard: {0} actions enregistrees [{1}]" -f @($Actions.Keys).Count, $actionKeys)
+    $log = $script:FreshAgentUiLog
+    if ($log -is [scriptblock]) {
+        & $log ("Show-FreshAgentDashboard: {0} actions enregistrees [{1}]" -f @($Actions.Keys).Count, $actionKeys)
+    }
+
+    $getSafe = $script:FreshAgentDashboardGetStateSafe
+    $upd = $script:FreshAgentDashboardUpdateUi
 
     if ($script:FreshAgentDashboardForm -and -not $script:FreshAgentDashboardForm.IsDisposed) {
-        Update-FreshAgentDashboardUi -Ui $script:FreshAgentDashboardUi -State (Get-FreshAgentDashboardStateSafe -GetState $GetState)
+        $st = if ($getSafe -is [scriptblock]) { & $getSafe $GetState } else { @{} }
+        if ($upd -is [scriptblock]) { & $upd $script:FreshAgentDashboardUi $st }
         $script:FreshAgentDashboardForm.Show()
         $script:FreshAgentDashboardForm.BringToFront()
         $script:FreshAgentDashboardForm.Activate()
@@ -312,7 +383,10 @@ function Show-FreshAgentDashboard {
     $btnQuit.Tag = 'QuitAgent'
     $btnQuit.Add_Click({
             param($sender, $e)
-            Invoke-FreshAgentDashboardClickHandler -Sender $sender -Source 'btn:QuitAgent'
+            $h = $script:FreshAgentDashboardClickHandler
+            if ($h -is [scriptblock]) {
+                & $h $sender 'btn:QuitAgent'
+            }
         })
     $form.Controls.Add($btnQuit) | Out-Null
 
@@ -322,12 +396,22 @@ function Show-FreshAgentDashboard {
             if ($form.IsDisposed) { return }
             try {
                 if (-not $script:FreshAgentDashboardGetState) { return }
-                $st = Get-FreshAgentDashboardStateSafe -GetState $script:FreshAgentDashboardGetState
+                $getSafe = $script:FreshAgentDashboardGetStateSafe
+                $upd = $script:FreshAgentDashboardUpdateUi
+                $st = @{}
+                if ($getSafe -is [scriptblock]) {
+                    $st = & $getSafe $script:FreshAgentDashboardGetState
+                }
                 if (-not $st) { $st = @{} }
-                Update-FreshAgentDashboardUi -Ui $script:FreshAgentDashboardUi -State $st
+                if ($upd -is [scriptblock]) {
+                    & $upd $script:FreshAgentDashboardUi $st
+                }
             }
             catch {
-                Write-FreshAgentUiLog ("Dashboard refresh tick: {0}" -f $_.Exception.ToString())
+                $log = $script:FreshAgentUiLog
+                if ($log -is [scriptblock]) {
+                    & $log ("Dashboard refresh tick: {0}" -f $_.Exception.ToString())
+                }
             }
         })
     $refreshTimer.Start()
@@ -339,7 +423,8 @@ function Show-FreshAgentDashboard {
     $script:FreshAgentDashboardForm = $form
     $script:FreshAgentDashboardUi = $ui
 
-    Update-FreshAgentDashboardUi -Ui $ui -State (Get-FreshAgentDashboardStateSafe -GetState $GetState)
+    $st0 = if ($getSafe -is [scriptblock]) { & $getSafe $GetState } else { @{} }
+    if ($upd -is [scriptblock]) { & $upd $ui $st0 }
     [void]$form.Show($script:HiddenForm)
 }
 
@@ -347,11 +432,17 @@ function Update-FreshAgentDashboardIfOpen {
     if (-not $script:FreshAgentDashboardForm -or $script:FreshAgentDashboardForm.IsDisposed) { return }
     if (-not $script:FreshAgentDashboardGetState) { return }
     try {
-        Update-FreshAgentDashboardUi -Ui $script:FreshAgentDashboardUi -State (Get-FreshAgentDashboardStateSafe -GetState $script:FreshAgentDashboardGetState)
+        $getSafe = $script:FreshAgentDashboardGetStateSafe
+        $upd = $script:FreshAgentDashboardUpdateUi
+        $st = if ($getSafe -is [scriptblock]) { & $getSafe $script:FreshAgentDashboardGetState } else { @{} }
+        if ($upd -is [scriptblock]) { & $upd $script:FreshAgentDashboardUi $st }
     }
     catch {
         try {
-            Update-FreshAgentDashboardUi -Ui $script:FreshAgentDashboardUi -State (& $script:FreshAgentDashboardGetState)
+            $upd = $script:FreshAgentDashboardUpdateUi
+            if ($upd -is [scriptblock]) {
+                & $upd $script:FreshAgentDashboardUi (& $script:FreshAgentDashboardGetState)
+            }
         }
         catch { }
     }

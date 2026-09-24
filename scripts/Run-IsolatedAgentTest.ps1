@@ -49,5 +49,6 @@ $script:WatchAgentSessionState = $ExecutionContext.SessionState
 & (Join-Path $tests 'Test-DashboardClickClosure.ps1')
 
 Write-Host ""
-Write-Host "OK tests isoles — lancer l agent:" -ForegroundColor Green
-Write-Host "  & `"$(Join-Path $FreshAppData 'Start-WatchAgent.cmd')`"" -ForegroundColor Cyan
+Write-Host 'OK tests isoles - lancer l agent:' -ForegroundColor Green
+$startCmd = Join-Path $FreshAppData 'Start-WatchAgent.cmd'
+Write-Host "  $startCmd" -ForegroundColor Cyan

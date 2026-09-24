@@ -43,18 +43,60 @@ function Start-FreshAgentAppEntry {
 }
 
 function Invoke-SkillCheckSystemHealth {
-    $os = Get-CimInstance Win32_OperatingSystem
-    $cs = Get-CimInstance Win32_ComputerSystem
-    $totalRam = [math]::Round($cs.TotalPhysicalMemory / 1GB, 1)
-    # Win32_OperatingSystem.FreePhysicalMemory est en kilo-octets
-    $freeRam = [math]::Round($os.FreePhysicalMemory / 1MB, 1)
-    $usedPct = if ($totalRam -gt 0) { [math]::Round((($totalRam - $freeRam) / $totalRam) * 100, 1) } else { 0 }
-    $cpuLoad = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
-    $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" -ErrorAction SilentlyContinue
-    $diskFree = if ($disk) { [math]::Round($disk.FreeSpace / 1GB, 1) } else { $null }
-    $power = Get-ActivePowerSchemeGuid
+    # CIM Win32_Processor.LoadPercentage peut bloquer longtemps — timeout via job.
+    $totalRam = '?'
+    $freeRam = '?'
+    $usedPct = '?'
+    $cpuLoad = '?'
+    $diskFree = '?'
+    $power = '?'
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+        $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+        $totalRam = [math]::Round($cs.TotalPhysicalMemory / 1GB, 1)
+        # Win32_OperatingSystem.FreePhysicalMemory est en kilo-octets
+        $freeRam = [math]::Round($os.FreePhysicalMemory / 1MB, 1)
+        if ($totalRam -gt 0) {
+            $usedPct = [math]::Round((($totalRam - $freeRam) / $totalRam) * 100, 1)
+        }
+    }
+    catch { }
+
+    try {
+        $cpuJob = Start-Job -ScriptBlock {
+            try {
+                return (Get-CimInstance Win32_Processor -ErrorAction Stop |
+                        Measure-Object -Property LoadPercentage -Average).Average
+            }
+            catch { return $null }
+        }
+        if (Wait-Job -Job $cpuJob -Timeout 4) {
+            $avg = Receive-Job -Job $cpuJob
+            if ($null -ne $avg) { $cpuLoad = [math]::Round([double]$avg) }
+        }
+        else {
+            Stop-Job -Job $cpuJob -ErrorAction SilentlyContinue
+        }
+        Remove-Job -Job $cpuJob -Force -ErrorAction SilentlyContinue
+    }
+    catch { }
+
+    try {
+        $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" -ErrorAction Stop
+        if ($disk) { $diskFree = [math]::Round($disk.FreeSpace / 1GB, 1) }
+    }
+    catch { }
+
+    try {
+        if (Get-Command Get-ActivePowerSchemeGuid -ErrorAction SilentlyContinue) {
+            $p = Get-ActivePowerSchemeGuid
+            if ($p) { $power = $p }
+        }
+    }
+    catch { }
+
     $msg = 'CPU ~{0}% | RAM {1} Go libres / {2} Go ({3}% utilise) | C: {4} Go libres | Plan {5}' -f `
-        [math]::Round($cpuLoad), $freeRam, $totalRam, $usedPct, $diskFree, $power
+        $cpuLoad, $freeRam, $totalRam, $usedPct, $diskFree, $power
     return @{ ok = $true; message = $msg }
 }
 
