@@ -145,14 +145,15 @@ function Invoke-OllamaPullModel {
 function Ensure-OllamaReady {
     param(
         $AiConfig,
-        [scriptblock]$OnProgress
+        [scriptblock]$OnProgress,
+        [switch]$SkipPull
     )
     $base = Get-OllamaBaseUrl -AiConfig $AiConfig
     $ollama = $AiConfig.ollama
     $autoStart = $true
     if ($null -ne $ollama.autoStart) { $autoStart = [bool]$ollama.autoStart }
 
-    if (-not (Test-OllamaApi -BaseUrl $base)) {
+    if (-not (Test-OllamaApi -BaseUrl $base -TimeoutSec 2)) {
         if (-not $autoStart) {
             throw 'Ollama API injoignable et autoStart desactive.'
         }
@@ -165,12 +166,26 @@ function Ensure-OllamaReady {
 
     $pull = $true
     if ($null -ne $ollama.pullOnEnable) { $pull = [bool]$ollama.pullOnEnable }
+    if ($SkipPull) { $pull = $false }
 
-    if ($pull -and -not (Test-OllamaModelPresent -ModelName $model -BaseUrl $base)) {
-        if ($OnProgress) { & $OnProgress "Telechargement modele $model..." }
-        Invoke-OllamaPullModel -ModelName $model -OnLine {
-            param($line)
-            if ($OnProgress) { & $OnProgress $line }
+    if (-not (Test-OllamaModelPresent -ModelName $model -BaseUrl $base)) {
+        if ($pull) {
+            if ($OnProgress) { & $OnProgress "Telechargement modele $model..." }
+            Invoke-OllamaPullModel -ModelName $model -OnLine {
+                param($line)
+                if ($OnProgress) { & $OnProgress $line }
+            }
+        }
+        else {
+            $locals = @(Get-OllamaLocalModels -BaseUrl $base)
+            $fallback = $locals | Where-Object { $_ -and $_ -notmatch '(?i)embed' } | Select-Object -First 1
+            if ($fallback) {
+                if ($OnProgress) { & $OnProgress ("Modele defaut absent, fallback: {0}" -f $fallback) }
+                $model = [string]$fallback
+            }
+            else {
+                throw ("Modele Ollama absent: {0}. Clique 'Telecharger modele' dans le panneau IA." -f $model)
+            }
         }
     }
 
