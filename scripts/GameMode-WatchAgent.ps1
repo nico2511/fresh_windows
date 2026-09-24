@@ -368,6 +368,10 @@ $script:MiAiListenItem = $null
 $script:MiAiListenLabel = $null
 $script:FaBgResultPending = $false
 $script:FaBgResultLastAt = $null
+$script:FaSkillResultPending = $false
+$script:FaSkillResultLastAt = $null
+$script:FaSkillResultId = $null
+$script:FaSkillResultStarted = $null
 $script:FreshAgentDeferredBootPending = $false
 $faConfigCandidates = @(
     (Join-Path $FreshAppData 'lib\FreshAgent-Config.ps1'),
@@ -804,6 +808,7 @@ function Invoke-WatchTick {
     }
     Invoke-FreshAgentDeferredBoot
     Invoke-FreshAgentBackgroundResultPoll
+    Invoke-FreshAgentSkillResultPoll
     if (Get-Command Update-FreshAgentDashboardIfOpen -ErrorAction SilentlyContinue) {
         Update-FreshAgentDashboardIfOpen
     }
@@ -992,8 +997,22 @@ function Invoke-FreshAgentSkillMenu {
         [string]$SkillId,
         [hashtable]$Parameters = @{}
     )
+    # Hors thread UI : un skill CIM/WMI qui bloque ne doit pas tuer le message loop.
+    Start-FreshAgentUiSkillBackground -SkillId $SkillId -Parameters $Parameters
+}
+
+function Start-FreshAgentUiSkillBackground {
+    param(
+        [Parameter(Mandatory)]
+        [string]$SkillId,
+        [hashtable]$Parameters = @{}
+    )
     if (-not $script:FreshAgentReady) {
         Show-Balloon -Title 'Fresh Agent' -Text 'Modules skills non charges (sync scripts locaux).' -Icon Warning
+        return
+    }
+    if ($script:FaSkillResultPending) {
+        Show-Balloon -Title 'Fresh Agent' -Text 'Un skill est deja en cours.' -Icon Warning
         return
     }
     try {
@@ -1003,17 +1022,138 @@ function Invoke-FreshAgentSkillMenu {
                 return
             }
         }
-        $r = Invoke-FreshAgentSkill -SkillId $SkillId -Parameters $Parameters -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData
-        $text = if ($r.message) { [string]$r.message } else { 'Termine.' }
-        $icon = if ($r.ok) { 'Info' } else { 'Warning' }
-        Show-Balloon -Title 'Fresh Agent' -Text $text -Icon $icon
-        if (Get-Command Invoke-FreshAgentSpeakSkillResult -ErrorAction SilentlyContinue) {
-            $cfg = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData
-            Invoke-FreshAgentSpeakSkillResult -Result $r -AiConfig $cfg -FreshAppData $script:FreshAppData
+    }
+    catch {
+        Write-WatchLog ("Skill ensure: {0}" -f $_.Exception.Message)
+        Show-Balloon -Title 'Fresh Agent' -Text $_.Exception.Message -Icon Error
+        return
+    }
+
+    Write-WatchLog ("Skill bg start: {0}" -f $SkillId)
+    Show-Balloon -Title 'Fresh Agent' -Text ("Skill en cours: {0}" -f $SkillId) -Icon Info
+
+    $resultPath = Join-Path $script:FreshAppData 'fa-skill-result.json'
+    try { Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue } catch { }
+
+    $freshEsc = $script:FreshAppData.Replace("'", "''")
+    $repoEsc = $script:RepoRef.Replace("'", "''")
+    $skillEsc = $SkillId.Replace("'", "''")
+    $paramsJson = '{}'
+    try {
+        if ($Parameters -and $Parameters.Count -gt 0) {
+            $paramsJson = ($Parameters | ConvertTo-Json -Compress -Depth 6)
+        }
+    }
+    catch { $paramsJson = '{}' }
+    $paramsEsc = $paramsJson.Replace("'", "''")
+
+    $scriptBody = @"
+`$ErrorActionPreference = 'Continue'
+`$fresh = '$freshEsc'
+`$repo = '$repoEsc'
+`$skillId = '$skillEsc'
+`$resultPath = Join-Path `$fresh 'fa-skill-result.json'
+`$log = Join-Path `$fresh 'watch-agent.log'
+function Log([string]`$m) { try { Add-Content -LiteralPath `$log -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' SKILL ' + `$m) -Encoding UTF8 } catch {} }
+try {
+  . (Join-Path `$fresh 'lib\FreshAgent-Config.ps1')
+  . (Join-Path `$fresh 'lib\FreshAgent-SkillsEngine.ps1')
+  . (Join-Path `$fresh 'lib\FreshAgent-SkillHandlers.ps1')
+  . (Join-Path `$fresh 'lib\FreshAgent-GameSession.ps1')
+  . (Join-Path `$fresh 'lib\FreshAgent-Inventory.ps1')
+  `$params = @{}
+  try {
+    `$rawParams = '$paramsEsc' | ConvertFrom-Json
+    if (`$rawParams) {
+      `$rawParams.PSObject.Properties | ForEach-Object { `$params[`$_.Name] = `$_.Value }
+    }
+  } catch {}
+  Log ("invoke begin `$skillId")
+  `$r = Invoke-FreshAgentSkill -SkillId `$skillId -Parameters `$params -RepoRef `$repo -FreshAppData `$fresh
+  `$payload = @{
+    ok = [bool]`$r.ok
+    message = if (`$r.message) { [string]`$r.message } else { 'Termine.' }
+    skill = `$skillId
+    at = (Get-Date -Format o)
+  }
+  `$payload | ConvertTo-Json -Compress | Set-Content -LiteralPath `$resultPath -Encoding UTF8
+  Log ("invoke end `$skillId ok=`$(`$payload.ok)")
+}
+catch {
+  Log ("invoke fail `$skillId : `$(`$_.Exception.Message)")
+  @{ ok = `$false; message = `$_.Exception.Message; skill = `$skillId; at = (Get-Date -Format o) } |
+    ConvertTo-Json -Compress | Set-Content -LiteralPath `$resultPath -Encoding UTF8
+}
+"@
+    Start-FreshAgentDetachedPs1 -ScriptContent $scriptBody
+    $script:FaSkillResultPending = $true
+    $script:FaSkillResultStarted = Get-Date
+    $script:FaSkillResultId = $SkillId
+    $script:FaSkillResultLastAt = $null
+    Start-FreshAgentSkillPollTimerIfNeeded
+}
+
+function Start-FreshAgentSkillPollTimerIfNeeded {
+    if ($script:FaSkillPollTimer) { return }
+    try {
+        $script:FaSkillPollTimer = New-Object System.Windows.Forms.Timer
+        $script:FaSkillPollTimer.Interval = 1000
+        $script:FaSkillPollTimer.Add_Tick((Register-WatchUiHandler {
+                try {
+                    Invoke-FreshAgentSkillResultPoll
+                    if (-not $script:FaSkillResultPending -and $script:FaSkillPollTimer) {
+                        $script:FaSkillPollTimer.Stop()
+                        $script:FaSkillPollTimer.Dispose()
+                        $script:FaSkillPollTimer = $null
+                    }
+                }
+                catch {
+                    Write-WatchLog ("Skill poll timer: {0}" -f $_.Exception.Message)
+                }
+            }))
+        $script:FaSkillPollTimer.Start()
+    }
+    catch {
+        Write-WatchLog ("Skill poll timer start: {0}" -f $_.Exception.Message)
+    }
+}
+
+function Invoke-FreshAgentSkillResultPoll {
+    if (-not $script:FaSkillResultPending) { return }
+    $path = Join-Path $script:FreshAppData 'fa-skill-result.json'
+    $timeoutSec = 60
+    try {
+        if ($script:FaSkillResultStarted -and ((Get-Date) - $script:FaSkillResultStarted).TotalSeconds -ge $timeoutSec) {
+            $script:FaSkillResultPending = $false
+            Write-WatchLog ("Skill bg timeout: {0}" -f $script:FaSkillResultId)
+            Show-Balloon -Title 'Fresh Agent' -Text ("Skill timeout: {0}" -f $script:FaSkillResultId) -Icon Warning
+            return
+        }
+    }
+    catch { }
+
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    try {
+        $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($raw.at -and $raw.at -eq $script:FaSkillResultLastAt) { return }
+        $script:FaSkillResultLastAt = [string]$raw.at
+        $script:FaSkillResultPending = $false
+        $msg = if ($raw.message) { [string]$raw.message } else { 'Termine.' }
+        $icon = if ($raw.ok) { 'Info' } else { 'Warning' }
+        Write-WatchLog ("Skill bg done: {0} ok={1}" -f $script:FaSkillResultId, [bool]$raw.ok)
+        Show-Balloon -Title 'Fresh Agent' -Text $msg -Icon $icon
+        try {
+            if ($raw.ok -and (Get-Command Invoke-FreshAgentSpeakSkillResult -ErrorAction SilentlyContinue)) {
+                $cfg = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData
+                Invoke-FreshAgentSpeakSkillResult -Result @{ ok = [bool]$raw.ok; message = $msg } -AiConfig $cfg -FreshAppData $script:FreshAppData
+            }
+        }
+        catch {
+            Write-WatchLog ("Skill TTS: {0}" -f $_.Exception.Message)
         }
     }
     catch {
-        Show-Balloon -Title 'Fresh Agent' -Text $_.Exception.Message -Icon Error
+        Write-WatchLog ("Skill bg poll: {0}" -f $_.Exception.Message)
     }
 }
 
@@ -1453,23 +1593,65 @@ function Get-FreshAgentDashboardState {
 
 function Invoke-FreshAgentProfileFromUi {
     param([string]$ProfileId)
-    try {
-        if (-not $script:FreshAgentReady) {
-            Show-Balloon -Title 'Profil' -Text 'Modules non charges.' -Icon Warning
-            return
-        }
-        if (-not (Ensure-FreshAgentProfileReady)) {
-            Show-Balloon -Title 'Profil' -Text 'FreshAgent-Profiles absent — sync scripts locaux.' -Icon Warning
-            return
-        }
-        $r = Invoke-FreshAgentProfile -ProfileId $ProfileId -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData
-        $text = if ($r.message) { [string]$r.message } else { 'OK' }
-        Show-Balloon -Title 'Profil' -Text $text -Icon Info
-        Update-FreshAgentTrayStatus
+    # Profiles enchainent des skills : meme chemin bg pour ne pas bloquer l UI.
+    if (-not $script:FreshAgentReady) {
+        Show-Balloon -Title 'Profil' -Text 'Modules non charges.' -Icon Warning
+        return
     }
-    catch {
-        Show-Balloon -Title 'Profil' -Text $_.Exception.Message -Icon Error
+    if (-not (Ensure-FreshAgentProfileReady)) {
+        Show-Balloon -Title 'Profil' -Text 'FreshAgent-Profiles absent — sync scripts locaux.' -Icon Warning
+        return
     }
+    if ($script:FaSkillResultPending) {
+        Show-Balloon -Title 'Profil' -Text 'Une action skill/profil est deja en cours.' -Icon Warning
+        return
+    }
+    Write-WatchLog ("Profile bg start: {0}" -f $ProfileId)
+    Show-Balloon -Title 'Profil' -Text ("Profil en cours: {0}" -f $ProfileId) -Icon Info
+
+    $resultPath = Join-Path $script:FreshAppData 'fa-skill-result.json'
+    try { Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue } catch { }
+    $freshEsc = $script:FreshAppData.Replace("'", "''")
+    $repoEsc = $script:RepoRef.Replace("'", "''")
+    $profEsc = $ProfileId.Replace("'", "''")
+    $scriptBody = @"
+`$ErrorActionPreference = 'Continue'
+`$fresh = '$freshEsc'
+`$repo = '$repoEsc'
+`$profileId = '$profEsc'
+`$resultPath = Join-Path `$fresh 'fa-skill-result.json'
+`$log = Join-Path `$fresh 'watch-agent.log'
+function Log([string]`$m) { try { Add-Content -LiteralPath `$log -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' PROFILE ' + `$m) -Encoding UTF8 } catch {} }
+try {
+  . (Join-Path `$fresh 'lib\FreshAgent-Config.ps1')
+  . (Join-Path `$fresh 'lib\FreshAgent-SkillsEngine.ps1')
+  . (Join-Path `$fresh 'lib\FreshAgent-SkillHandlers.ps1')
+  . (Join-Path `$fresh 'lib\FreshAgent-GameSession.ps1')
+  . (Join-Path `$fresh 'lib\FreshAgent-Inventory.ps1')
+  . (Join-Path `$fresh 'lib\FreshAgent-Profiles.ps1')
+  Log ("invoke begin `$profileId")
+  `$r = Invoke-FreshAgentProfile -ProfileId `$profileId -RepoRef `$repo -FreshAppData `$fresh
+  `$payload = @{
+    ok = `$true
+    message = if (`$r.message) { [string]`$r.message } else { 'OK' }
+    skill = ('profile:' + `$profileId)
+    at = (Get-Date -Format o)
+  }
+  `$payload | ConvertTo-Json -Compress | Set-Content -LiteralPath `$resultPath -Encoding UTF8
+  Log ("invoke end `$profileId")
+}
+catch {
+  Log ("invoke fail `$profileId : `$(`$_.Exception.Message)")
+  @{ ok = `$false; message = `$_.Exception.Message; skill = ('profile:' + `$profileId); at = (Get-Date -Format o) } |
+    ConvertTo-Json -Compress | Set-Content -LiteralPath `$resultPath -Encoding UTF8
+}
+"@
+    Start-FreshAgentDetachedPs1 -ScriptContent $scriptBody
+    $script:FaSkillResultPending = $true
+    $script:FaSkillResultStarted = Get-Date
+    $script:FaSkillResultId = "profile:$ProfileId"
+    $script:FaSkillResultLastAt = $null
+    Start-FreshAgentSkillPollTimerIfNeeded
 }
 
 function Set-FreshAgentAiEnabledFromUi {
