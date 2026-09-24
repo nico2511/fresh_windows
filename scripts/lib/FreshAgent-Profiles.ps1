@@ -10,7 +10,7 @@ function Get-FreshAgentProfilesConfig {
         return Get-Content -LiteralPath $local -Raw -Encoding UTF8 | ConvertFrom-Json
     }
     $raw = Get-FreshAgentRepoRawRoot -RepoRef $RepoRef
-    return Invoke-FreshAgentRestJson -Url "$raw/configs/agent-profiles.json"
+    return Invoke-FreshAgentRestJson -Url "$raw/configs/agent-profiles.json" -TimeoutSec 4
 }
 
 function Invoke-FreshAgentProfile {
