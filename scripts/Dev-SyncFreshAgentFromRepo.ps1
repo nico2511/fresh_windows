@@ -47,6 +47,25 @@ foreach ($sub in @('lib', 'ai')) {
     Write-Host "-> $sub\*" -ForegroundColor DarkGray
 }
 
+# Garantir les modules critiques (STT / TTS / bridge) meme si le glob a rate.
+foreach ($must in @(
+        'ai\Windows-Stt.ps1',
+        'ai\FreshAgent-Tts.ps1',
+        'ai\Ollama-Manager.ps1',
+        'ai\FreshAgent-OllamaBridge.ps1',
+        'lib\FreshAgent-Dashboard.ps1',
+        'lib\FreshAgent-Profiles.ps1'
+    )) {
+    $srcMust = Join-Path $scriptsSrc $must
+    $dstMust = Join-Path $FreshAppData $must
+    if (-not (Test-Path -LiteralPath $srcMust)) { continue }
+    New-Item -ItemType Directory -Path (Split-Path $dstMust -Parent) -Force | Out-Null
+    Copy-Item -LiteralPath $srcMust -Destination $dstMust -Force
+    if (-not (Test-Path -LiteralPath $dstMust)) {
+        throw "Copie critique echouee : $must"
+    }
+}
+
 if (Test-Path -LiteralPath $configsSrc) {
     $cfgDest = Join-Path $FreshAppData 'configs'
     New-Item -ItemType Directory -Path $cfgDest -Force | Out-Null
