@@ -808,7 +808,11 @@ function Invoke-WatchTick {
     }
     Invoke-FreshAgentDeferredBoot
     Invoke-FreshAgentBackgroundResultPoll
-    Invoke-FreshAgentSkillResultPoll
+    $skillPoll = $script:FreshAgentSkillResultPoll
+    if ($skillPoll -is [scriptblock]) { & $skillPoll }
+    elseif (Get-Command Invoke-FreshAgentSkillResultPoll -ErrorAction SilentlyContinue) {
+        Invoke-FreshAgentSkillResultPoll
+    }
     if (Get-Command Update-FreshAgentDashboardIfOpen -ErrorAction SilentlyContinue) {
         Update-FreshAgentDashboardIfOpen
     }
@@ -997,7 +1001,11 @@ function Invoke-FreshAgentSkillMenu {
         [string]$SkillId,
         [hashtable]$Parameters = @{}
     )
-    # Hors thread UI : un skill CIM/WMI qui bloque ne doit pas tuer le message loop.
+    $sb = $script:FreshAgentStartSkillBg
+    if ($sb -is [scriptblock]) {
+        & $sb $SkillId $Parameters
+        return
+    }
     Start-FreshAgentUiSkillBackground -SkillId $SkillId -Parameters $Parameters
 }
 
@@ -1007,25 +1015,13 @@ function Start-FreshAgentUiSkillBackground {
         [string]$SkillId,
         [hashtable]$Parameters = @{}
     )
+    Write-WatchLog ("Skill bg enter: {0}" -f $SkillId)
     if (-not $script:FreshAgentReady) {
         Show-Balloon -Title 'Fresh Agent' -Text 'Modules skills non charges (sync scripts locaux).' -Icon Warning
         return
     }
     if ($script:FaSkillResultPending) {
         Show-Balloon -Title 'Fresh Agent' -Text 'Un skill est deja en cours.' -Icon Warning
-        return
-    }
-    try {
-        if (Get-Command Ensure-FreshAgentSkillsLoaded -ErrorAction SilentlyContinue) {
-            if (-not (Ensure-FreshAgentSkillsLoaded -FreshAppData $script:FreshAppData)) {
-                Show-Balloon -Title 'Fresh Agent' -Text 'Skills Engine absent — sync scripts locaux puis redemarrer l agent.' -Icon Warning
-                return
-            }
-        }
-    }
-    catch {
-        Write-WatchLog ("Skill ensure: {0}" -f $_.Exception.Message)
-        Show-Balloon -Title 'Fresh Agent' -Text $_.Exception.Message -Icon Error
         return
     }
 
@@ -1085,12 +1081,29 @@ catch {
     ConvertTo-Json -Compress | Set-Content -LiteralPath `$resultPath -Encoding UTF8
 }
 "@
-    Start-FreshAgentDetachedPs1 -ScriptContent $scriptBody
+    try {
+        Start-FreshAgentDetachedPs1 -ScriptContent $scriptBody
+    }
+    catch {
+        Write-WatchLog ("Skill bg spawn: {0}" -f $_.Exception.ToString())
+        Show-Balloon -Title 'Fresh Agent' -Text $_.Exception.Message -Icon Error
+        return
+    }
     $script:FaSkillResultPending = $true
     $script:FaSkillResultStarted = Get-Date
     $script:FaSkillResultId = $SkillId
     $script:FaSkillResultLastAt = $null
     Start-FreshAgentSkillPollTimerIfNeeded
+    Write-WatchLog ("Skill bg queued: {0}" -f $SkillId)
+}
+
+# Publie sur $script: pour handlers WinForms / InvokeScript (pas de Function:).
+$script:FreshAgentStartSkillBg = {
+    param(
+        [string]$SkillId,
+        [hashtable]$Parameters = @{}
+    )
+    Start-FreshAgentUiSkillBackground -SkillId $SkillId -Parameters $Parameters
 }
 
 function Start-FreshAgentSkillPollTimerIfNeeded {
@@ -1100,7 +1113,14 @@ function Start-FreshAgentSkillPollTimerIfNeeded {
         $script:FaSkillPollTimer.Interval = 1000
         $script:FaSkillPollTimer.Add_Tick((Register-WatchUiHandler {
                 try {
-                    Invoke-FreshAgentSkillResultPoll
+                    $poll = $script:FreshAgentSkillResultPoll
+                    if ($poll -is [scriptblock]) {
+                        & $poll
+                    }
+                    elseif ($script:WatchAgentSessionState) {
+                        $null = $script:WatchAgentSessionState.InvokeCommand.InvokeScript(
+                            $false, { Invoke-FreshAgentSkillResultPoll }, $null, @())
+                    }
                     if (-not $script:FaSkillResultPending -and $script:FaSkillPollTimer) {
                         $script:FaSkillPollTimer.Stop()
                         $script:FaSkillPollTimer.Dispose()
@@ -1108,7 +1128,16 @@ function Start-FreshAgentSkillPollTimerIfNeeded {
                     }
                 }
                 catch {
-                    Write-WatchLog ("Skill poll timer: {0}" -f $_.Exception.Message)
+                    try {
+                        $log = $script:FreshAgentUiLog
+                        if ($log -is [scriptblock]) {
+                            & $log ("Skill poll timer: {0}" -f $_.Exception.Message)
+                        }
+                        else {
+                            Write-WatchLog ("Skill poll timer: {0}" -f $_.Exception.Message)
+                        }
+                    }
+                    catch { }
                 }
             }))
         $script:FaSkillPollTimer.Start()
@@ -1144,7 +1173,7 @@ function Invoke-FreshAgentSkillResultPoll {
         Show-Balloon -Title 'Fresh Agent' -Text $msg -Icon $icon
         try {
             if ($raw.ok -and (Get-Command Invoke-FreshAgentSpeakSkillResult -ErrorAction SilentlyContinue)) {
-                $cfg = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData
+                $cfg = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData -PreferLocal
                 Invoke-FreshAgentSpeakSkillResult -Result @{ ok = [bool]$raw.ok; message = $msg } -AiConfig $cfg -FreshAppData $script:FreshAppData
             }
         }
@@ -1154,6 +1183,38 @@ function Invoke-FreshAgentSkillResultPoll {
     }
     catch {
         Write-WatchLog ("Skill bg poll: {0}" -f $_.Exception.Message)
+    }
+}
+
+$script:FreshAgentSkillResultPoll = {
+    if (-not $script:FaSkillResultPending) { return }
+    $path = Join-Path $script:FreshAppData 'fa-skill-result.json'
+    $timeoutSec = 60
+    try {
+        if ($script:FaSkillResultStarted -and ((Get-Date) - $script:FaSkillResultStarted).TotalSeconds -ge $timeoutSec) {
+            $script:FaSkillResultPending = $false
+            $log = $script:FreshAgentUiLog
+            if ($log -is [scriptblock]) { & $log ("Skill bg timeout: {0}" -f $script:FaSkillResultId) }
+            Show-Balloon -Title 'Fresh Agent' -Text ("Skill timeout: {0}" -f $script:FaSkillResultId) -Icon Warning
+            return
+        }
+    }
+    catch { }
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    try {
+        $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($raw.at -and $raw.at -eq $script:FaSkillResultLastAt) { return }
+        $script:FaSkillResultLastAt = [string]$raw.at
+        $script:FaSkillResultPending = $false
+        $msg = if ($raw.message) { [string]$raw.message } else { 'Termine.' }
+        $icon = if ($raw.ok) { 'Info' } else { 'Warning' }
+        $log = $script:FreshAgentUiLog
+        if ($log -is [scriptblock]) { & $log ("Skill bg done: {0} ok={1}" -f $script:FaSkillResultId, [bool]$raw.ok) }
+        Show-Balloon -Title 'Fresh Agent' -Text $msg -Icon $icon
+    }
+    catch {
+        $log = $script:FreshAgentUiLog
+        if ($log -is [scriptblock]) { & $log ("Skill bg poll: {0}" -f $_.Exception.Message) }
     }
 }
 
@@ -1307,6 +1368,31 @@ function Start-FreshAgentBackgroundWork {
         '-FreshAppData', $script:FreshAppData,
         '-RepoRef', $script:RepoRef
     ) | Out-Null
+    Start-FreshAgentBgPollTimerIfNeeded
+}
+
+function Start-FreshAgentBgPollTimerIfNeeded {
+    if ($script:FaBgPollTimer) { return }
+    try {
+        $script:FaBgPollTimer = New-Object System.Windows.Forms.Timer
+        $script:FaBgPollTimer.Interval = 1000
+        $script:FaBgPollTimer.Add_Tick((Register-WatchUiHandler {
+                try {
+                    if ($script:WatchAgentSessionState) {
+                        $null = $script:WatchAgentSessionState.InvokeCommand.InvokeScript(
+                            $false, { Invoke-FreshAgentBackgroundResultPoll }, $null, @())
+                    }
+                    if (-not $script:FaBgResultPending -and $script:FaBgPollTimer) {
+                        $script:FaBgPollTimer.Stop()
+                        $script:FaBgPollTimer.Dispose()
+                        $script:FaBgPollTimer = $null
+                    }
+                }
+                catch { }
+            }))
+        $script:FaBgPollTimer.Start()
+    }
+    catch { }
 }
 
 function Invoke-FreshAgentBackgroundResultPoll {
@@ -1318,9 +1404,14 @@ function Invoke-FreshAgentBackgroundResultPoll {
         if ($raw.at -and $raw.at -eq $script:FaBgResultLastAt) { return }
         $script:FaBgResultLastAt = [string]$raw.at
         $script:FaBgResultPending = $false
+        $script:OllamaOkCacheAt = $null
         $msg = if ($raw.message) { [string]$raw.message } else { 'Operation terminee.' }
         $icon = if ($raw.ok) { 'Info' } else { 'Error' }
         Show-Balloon -Title 'Fresh Agent' -Text $msg -Icon $icon
+        if ($raw.ok -and $raw.action -match 'Ollama|Model') {
+            $script:OllamaOkCache = $true
+            $script:OllamaOkCacheAt = Get-Date
+        }
         if ($script:FreshAgentAiMenu) {
             $m = $script:FreshAgentAiMenu
             Update-FreshAgentAiMenu -MiAiRoot $m.Root -MiAiToggle $m.Toggle -MiOllamaState $m.OllamaState `
@@ -1440,7 +1531,7 @@ function Invoke-FreshAgentAiHistoryMenu {
 function Update-FreshAgentAiMenu {
     param($MiAiRoot, $MiAiToggle, $MiOllamaState, $MiSttState, $MiAiListen, $MiTtsCycle, $MiRagToggle, [switch]$SkipNetworkChecks)
     if (-not $MiAiRoot) { return }
-    $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
+    $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData -PreferLocal
     $enabled = $false
     if ($script:FreshAgentAi -and $null -ne $script:FreshAgentAi.enabled) {
         $enabled = [bool]$script:FreshAgentAi.enabled
@@ -1449,7 +1540,12 @@ function Update-FreshAgentAiMenu {
     $ollamaOk = $false
     if (-not $SkipNetworkChecks -and (Get-Command Test-OllamaApi -ErrorAction SilentlyContinue)) {
         $base = if ($script:FreshAgentAi.ollama.baseUrl) { $script:FreshAgentAi.ollama.baseUrl } else { 'http://127.0.0.1:11434' }
-        $ollamaOk = Test-OllamaApi -BaseUrl $base -TimeoutSec 2
+        $ollamaOk = Test-OllamaApi -BaseUrl $base -TimeoutSec 1
+        $script:OllamaOkCache = $ollamaOk
+        $script:OllamaOkCacheAt = Get-Date
+    }
+    elseif ($script:OllamaOkCacheAt -and ((Get-Date) - [datetime]$script:OllamaOkCacheAt).TotalSeconds -lt 8) {
+        $ollamaOk = [bool]$script:OllamaOkCache
     }
     $MiOllamaState.Text = if ($SkipNetworkChecks) { 'Ollama : (verification differee)' } elseif ($ollamaOk) { 'Ollama : actif' } else { 'Ollama : arrete / injoignable' }
     $sttMsg = 'STT : Windows API'
@@ -1560,21 +1656,59 @@ function Get-FreshAgentDashboardState {
     $ollamaOk = $false
     $sttMsg = 'STT : —'
     $listenOk = $false
-    if ($script:FreshAgentReady -and (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue)) {
-        $cfg = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData
+    if ($script:FreshAgentReady) {
+        $cfg = $script:FreshAgentAi
+        if (-not $cfg -and (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue)) {
+            try {
+                $cfg = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData -PreferLocal
+                $script:FreshAgentAi = $cfg
+            }
+            catch { }
+        }
         if ($cfg) {
             if ($null -ne $cfg.enabled) { $aiOn = [bool]$cfg.enabled }
             if ($cfg.rag -and $null -ne $cfg.rag.enabled) { $ragOn = [bool]$cfg.rag.enabled }
         }
-        if (Get-Command Test-OllamaApi -ErrorAction SilentlyContinue) {
-            $base = if ($cfg.ollama.baseUrl) { $cfg.ollama.baseUrl } else { 'http://127.0.0.1:11434' }
-            $ollamaOk = Test-OllamaApi -BaseUrl $base
+        $base = 'http://127.0.0.1:11434'
+        try {
+            if ($cfg -and $cfg.ollama -and $cfg.ollama.baseUrl) {
+                $base = [string]$cfg.ollama.baseUrl
+            }
+        }
+        catch { }
+        $cacheOk = $false
+        try {
+            if ($script:OllamaOkCacheAt -and ((Get-Date) - [datetime]$script:OllamaOkCacheAt).TotalSeconds -lt 8) {
+                $ollamaOk = [bool]$script:OllamaOkCache
+                $cacheOk = $true
+            }
+        }
+        catch { }
+        if (-not $cacheOk) {
+            try {
+                if (Get-Command Test-OllamaApi -ErrorAction SilentlyContinue) {
+                    $ollamaOk = [bool](Test-OllamaApi -BaseUrl $base -TimeoutSec 1)
+                }
+                else {
+                    $uri = ($base.Trim().TrimEnd('/') + '/api/tags') -replace '(?i)^(https?://)localhost', '${1}127.0.0.1'
+                    $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 1
+                    $ollamaOk = ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300)
+                }
+            }
+            catch {
+                $ollamaOk = $false
+            }
+            $script:OllamaOkCache = $ollamaOk
+            $script:OllamaOkCacheAt = Get-Date
         }
         if (Get-Command Get-WindowsSttStatusMessage -ErrorAction SilentlyContinue) {
-            $sttMsg = Get-WindowsSttStatusMessage
+            try { $sttMsg = Get-WindowsSttStatusMessage } catch { }
         }
         if (Get-Command Test-FreshAgentWindowsSttEnabled -ErrorAction SilentlyContinue) {
-            $listenOk = (Test-FreshAgentWindowsSttEnabled -AiConfig $cfg) -and -not $script:VoiceListenActive
+            try {
+                $listenOk = (Test-FreshAgentWindowsSttEnabled -AiConfig $cfg) -and -not $script:VoiceListenActive
+            }
+            catch { }
         }
     }
     $summary = if ($script:NotifyIcon) { $script:NotifyIcon.Text } else { 'Fresh Agent' }
@@ -1738,9 +1872,9 @@ function Open-FreshAgentDashboardPanel {
             ProfileGame       = { Invoke-FreshAgentProfileFromUi -ProfileId 'game' }
             ProfileWork       = { Invoke-FreshAgentProfileFromUi -ProfileId 'work' }
             ProfileClean      = { Invoke-FreshAgentProfileFromUi -ProfileId 'clean' }
-            SkillHealth       = { Invoke-FreshAgentSkillMenu -SkillId 'check_system_health' }
-            SkillGameSession  = { Invoke-FreshAgentSkillMenu -SkillId 'game_session' }
-            SkillEndGame      = { Invoke-FreshAgentSkillMenu -SkillId 'end_game_session' }
+            SkillHealth       = { & $script:FreshAgentStartSkillBg 'check_system_health' @{} }
+            SkillGameSession  = { & $script:FreshAgentStartSkillBg 'game_session' @{} }
+            SkillEndGame      = { & $script:FreshAgentStartSkillBg 'end_game_session' @{} }
             SetAiEnabled      = { param([bool]$On) Set-FreshAgentAiEnabledFromUi -Enabled $On }
             SetRagEnabled     = { param([bool]$On) Set-FreshAgentRagEnabledFromUi -Enabled $On }
             StartOllama       = { Start-FreshAgentBackgroundWork -Action StartOllama -BusyText 'Demarrage Ollama...' }

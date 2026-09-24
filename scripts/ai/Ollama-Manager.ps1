@@ -28,14 +28,29 @@ function Get-OllamaBaseUrl {
 function Test-OllamaApi {
     param(
         [string]$BaseUrl = 'http://127.0.0.1:11434',
-        [int]$TimeoutSec = 3
+        [int]$TimeoutSec = 2
     )
+    if ([string]::IsNullOrWhiteSpace($BaseUrl)) {
+        $BaseUrl = 'http://127.0.0.1:11434'
+    }
+    $BaseUrl = $BaseUrl.Trim().TrimEnd('/')
+    # localhost peut resoudre en IPv6 (::1) alors qu'Ollama ecoute en IPv4.
+    if ($BaseUrl -match '(?i)^https?://localhost(?::|/|$)') {
+        $BaseUrl = $BaseUrl -replace '(?i)^(https?://)localhost', '${1}127.0.0.1'
+    }
+    $uri = "$BaseUrl/api/tags"
     try {
-        $null = Invoke-RestMethod -Uri "$BaseUrl/api/tags" -Method Get -TimeoutSec $TimeoutSec
+        $null = Invoke-RestMethod -Uri $uri -Method Get -TimeoutSec $TimeoutSec
         return $true
     }
     catch {
-        return $false
+        try {
+            $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec $TimeoutSec
+            return ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300)
+        }
+        catch {
+            return $false
+        }
     }
 }
 
