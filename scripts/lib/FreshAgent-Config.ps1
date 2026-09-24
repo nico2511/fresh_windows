@@ -125,6 +125,8 @@ function Get-FreshAgentAiConfig {
             schemaVersion = 1
             enabled       = $false
             ollama        = @{ baseUrl = 'http://127.0.0.1:11434'; defaultModel = 'qwen2.5:3b'; autoStart = $true }
+            stt           = @{ provider = 'windows'; listenSeconds = 20; culture = 'fr-FR'; route = 'auto'; minConfidence = 0.42 }
+            tts           = @{ provider = 'off' }
         } | ConvertTo-Json -Depth 6 | ConvertFrom-Json
     }
 

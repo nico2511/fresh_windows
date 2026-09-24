@@ -4,24 +4,42 @@
 #>
 
 function Test-WindowsSpeechRecognitionAvailable {
+    # Ne cacher que les succes: un echec transitoire au boot ne doit pas griser le STT pour toujours.
+    if ($script:FreshAgentSpeechAvailCache -eq $true) {
+        return $true
+    }
     try {
         Add-Type -AssemblyName System.Speech -ErrorAction Stop
         $engines = [System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers()
-        return ($engines.Count -gt 0)
+        if ($engines -and $engines.Count -gt 0) {
+            $script:FreshAgentSpeechAvailCache = $true
+            return $true
+        }
     }
     catch { }
     return $false
 }
 
 function Get-WindowsSttStatusMessage {
+    param(
+        [string]$FreshAppData,
+        [string]$RepoRef
+    )
     $cfg = $null
     if (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue) {
         try {
-            $cfg = Get-FreshAgentAiConfig
+            $p = @{ PreferLocal = $true }
+            if ($FreshAppData) { $p.FreshAppData = $FreshAppData }
+            if ($RepoRef) { $p.RepoRef = $RepoRef }
+            $cfg = Get-FreshAgentAiConfig @p
         }
         catch { }
     }
-    if ($cfg -and $cfg.stt -and $cfg.stt.provider -eq 'cyberScribe') {
+    $provider = 'windows'
+    if ($cfg -and $cfg.stt -and $cfg.stt.provider) {
+        $provider = [string]$cfg.stt.provider
+    }
+    if ($provider -eq 'cyberScribe') {
         return 'STT : CyberScribe (non gere par cet agent — utilise mode Windows).'
     }
     if (-not (Test-WindowsSpeechRecognitionAvailable)) {
@@ -33,8 +51,12 @@ function Get-WindowsSttStatusMessage {
 
 function Test-FreshAgentWindowsSttEnabled {
     param($AiConfig)
-    if (-not $AiConfig -or -not $AiConfig.stt) { return $false }
-    if ([string]$AiConfig.stt.provider -ne 'windows') { return $false }
+    # Provider absent = windows (defaut agent). Seul cyberScribe desactive ce chemin.
+    $provider = 'windows'
+    if ($AiConfig -and $AiConfig.stt -and $AiConfig.stt.provider) {
+        $provider = [string]$AiConfig.stt.provider
+    }
+    if ($provider -ne 'windows') { return $false }
     return (Test-WindowsSpeechRecognitionAvailable)
 }
 

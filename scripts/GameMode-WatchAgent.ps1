@@ -599,7 +599,7 @@ function Invoke-FreshWatchAgentModuleBoot {
             Ensure-FreshAgentAiBridgeLoaded -FreshAppData $script:FreshAppData | Out-Null
         }
         if (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue) {
-            $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData
+            $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData -PreferLocal
             $script:FreshAgentReady = $true
             Write-WatchLog 'Fresh Agent modules charges (differe)'
             $script:FreshAgentDeferredBootPending = $true
@@ -647,7 +647,7 @@ function Complete-WatchAgentModuleBoot {
             Invoke-WatchAgentDotModuleAtScript -RelativePath 'lib/FreshAgent-Dashboard.ps1' | Out-Null
         }
         if (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue) {
-            $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData
+            $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData -PreferLocal
             $script:FreshAgentReady = $true
             Write-WatchLog 'Fresh Agent modules charges (differe)'
             $script:FreshAgentDeferredBootPending = $true
@@ -681,20 +681,34 @@ function Invoke-WatchAgentDotModuleAtScript {
     }
     try {
         Set-WatchScriptUtf8Bom -Path $path
-        $escaped = $path.Replace("'", "''")
-        $dot = [scriptblock]::Create(". '$escaped'")
-        if ($script:WatchAgentSessionState) {
-            $null = $script:WatchAgentSessionState.InvokeCommand.InvokeScript($false, $dot, $null, @())
-        }
-        else {
-            $null = $ExecutionContext.InvokeCommand.InvokeScript($false, $dot, $null, @())
-        }
+        # Dot direct dans le scope script agent (InvokeScript peut ne pas exporter les functions).
+        . $path
         return $true
     }
     catch {
         Write-WatchLog ("Module dot: {0}" -f $_.Exception.Message)
         return $false
     }
+}
+
+function Ensure-FreshAgentSttLoaded {
+    if (Get-Command Invoke-WindowsSttListenInteractive -ErrorAction SilentlyContinue) {
+        return $true
+    }
+    $path = Join-Path $script:FreshAppData 'ai\Windows-Stt.ps1'
+    if (-not (Test-Path -LiteralPath $path)) {
+        Write-WatchLog ("STT file absent: {0}" -f $path)
+        return $false
+    }
+    try {
+        . $path
+        Write-WatchLog 'STT module force-loaded'
+    }
+    catch {
+        Write-WatchLog ("STT force-load: {0}" -f $_.Exception.Message)
+        return $false
+    }
+    return [bool](Get-Command Invoke-WindowsSttListenInteractive -ErrorAction SilentlyContinue)
 }
 
 function Invoke-WatchAgentModuleBootStep {
@@ -1631,14 +1645,18 @@ function Invoke-FreshAgentVoiceListenMenu {
         Show-Balloon -Title 'STT' -Text 'Modules non charges.' -Icon Warning
         return
     }
-    if (-not (Get-Command Invoke-WindowsSttListenInteractive -ErrorAction SilentlyContinue)) {
+    if (-not (Ensure-FreshAgentSttLoaded)) {
         Show-Balloon -Title 'STT' -Text 'Module Windows-Stt absent — sync scripts locaux.' -Icon Warning
         return
     }
 
-    $cfg = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
+    $cfg = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData -PreferLocal
     if (-not (Test-FreshAgentWindowsSttEnabled -AiConfig $cfg)) {
-        Show-Balloon -Title 'STT' -Text 'STT Windows indisponible (micro / langue).' -Icon Warning
+        $detail = 'STT Windows indisponible (micro / langue).'
+        if (Get-Command Get-WindowsSttStatusMessage -ErrorAction SilentlyContinue) {
+            try { $detail = Get-WindowsSttStatusMessage -FreshAppData $FreshAppData -RepoRef $RepoRef } catch { }
+        }
+        Show-Balloon -Title 'STT' -Text $detail -Icon Warning
         return
     }
 
@@ -1743,20 +1761,53 @@ function Update-FreshAgentAiMenu {
     }
     $MiOllamaState.Text = if ($SkipNetworkChecks) { 'Ollama : (verification differee)' } elseif ($ollamaOk) { 'Ollama : actif' } else { 'Ollama : arrete / injoignable' }
     $sttMsg = 'STT : Windows API'
-    if (-not $SkipNetworkChecks -and (Get-Command Get-WindowsSttStatusMessage -ErrorAction SilentlyContinue)) {
-        $sttMsg = Get-WindowsSttStatusMessage
+    if ($script:FreshAgentReady) { Ensure-FreshAgentSttLoaded | Out-Null }
+    if (Get-Command Get-WindowsSttStatusMessage -ErrorAction SilentlyContinue) {
+        try {
+            $sttMsg = Get-WindowsSttStatusMessage -FreshAppData $FreshAppData -RepoRef $RepoRef
+        }
+        catch {
+            $sttMsg = 'STT : (statut indisponible)'
+        }
     }
-    $MiSttState.Text = $sttMsg
+    elseif (-not $script:FreshAgentReady) {
+        $sttMsg = 'STT : modules en cours...'
+    }
+    if ($MiSttState) {
+        $MiSttState.Text = $sttMsg
+        $MiSttState.Enabled = [bool]$script:FreshAgentReady
+    }
     if ($MiAiListen) {
         $listenOk = $false
         if (Get-Command Test-FreshAgentWindowsSttEnabled -ErrorAction SilentlyContinue) {
-            $listenOk = Test-FreshAgentWindowsSttEnabled -AiConfig $script:FreshAgentAi
+            try {
+                $listenOk = [bool](Test-FreshAgentWindowsSttEnabled -AiConfig $script:FreshAgentAi)
+            }
+            catch {
+                Write-WatchLog ("STT test: {0}" -f $_.Exception.Message)
+            }
         }
-        $MiAiListen.Enabled = $listenOk -and -not $script:VoiceListenActive
-        $label = if ($listenOk) { 'Ecouter (commande vocale Windows)' } else { 'Ecouter (STT indisponible)' }
+        $prov = 'n/a'
+        try {
+            if ($script:FreshAgentAi -and $script:FreshAgentAi.stt) { $prov = [string]$script:FreshAgentAi.stt.provider }
+        }
+        catch { }
+        # Apres boot: bouton actif pour pouvoir cliquer et recevoir un balloon explicite.
+        $ready = [bool]$script:FreshAgentReady
+        $MiAiListen.Enabled = $ready -and -not $script:VoiceListenActive
+        $label = if ($listenOk) {
+            'Ecouter (commande vocale Windows)'
+        }
+        elseif ($ready) {
+            'Ecouter (STT indisponible — clic = detail)'
+        }
+        else {
+            'Ecouter (modules...)'
+        }
         $MiAiListen.Text = $label
         $script:MiAiListenLabel = $label
         $script:MiAiListenItem = $MiAiListen
+        Write-WatchLog ("STT menu ready={0} listenOk={1} enabled={2} provider={3}" -f $ready, $listenOk, $MiAiListen.Enabled, $prov)
     }
     if ($MiTtsCycle -and (Get-Command Get-FreshAgentTtsProvider -ErrorAction SilentlyContinue)) {
         $p = Get-FreshAgentTtsProvider -AiConfig $script:FreshAgentAi
@@ -1905,14 +1956,19 @@ function Get-FreshAgentDashboardState {
             $script:OllamaOkCacheAt = Get-Date
         }
         if (Get-Command Get-WindowsSttStatusMessage -ErrorAction SilentlyContinue) {
-            try { $sttMsg = Get-WindowsSttStatusMessage } catch { }
-        }
-        if (Get-Command Test-FreshAgentWindowsSttEnabled -ErrorAction SilentlyContinue) {
             try {
-                $listenOk = (Test-FreshAgentWindowsSttEnabled -AiConfig $cfg) -and -not $script:VoiceListenActive
+                $sttMsg = Get-WindowsSttStatusMessage -FreshAppData $script:FreshAppData -RepoRef $script:RepoRef
             }
             catch { }
         }
+        if (Get-Command Test-FreshAgentWindowsSttEnabled -ErrorAction SilentlyContinue) {
+            try {
+                $null = Test-FreshAgentWindowsSttEnabled -AiConfig $cfg
+            }
+            catch { }
+        }
+        # Bouton STT cliquable des que les modules sont prets (balloon si indisponible).
+        $listenOk = -not $script:VoiceListenActive
     }
     $summary = if ($script:NotifyIcon) { $script:NotifyIcon.Text } else { 'Fresh Agent' }
     return @{
@@ -1926,6 +1982,26 @@ function Get-FreshAgentDashboardState {
         FreshAgentReady  = [bool]$script:FreshAgentReady
         TraySummary      = $summary
     }
+}
+
+function Invoke-FreshAgentSttStatusMenu {
+    if (-not $script:FreshAgentReady) {
+        Show-Balloon -Title 'STT' -Text 'Modules non charges.' -Icon Warning
+        return
+    }
+    $msg = 'STT : ?'
+    if (Get-Command Get-WindowsSttStatusMessage -ErrorAction SilentlyContinue) {
+        try {
+            $msg = Get-WindowsSttStatusMessage -FreshAppData $FreshAppData -RepoRef $RepoRef
+        }
+        catch {
+            $msg = $_.Exception.Message
+        }
+    }
+    else {
+        $msg = 'Module Windows-Stt absent — sync scripts locaux.'
+    }
+    Show-Balloon -Title 'STT' -Text $msg -Icon Info
 }
 
 function Set-FreshAgentAiEnabledFromUi {
@@ -2268,6 +2344,7 @@ $miAi.DropDownItems.Add($miOllamaState) | Out-Null
 $miSttState = New-Object System.Windows.Forms.ToolStripMenuItem
 $miSttState.Text = 'STT : Windows API'
 $miSttState.Enabled = $false
+Add-WatchMenuClick $miSttState { Invoke-FreshAgentSttStatusMenu }
 $miAi.DropDownItems.Add($miSttState) | Out-Null
 
 $miAiListen = New-Object System.Windows.Forms.ToolStripMenuItem
