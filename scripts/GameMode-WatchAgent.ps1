@@ -52,7 +52,24 @@ function Add-WatchMenuClick {
         [Parameter(Mandatory)][System.Windows.Forms.ToolStripItem]$MenuItem,
         [Parameter(Mandatory)][scriptblock]$Handler
     )
-    $MenuItem.Add_Click((Register-WatchUiHandler $Handler))
+    $wrapped = {
+        param($sender, $e)
+        $label = 'menu'
+        try {
+            if ($sender -and $sender.Text) { $label = [string]$sender.Text }
+        }
+        catch { }
+        Write-WatchLog ("UI click begin: {0}" -f $label)
+        try {
+            try { & $Handler $sender $e }
+            catch { & $Handler }
+        }
+        catch {
+            Write-WatchLog ("UI click error ({0}): {1}" -f $label, $_.Exception.ToString())
+        }
+        Write-WatchLog ("UI click end: {0}" -f $label)
+    }
+    $MenuItem.Add_Click((Register-WatchUiHandler $wrapped))
 }
 
 function Set-WatchAgentNotifyIconInteractive {
@@ -63,15 +80,18 @@ function Set-WatchAgentNotifyIconInteractive {
                 param($sender, $e)
                 if ($script:WatchSuppressNotifyActivation) { return }
                 if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+                    Write-WatchLog 'Systray MouseUp left -> dashboard'
                     Open-FreshAgentDashboardPanel
                 }
             }))
         $script:NotifyIcon.Add_Click((Register-WatchUiHandler {
                 if ($script:WatchSuppressNotifyActivation) { return }
+                Write-WatchLog 'Systray Click -> dashboard'
                 Open-FreshAgentDashboardPanel
             }))
         $script:NotifyIcon.Add_DoubleClick((Register-WatchUiHandler {
                 if ($script:WatchSuppressNotifyActivation) { return }
+                Write-WatchLog 'Systray DoubleClick -> dashboard'
                 Open-FreshAgentDashboardPanel
             }))
         $script:WatchMouseHandlersInstalled = $true
@@ -255,7 +275,8 @@ try {
         [System.Windows.Forms.Application]::add_ThreadException({
                 param($sender, $e)
                 try {
-                    Write-WatchLog ('UI ThreadException: {0}' -f $e.Exception.Message)
+                    $detail = if ($e.Exception) { $e.Exception.ToString() } else { 'unknown' }
+                    Write-WatchLog ('UI ThreadException: {0}' -f $detail)
                 }
                 catch { }
             })
@@ -1487,6 +1508,12 @@ function Set-FreshAgentRagEnabledFromUi {
 }
 
 function Open-FreshAgentDashboardPanel {
+    if ($script:FreshAgentDashboardOpening) {
+        Write-WatchLog 'Dashboard open ignore (deja en cours)'
+        return
+    }
+    $script:FreshAgentDashboardOpening = $true
+    try {
     $dashPath = Join-Path $script:FreshAppData 'lib\FreshAgent-Dashboard.ps1'
     if (-not (Test-Path -LiteralPath $dashPath)) {
         Write-WatchLog ("Dashboard fichier absent: {0}" -f $dashPath)
@@ -1494,6 +1521,8 @@ function Open-FreshAgentDashboardPanel {
         return
     }
     try {
+        $dashAge = (Get-Item -LiteralPath $dashPath).LastWriteTimeUtc.ToString('o')
+        Write-WatchLog ("Dashboard open: {0} (mtime UTC {1})" -f $dashPath, $dashAge)
         Set-WatchScriptUtf8Bom -Path $dashPath
     }
     catch { }
@@ -1582,8 +1611,12 @@ Show-FreshAgentDashboard -Actions `$script:FreshAgentDashboardActionMap -GetStat
         }
     }
     catch {
-        Write-WatchLog ("Dashboard open: {0}" -f $_.Exception.Message)
+        Write-WatchLog ("Dashboard open: {0}" -f $_.Exception.ToString())
         Show-Balloon -Title 'Fresh Agent' -Text $_.Exception.Message -Icon Error
+    }
+    }
+    finally {
+        $script:FreshAgentDashboardOpening = $false
     }
 }
 
