@@ -205,7 +205,7 @@ function Sync-GameModeLocalScripts {
         }
     }
 
-    foreach ($scriptName in @('GameMode-Common.ps1', 'Invoke-GameModeKill.ps1', 'GameMode-WatchAgent.ps1', 'Sync-FreshWindowsAgent.ps1')) {
+    foreach ($scriptName in @('GameMode-Common.ps1', 'Invoke-GameModeKill.ps1', 'GameMode-WatchAgent.ps1', 'Stop-FreshWatchAgent.ps1', 'Sync-FreshWindowsAgent.ps1')) {
         $dest = Join-Path $FreshAppData $scriptName
         $url  = "$RepoRawRoot/scripts/$scriptName"
         Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
