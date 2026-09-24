@@ -43,14 +43,14 @@ foreach ($sub in @('lib', 'ai')) {
     if (-not (Test-Path -LiteralPath $from)) { continue }
     $to = Join-Path $FreshAppData $sub
     New-Item -ItemType Directory -Path $to -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $from '*') -Destination $to -Recurse -Force
+    Get-ChildItem -LiteralPath $from -Force | Copy-Item -Destination $to -Recurse -Force
     Write-Host "-> $sub\*" -ForegroundColor DarkGray
 }
 
 if (Test-Path -LiteralPath $configsSrc) {
     $cfgDest = Join-Path $FreshAppData 'configs'
     New-Item -ItemType Directory -Path $cfgDest -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $configsSrc '*') -Destination $cfgDest -Recurse -Force
+    Get-ChildItem -LiteralPath $configsSrc -Force | Copy-Item -Destination $cfgDest -Recurse -Force
     Write-Host '-> configs\*' -ForegroundColor DarkGray
 }
 
