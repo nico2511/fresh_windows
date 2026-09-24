@@ -372,6 +372,9 @@ $script:FaSkillResultPending = $false
 $script:FaSkillResultLastAt = $null
 $script:FaSkillResultId = $null
 $script:FaSkillResultStarted = $null
+$script:FaAiResultPending = $false
+$script:FaAiResultLastAt = $null
+$script:FaAiResultStarted = $null
 $script:FreshAgentDeferredBootPending = $false
 $faConfigCandidates = @(
     (Join-Path $FreshAppData 'lib\FreshAgent-Config.ps1'),
@@ -1220,16 +1223,26 @@ $script:FreshAgentSkillResultPoll = {
 
 function Show-FreshAgentAiPromptDialog {
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = 'Fresh Agent — Tester l IA'
+    $form.Text = 'Fresh Agent - Tester l IA'
     $form.Size = New-Object System.Drawing.Size(480, 200)
     $form.StartPosition = 'CenterScreen'
     $form.FormBorderStyle = 'FixedDialog'
     $form.MaximizeBox = $false
     $form.MinimizeBox = $false
     $form.TopMost = $true
+    $form.ShowInTaskbar = $true
+    try {
+        if ($script:FreshAgentDashboardForm -and -not $script:FreshAgentDashboardForm.IsDisposed) {
+            $form.Owner = $script:FreshAgentDashboardForm
+        }
+        elseif ($script:HiddenForm -and -not $script:HiddenForm.IsDisposed) {
+            $form.Owner = $script:HiddenForm
+        }
+    }
+    catch { }
 
     $label = New-Object System.Windows.Forms.Label
-    $label.Text = 'Demande (ex: mets du lofi sur YouTube, etat systeme) :'
+    $label.Text = 'Demande (ex: etat systeme, mets du lofi sur YouTube) :'
     $label.AutoSize = $true
     $label.Location = New-Object System.Drawing.Point(12, 12)
     $form.Controls.Add($label)
@@ -1256,6 +1269,7 @@ function Show-FreshAgentAiPromptDialog {
     $form.Controls.Add($cancel)
 
     $result = $form.ShowDialog()
+    try { $form.Dispose() } catch { }
     if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         return $textBox.Text.Trim()
     }
@@ -1297,9 +1311,17 @@ function Start-FreshAgentAiPromptBackground {
         [string]$Prompt
     )
     if ([string]::IsNullOrWhiteSpace($Prompt)) { return }
+    if ($script:FaAiResultPending) {
+        Show-Balloon -Title 'Fresh Agent IA' -Text 'Une analyse IA est deja en cours.' -Icon Warning
+        return
+    }
+
+    Write-WatchLog ("AI prompt bg start ({0} chars)" -f $Prompt.Length)
     New-Item -ItemType Directory -Path $script:FreshAppData -Force | Out-Null
     $promptFile = Join-Path $script:FreshAppData 'ai-prompt.pending.txt'
     Set-Content -LiteralPath $promptFile -Value $Prompt -Encoding UTF8
+    $resultPath = Join-Path $script:FreshAppData 'fa-ai-result.json'
+    try { Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue } catch { }
 
     Show-Balloon -Title 'Fresh Agent IA' -Text 'Analyse en cours (Ollama)...' -Icon Info
 
@@ -1307,45 +1329,139 @@ function Start-FreshAgentAiPromptBackground {
     $repoEsc = $script:RepoRef.Replace("'", "''")
     $scriptBody = @"
 `$ErrorActionPreference = 'Continue'
-Add-Type -AssemblyName System.Windows.Forms
 `$fresh = '$freshEsc'
 `$repo = '$repoEsc'
-. (Join-Path `$fresh 'lib\FreshAgent-Config.ps1')
-. (Join-Path `$fresh 'lib\FreshAgent-SkillsEngine.ps1')
-. (Join-Path `$fresh 'lib\FreshAgent-SkillHandlers.ps1')
-. (Join-Path `$fresh 'lib\FreshAgent-GameSession.ps1')
-. (Join-Path `$fresh 'ai\Ollama-Manager.ps1')
-. (Join-Path `$fresh 'ai\FreshAgent-OllamaBridge.ps1')
-. (Join-Path `$fresh 'lib\FreshAgent-Inventory.ps1')
-. (Join-Path `$fresh 'lib\FreshAgent-Rag.ps1')
-. (Join-Path `$fresh 'ai\FreshAgent-Tts.ps1')
-. (Join-Path `$fresh 'lib\FreshAgent-History.ps1')
+`$resultPath = Join-Path `$fresh 'fa-ai-result.json'
 `$log = Join-Path `$fresh 'watch-agent.log'
-function Log([string]`$m) { try { Add-Content -LiteralPath `$log -Value ((Get-Date -Format o) + ' AI ' + `$m) -Encoding UTF8 } catch {} }
+function Log([string]`$m) { try { Add-Content -LiteralPath `$log -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' AI ' + `$m) -Encoding UTF8 } catch {} }
+function Write-AiResult([bool]`$Ok, [string]`$Message, `$Skills) {
+  `$payload = @{
+    ok = `$Ok
+    message = `$Message
+    skills = @(`$Skills)
+    at = (Get-Date -Format o)
+  }
+  `$payload | ConvertTo-Json -Compress -Depth 6 | Set-Content -LiteralPath `$resultPath -Encoding UTF8
+}
 try {
+  Log 'worker begin'
+  . (Join-Path `$fresh 'lib\FreshAgent-Config.ps1')
+  . (Join-Path `$fresh 'lib\FreshAgent-SkillsEngine.ps1')
+  . (Join-Path `$fresh 'lib\FreshAgent-SkillHandlers.ps1')
+  . (Join-Path `$fresh 'lib\FreshAgent-GameSession.ps1')
+  . (Join-Path `$fresh 'ai\Ollama-Manager.ps1')
+  . (Join-Path `$fresh 'ai\FreshAgent-OllamaBridge.ps1')
+  . (Join-Path `$fresh 'lib\FreshAgent-Inventory.ps1')
+  . (Join-Path `$fresh 'lib\FreshAgent-Rag.ps1')
+  . (Join-Path `$fresh 'ai\FreshAgent-Tts.ps1')
+  . (Join-Path `$fresh 'lib\FreshAgent-History.ps1')
   `$prompt = Get-Content -LiteralPath (Join-Path `$fresh 'ai-prompt.pending.txt') -Raw -Encoding UTF8
-  `$cfg = Get-FreshAgentAiConfig -RepoRef `$repo -FreshAppData `$fresh
-  if (-not `$cfg.enabled) { throw 'IA desactivee - active IA : ON dans le menu.' }
+  `$cfg = Get-FreshAgentAiConfig -RepoRef `$repo -FreshAppData `$fresh -PreferLocal
+  if (-not `$cfg.enabled) { throw 'IA desactivee - active IA : ON dans le panneau.' }
+  if (-not (Test-OllamaApi -TimeoutSec 2)) { throw 'Ollama API injoignable (127.0.0.1:11434).' }
+  Log 'Invoke-FreshAgentAiTurn...'
   `$r = Invoke-FreshAgentAiTurn -UserPrompt `$prompt.Trim() -AiConfig `$cfg -RepoRef `$repo -FreshAppData `$fresh
   `$text = if (`$r.message) { [string]`$r.message } else { 'Termine.' }
   if (`$r.skills -and `$r.skills.Count -gt 0) { `$text += ([Environment]::NewLine + 'Skills: ' + (`$r.skills -join ', ')) }
-  Log `$text
+  Log ("done ok=`$(`$r.ok) len=`$(`$text.Length)")
   if (Get-Command Invoke-FreshAgentSpeak -ErrorAction SilentlyContinue) {
-    Invoke-FreshAgentSpeak -Text `$text -AiConfig `$cfg -FreshAppData `$fresh | Out-Null
+    try { Invoke-FreshAgentSpeak -Text `$text -AiConfig `$cfg -FreshAppData `$fresh | Out-Null } catch { Log ("tts: `$(`$_.Exception.Message)") }
   }
   if (Get-Command Add-FreshAgentAiHistoryEntry -ErrorAction SilentlyContinue) {
-    Add-FreshAgentAiHistoryEntry -Prompt `$prompt.Trim() -Response `$text -Skills `$r.skills -FreshAppData `$fresh
+    try { Add-FreshAgentAiHistoryEntry -Prompt `$prompt.Trim() -Response `$text -Skills `$r.skills -FreshAppData `$fresh } catch {}
   }
-  [System.Windows.Forms.MessageBox]::Show(`$text, 'Fresh Agent IA')
+  Write-AiResult -Ok ([bool]`$r.ok) -Message `$text -Skills `$r.skills
 }
 catch {
-  Log `$_.Exception.Message
-  [System.Windows.Forms.MessageBox]::Show(`$_.Exception.Message, 'Fresh Agent IA', 'OK', 'Error')
+  Log ("fail: `$(`$_.Exception.Message)")
+  Write-AiResult -Ok `$false -Message `$_.Exception.Message -Skills @()
 }
 "@
-    Start-FreshAgentDetachedPs1 -ScriptContent $scriptBody -Sta
+    try {
+        Start-FreshAgentDetachedPs1 -ScriptContent $scriptBody
+    }
+    catch {
+        Write-WatchLog ("AI prompt spawn: {0}" -f $_.Exception.ToString())
+        Show-Balloon -Title 'Fresh Agent IA' -Text $_.Exception.Message -Icon Error
+        return
+    }
+    $script:FaAiResultPending = $true
+    $script:FaAiResultStarted = Get-Date
+    $script:FaAiResultLastAt = $null
+    Start-FreshAgentAiPollTimerIfNeeded
+    Write-WatchLog 'AI prompt bg queued'
 }
 
+function Start-FreshAgentAiPollTimerIfNeeded {
+    if ($script:FaAiPollTimer) { return }
+    try {
+        $script:FaAiPollTimer = New-Object System.Windows.Forms.Timer
+        $script:FaAiPollTimer.Interval = 1000
+        $script:FaAiPollTimer.Add_Tick((Register-WatchUiHandler {
+                try {
+                    $poll = $script:FreshAgentAiResultPoll
+                    if ($poll -is [scriptblock]) { & $poll }
+                    if (-not $script:FaAiResultPending -and $script:FaAiPollTimer) {
+                        $script:FaAiPollTimer.Stop()
+                        $script:FaAiPollTimer.Dispose()
+                        $script:FaAiPollTimer = $null
+                    }
+                }
+                catch { }
+            }))
+        $script:FaAiPollTimer.Start()
+    }
+    catch { }
+}
+
+$script:FreshAgentAiResultPoll = {
+    if (-not $script:FaAiResultPending) { return }
+    $path = Join-Path $script:FreshAppData 'fa-ai-result.json'
+    try {
+        if ($script:FaAiResultStarted -and ((Get-Date) - $script:FaAiResultStarted).TotalSeconds -ge 180) {
+            $script:FaAiResultPending = $false
+            Write-WatchLog 'AI prompt timeout 180s'
+            Show-Balloon -Title 'Fresh Agent IA' -Text 'Timeout analyse IA (180s). Verifie Ollama / modele.' -Icon Warning
+            return
+        }
+    }
+    catch { }
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    try {
+        $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($raw.at -and $raw.at -eq $script:FaAiResultLastAt) { return }
+        $script:FaAiResultLastAt = [string]$raw.at
+        $script:FaAiResultPending = $false
+        $msg = if ($raw.message) { [string]$raw.message } else { 'Termine.' }
+        if ($msg.Length -gt 240) { $msg = $msg.Substring(0, 237) + '...' }
+        $icon = if ($raw.ok) { 'Info' } else { 'Error' }
+        Write-WatchLog ("AI prompt done ok={0}" -f [bool]$raw.ok)
+        Show-Balloon -Title 'Fresh Agent IA' -Text $msg -Icon $icon
+    }
+    catch {
+        Write-WatchLog ("AI poll: {0}" -f $_.Exception.Message)
+    }
+}
+
+$script:FreshAgentRunAiTest = {
+    try {
+        Write-WatchLog 'AiTest enter'
+        if (-not (Test-FreshAgentAiBridgeReady)) {
+            Write-WatchLog 'AiTest bridge not ready'
+            return
+        }
+        $prompt = Show-FreshAgentAiPromptDialog
+        Write-WatchLog ("AiTest dialog done promptLen={0}" -f $(if ($prompt) { $prompt.Length } else { 0 }))
+        if ($prompt) {
+            Start-FreshAgentAiPromptBackground -Prompt $prompt
+        }
+    }
+    catch {
+        Write-WatchLog ("AiTest error: {0}" -f $_.Exception.ToString())
+        Show-Balloon -Title 'Fresh Agent IA' -Text $_.Exception.Message -Icon Error
+    }
+    Write-WatchLog 'AiTest leave'
+}
 function Start-FreshAgentBackgroundWork {
     param(
         [ValidateSet('StartOllama', 'EnsureModel')]
@@ -1626,12 +1742,8 @@ function Test-FreshAgentAiBridgeReady {
         Show-Balloon -Title 'IA' -Text 'Modules non charges.' -Icon Warning
         return $false
     }
-    if (Get-Command Ensure-FreshAgentAiBridgeLoaded -ErrorAction SilentlyContinue) {
-        if (Ensure-FreshAgentAiBridgeLoaded -FreshAppData $script:FreshAppData) {
-            return $true
-        }
-    }
-    elseif (Get-Command Invoke-FreshAgentAiTurn -ErrorAction SilentlyContinue) {
+    # Check rapide fichiers + commande (pas de re-import synchrone qui bloque l UI).
+    if (Get-Command Invoke-FreshAgentAiTurn -ErrorAction SilentlyContinue) {
         return $true
     }
     $missing = @()
@@ -1642,6 +1754,19 @@ function Test-FreshAgentAiBridgeReady {
         )) {
         if (-not (Test-Path -LiteralPath (Join-Path $script:FreshAppData $rel))) {
             $missing += $rel
+        }
+    }
+    if ($missing.Count -eq 0) {
+        try {
+            if (Get-Command Ensure-FreshAgentAiBridgeLoaded -ErrorAction SilentlyContinue) {
+                Ensure-FreshAgentAiBridgeLoaded -FreshAppData $script:FreshAppData | Out-Null
+            }
+        }
+        catch {
+            Write-WatchLog ("AiBridge load: {0}" -f $_.Exception.Message)
+        }
+        if (Get-Command Invoke-FreshAgentAiTurn -ErrorAction SilentlyContinue) {
+            return $true
         }
     }
     $detail = if ($missing.Count -gt 0) { "Fichiers manquants: $($missing -join ', ')" } else { 'Sync scripts locaux puis redemarrer l agent.' }
@@ -1844,8 +1969,8 @@ function Open-FreshAgentDashboardPanel {
     catch { }
 
     try {
-    if (-not $script:FreshAgentDashboardActionMap) {
-        $script:FreshAgentDashboardActionMap = @{
+    # Rebuild action map each open (evite closures / code obsolete en memoire).
+    $script:FreshAgentDashboardActionMap = @{
             ToggleAutoSuggest = {
                 param([bool]$On)
                 $s = Get-WatchUserSettings
@@ -1882,9 +2007,8 @@ function Open-FreshAgentDashboardPanel {
             VoiceListen       = { Invoke-FreshAgentVoiceListenMenu }
             TtsCycle          = { Invoke-FreshAgentTtsCycleMenu }
             AiTest            = {
-                if (-not (Test-FreshAgentAiBridgeReady)) { return }
-                $prompt = Show-FreshAgentAiPromptDialog
-                if ($prompt) { Start-FreshAgentAiPromptBackground -Prompt $prompt }
+                $run = $script:FreshAgentRunAiTest
+                if ($run -is [scriptblock]) { & $run }
             }
             AiHistory         = { Invoke-FreshAgentAiHistoryMenu }
             FwMenu            = { try { Start-FreshWindowsElevated -RepoRef $script:RepoRef } catch { Show-Balloon -Title 'Fresh Windows' -Text $_.Exception.Message -Icon Error } }
@@ -1902,7 +2026,6 @@ function Open-FreshAgentDashboardPanel {
                 [System.Windows.Forms.Application]::Exit()
             }
         }
-    }
         $getState = (Get-Command Get-FreshAgentDashboardState -CommandType Function -ErrorAction Stop).ScriptBlock
         $escapedDash = $dashPath.Replace("'", "''")
         $runner = [scriptblock]::Create(@"
@@ -2177,15 +2300,8 @@ $miAi.DropDownItems.Add($miAiHistory) | Out-Null
 $miAiTest = New-Object System.Windows.Forms.ToolStripMenuItem
 $miAiTest.Text = 'Tester l IA (tool calling)...'
 Add-WatchMenuClick $miAiTest {
-    if (-not $script:FreshAgentReady) {
-        Show-Balloon -Title 'IA' -Text 'Modules non charges.' -Icon Warning
-        return
-    }
-    if (-not (Test-FreshAgentAiBridgeReady)) { return }
-    $prompt = Show-FreshAgentAiPromptDialog
-    if ($prompt) {
-        Start-FreshAgentAiPromptBackground -Prompt $prompt
-    }
+    $run = $script:FreshAgentRunAiTest
+    if ($run -is [scriptblock]) { & $run }
 }
 $miAi.DropDownItems.Add($miAiTest) | Out-Null
 

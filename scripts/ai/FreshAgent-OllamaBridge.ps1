@@ -151,7 +151,10 @@ function Invoke-FreshAgentAiTurn {
         return @{ ok = $false; message = 'IA desactivee. Active-la dans le menu Intelligence artificielle.' }
     }
 
-    Ensure-OllamaReady -AiConfig $AiConfig -OnProgress { param($m) } | Out-Null
+    $ready = Ensure-OllamaReady -AiConfig $AiConfig -SkipPull -OnProgress { param($m) }
+    if ($ready -and $ready.model -and $AiConfig.ollama) {
+        try { $AiConfig.ollama.defaultModel = [string]$ready.model } catch { }
+    }
 
     $tools = @(Get-FreshAgentAiToolSchema -RepoRef $RepoRef -FreshAppData $FreshAppData)
     if ($tools.Count -lt 1) {
