@@ -105,10 +105,21 @@ function Merge-FreshAgentJsonObject {
 function Get-FreshAgentAiConfig {
     param(
         [string]$RepoRef,
-        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
+        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot),
+        [switch]$PreferLocal
     )
-    $raw = Get-FreshAgentRepoRawRoot -RepoRef $RepoRef
-    $defaults = Invoke-FreshAgentRestJson -Url "$raw/configs/agent-ai.json"
+    $defaults = $null
+    $localDefaults = Join-Path $FreshAppData 'configs\agent-ai.json'
+    if (Test-Path -LiteralPath $localDefaults) {
+        try {
+            $defaults = Get-Content -LiteralPath $localDefaults -Raw -Encoding UTF8 | ConvertFrom-Json
+        }
+        catch { }
+    }
+    if (-not $defaults -and -not $PreferLocal) {
+        $raw = Get-FreshAgentRepoRawRoot -RepoRef $RepoRef
+        $defaults = Invoke-FreshAgentRestJson -Url "$raw/configs/agent-ai.json" -TimeoutSec 4
+    }
     if (-not $defaults) {
         $defaults = @{
             schemaVersion = 1
