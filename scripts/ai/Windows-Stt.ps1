@@ -133,25 +133,37 @@ function Invoke-WindowsSttListenInteractive {
     $minConfidence = Get-WindowsSttMinConfidence -AiConfig $AiConfig
     $engine = $null
 
-    $script:SttListenResult = $null
-    $script:SttListenDone = $false
+    $global:FreshAgentSttResult = $null
+    $global:FreshAgentSttDone = $false
+    $global:FreshAgentSttMinConfidence = $minConfidence
 
     try {
         $engine = New-WindowsSpeechRecognitionEngine -AiConfig $AiConfig
 
+        # Handler WinForms: pas de variable locale, uniquement $global: (sinon le texte est perdu).
         $engine.Add_SpeechRecognized({
                 param($sender, $e)
-                if ($null -eq $e -or $null -eq $e.Result) { return }
-                if ($e.Result.Rejected) { return }
-                if ($e.Result.Confidence -lt $minConfidence) { return }
-                $script:SttListenResult = $e.Result.Text
-                $script:SttListenDone = $true
+                try {
+                    if ($null -eq $e -or $null -eq $e.Result) { return }
+                    $text = [string]$e.Result.Text
+                    $conf = [double]$e.Result.Confidence
+                    $min = 0.25
+                    if ($null -ne $global:FreshAgentSttMinConfidence) { $min = [double]$global:FreshAgentSttMinConfidence }
+                    $global:FreshAgentSttLastNote = ("conf={0:N2} text={1}" -f $conf, $text)
+                    if ($e.Result.Rejected -or $conf -lt $min -or [string]::IsNullOrWhiteSpace($text)) { return }
+                    $global:FreshAgentSttResult = $text
+                    $global:FreshAgentSttDone = $true
+                    $global:FreshAgentSttPending = $text
+                }
+                catch {
+                    $global:FreshAgentSttLastNote = $_.Exception.Message
+                }
             })
 
         $engine.RecognizeAsync([System.Speech.Recognition.RecognizeMode]::Single)
 
         $deadline = (Get-Date).AddSeconds($timeoutSec)
-        while (-not $script:SttListenDone -and (Get-Date) -lt $deadline) {
+        while (-not $global:FreshAgentSttDone -and (Get-Date) -lt $deadline) {
             if (Get-Command -Name 'Application' -ErrorAction SilentlyContinue) {
                 [System.Windows.Forms.Application]::DoEvents()
             }
@@ -159,12 +171,53 @@ function Invoke-WindowsSttListenInteractive {
         }
 
         try { $engine.RecognizeAsyncStop() } catch { }
-        return $script:SttListenResult
+        return $global:FreshAgentSttResult
     }
     finally {
         if ($engine) {
             try { $engine.Dispose() } catch { }
         }
+    }
+}
+
+function Start-WindowsSttAlwaysOn {
+    param($AiConfig)
+    if ($global:FreshAgentSttEngine) { return $true }
+    $global:FreshAgentSttMinConfidence = Get-WindowsSttMinConfidence -AiConfig $AiConfig
+    if ($global:FreshAgentSttMinConfidence -gt 0.35) { $global:FreshAgentSttMinConfidence = 0.35 }
+    $global:FreshAgentSttPaused = $false
+    $global:FreshAgentSttPending = $null
+    $engine = New-WindowsSpeechRecognitionEngine -AiConfig $AiConfig
+    $engine.Add_SpeechRecognized({
+            param($sender, $e)
+            try {
+                if ($global:FreshAgentSttPaused) { return }
+                if ($null -eq $e -or $null -eq $e.Result) { return }
+                $text = [string]$e.Result.Text
+                $conf = [double]$e.Result.Confidence
+                $min = 0.35
+                if ($null -ne $global:FreshAgentSttMinConfidence) { $min = [double]$global:FreshAgentSttMinConfidence }
+                $global:FreshAgentSttLastNote = ("conf={0:N2} text={1}" -f $conf, $text)
+                if ($e.Result.Rejected -or $conf -lt $min -or [string]::IsNullOrWhiteSpace($text)) { return }
+                if ($global:FreshAgentSttPending) { return }
+                $global:FreshAgentSttPending = $text
+            }
+            catch {
+                $global:FreshAgentSttLastNote = $_.Exception.Message
+            }
+        })
+    $engine.RecognizeAsync([System.Speech.Recognition.RecognizeMode]::Multiple)
+    $global:FreshAgentSttEngine = $engine
+    return $true
+}
+
+function Stop-WindowsSttAlwaysOn {
+    $engine = $global:FreshAgentSttEngine
+    $global:FreshAgentSttEngine = $null
+    $global:FreshAgentSttPending = $null
+    if ($engine) {
+        try { $engine.RecognizeAsyncCancel() } catch { }
+        try { $engine.Dispose() } catch { }
     }
 }
 

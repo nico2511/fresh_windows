@@ -29,7 +29,8 @@ New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null
 
 foreach ($name in @(
         'GameMode-Common.ps1', 'Invoke-GameModeKill.ps1', 'GameMode-WatchAgent.ps1',
-        'Stop-FreshWatchAgent.ps1', 'Sync-FreshWindowsAgent.ps1', 'Dev-SyncFreshAgentFromRepo.ps1'
+        'Stop-FreshWatchAgent.ps1', 'Sync-FreshWindowsAgent.ps1', 'Dev-SyncFreshAgentFromRepo.ps1',
+        'Start-FreshAgentDev.ps1', 'Stop-FreshAgentDev.ps1'
     )) {
     $src = Join-Path $scriptsSrc $name
     if (Test-Path -LiteralPath $src) {
@@ -51,9 +52,12 @@ foreach ($sub in @('lib', 'ai')) {
 foreach ($must in @(
         'ai\Windows-Stt.ps1',
         'ai\FreshAgent-Tts.ps1',
+        'ai\FreshAgent-VoiceWorker.ps1',
         'ai\Ollama-Manager.ps1',
         'ai\FreshAgent-OllamaBridge.ps1',
         'lib\FreshAgent-Dashboard.ps1',
+        'lib\FreshAgent-Overlay.ps1',
+        'lib\FreshAgent-VoiceRouter.ps1',
         'lib\FreshAgent-Profiles.ps1'
     )) {
     $srcMust = Join-Path $scriptsSrc $must

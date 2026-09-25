@@ -1,13 +1,19 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "enabled": false,
+  "voice": {
+    "enabled": false,
+    "comment": "always-on listen session; OFF at boot. Toggle via dashboard/tray.",
+    "idleMinutes": 5,
+    "releaseOnMicConflict": true
+  },
   "ollama": {
     "baseUrl": "http://127.0.0.1:11434",
     "defaultModel": "qwen2.5:3b",
     "models": [
       "qwen2.5:3b"
     ],
-    "autoStart": true,
+    "autoStart": false,
     "pullOnEnable": true,
     "keepAliveMinutes": 0,
     "toolCallMaxRounds": 4,
@@ -15,18 +21,28 @@
   },
   "systemPrompt": "",
   "stt": {
-    "provider": "windows",
-    "comment": "windows = reconnaissance Windows (Speech API). cyberScribe desactive par defaut.",
-    "pushToTalk": true,
+    "provider": "voiceWorker",
+    "comment": "voiceWorker = bin/voice_worker.exe (asset FreshWindows). windows = secours. off = desactive.",
+    "exe": "%LOCALAPPDATA%\\FreshWindows\\bin\\voice_worker.exe",
+    "downloadUrl": "https://github.com/nico2511/CyberScribeNote/releases/latest/download/CyberScribeNote-win.zip",
+    "language": "fr",
+    "modelSize": "base",
+    "transcriptionProfile": "fast",
+    "pushToTalk": false,
     "listenSeconds": 20,
     "culture": "fr-FR",
-    "route": "auto",
+    "route": "skills",
     "minConfidence": 0.42
   },
   "tts": {
-    "provider": "off",
-    "comment": "off | windows | piper",
+    "provider": "edge",
+    "comment": "off | edge | windows | piper(legacy)",
     "speakSkillResults": true,
+    "edge": {
+      "voice": "fr-FR-DeniseNeural",
+      "rate": "+0%",
+      "volume": "+0%"
+    },
     "windows": {
       "culture": "fr-FR",
       "rate": 0,
@@ -42,5 +58,10 @@
     "includeInventoryInPrompt": true,
     "topK": 4,
     "comment": "enabled=true active la recherche guides (index local rag/index.json)"
+  },
+  "overlay": {
+    "enabled": true,
+    "corner": "bottomRight",
+    "fadeMs": 4000
   }
 }

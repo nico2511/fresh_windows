@@ -4,6 +4,12 @@
 #>
 
 function Get-FreshAgentAppDataRoot {
+    if ($env:FRESH_WIN_APPDATA -and -not [string]::IsNullOrWhiteSpace($env:FRESH_WIN_APPDATA)) {
+        return $env:FRESH_WIN_APPDATA.Trim()
+    }
+    if ($script:FreshAppData -and -not [string]::IsNullOrWhiteSpace([string]$script:FreshAppData)) {
+        return [string]$script:FreshAppData
+    }
     return Join-Path $env:LOCALAPPDATA 'FreshWindows'
 }
 
@@ -125,8 +131,8 @@ function Get-FreshAgentAiConfig {
             schemaVersion = 1
             enabled       = $false
             ollama        = @{ baseUrl = 'http://127.0.0.1:11434'; defaultModel = 'qwen2.5:3b'; autoStart = $true }
-            stt           = @{ provider = 'windows'; listenSeconds = 20; culture = 'fr-FR'; route = 'auto'; minConfidence = 0.42 }
-            tts           = @{ provider = 'off' }
+            stt           = @{ provider = 'cyberScribe'; listenSeconds = 20; culture = 'fr-FR'; route = 'auto'; minConfidence = 0.42 }
+            tts           = @{ provider = 'windows' }
         } | ConvertTo-Json -Depth 6 | ConvertFrom-Json
     }
 
@@ -315,6 +321,15 @@ function Sync-FreshAgentLocalAssets {
     return $true
 }
 
+function Import-FreshAgentFileIntoScriptScope {
+    param([Parameter(Mandatory)][string]$LiteralPath)
+    # Dot depuis une fonction ne survit pas au return. function script: reste dans le script agent.
+    $raw = [System.IO.File]::ReadAllText($LiteralPath)
+    $raw = [regex]::Replace($raw, '(?m)^(\s*)#Requires[^\r\n]*', '${1}# requires stripped')
+    $raw = [regex]::Replace($raw, '(?m)^(\s*)function\s+(?!script:)', '${1}function script:')
+    Invoke-Expression $raw
+}
+
 function Import-FreshAgentModule {
     param(
         [Parameter(Mandatory)]
@@ -352,14 +367,7 @@ function Import-FreshAgentModule {
             if (Get-Command Set-FreshScriptUtf8Bom -ErrorAction SilentlyContinue) {
                 Set-FreshScriptUtf8Bom -Path $path
             }
-            $escaped = $path.Replace("'", "''")
-            $dot = [scriptblock]::Create(". '$escaped'")
-            if ($script:WatchAgentSessionState) {
-                $null = $script:WatchAgentSessionState.InvokeCommand.InvokeScript($false, $dot, $null, @())
-            }
-            else {
-                $null = $ExecutionContext.InvokeCommand.InvokeScript($false, $dot, $null, @())
-            }
+            Import-FreshAgentFileIntoScriptScope -LiteralPath $path
             return $true
         }
         catch {
@@ -425,10 +433,14 @@ function Import-FreshAgentStandardModules {
             'lib/FreshAgent-Profiles.ps1',
             'lib/FreshAgent-Log.ps1',
             'lib/FreshAgent-Dashboard.ps1',
+            'lib/FreshAgent-Overlay.ps1',
+            'lib/FreshAgent-VoiceRouter.ps1',
+            'lib/FreshAgent-IdleSuggest.ps1',
             'ai/Ollama-Manager.ps1',
             'ai/FreshAgent-OllamaBridge.ps1',
             'ai/Windows-Stt.ps1',
-            'ai/FreshAgent-Tts.ps1'
+            'ai/FreshAgent-Tts.ps1',
+            'ai/FreshAgent-VoiceWorker.ps1'
         )) {
         Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
     }

@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "comment": "Patterns FR -> skills PC (ordre important)",
+  "rules": [
+    {
+      "id": "game_session",
+      "enabled": true,
+      "skillId": "game_session",
+      "say": "Session jeu.",
+      "patterns": [
+        "^(?:lance|demarre|active)\\s+(?:le\\s+)?mode\\s+jeu",
+        "^(?:session|mode)\\s+jeu",
+        "^mode\\s+jeu$"
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "end_game_session",
+      "enabled": true,
+      "skillId": "end_game_session",
+      "say": "Fin de session jeu.",
+      "patterns": [
+        "^(?:fin|arrete|stop|quitte)\\s+(?:la\\s+)?session\\s+jeu",
+        "^(?:fin|arrete)\\s+(?:le\\s+)?mode\\s+jeu",
+        "^fin\\s+de\\s+partie"
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "youtube_search",
+      "enabled": true,
+      "skillId": "youtube_search",
+      "say": "YouTube.",
+      "patterns": [
+        "^(?:cherche|recherche|ouvre)\\s+(?:sur\\s+)?youtube\\s+(.+)$",
+        "^youtube\\s+(.+)$"
+      ],
+      "parameters": { "query": "$1" }
+    },
+    {
+      "id": "browser_search",
+      "enabled": true,
+      "skillId": "browser_search",
+      "say": "Recherche.",
+      "patterns": [
+        "^(?:cherche|recherche)(?:\\s+sur\\s+(?:le\\s+)?(?:web|internet))?\\s+(.+)$",
+        "^(?:google|bing)\\s+(.+)$"
+      ],
+      "parameters": { "query": "$1" }
+    },
+    {
+      "id": "open_url",
+      "enabled": true,
+      "skillId": "open_url",
+      "say": "Ouverture.",
+      "patterns": [
+        "^(?:ouvre|lance)\\s+(https?://\\S+)$",
+        "^(?:ouvre|lance)\\s+(www\\.\\S+)$"
+      ],
+      "parameters": { "url": "$1" }
+    },
+    {
+      "id": "launch_app",
+      "enabled": true,
+      "skillId": "launch_app",
+      "say": "Lancement.",
+      "patterns": [
+        "^(?:lance|ouvre|demarre)\\s+(.+)$"
+      ],
+      "parameters": { "name": "$1" }
+    },
+    {
+      "id": "check_system_health",
+      "enabled": true,
+      "skillId": "check_system_health",
+      "say": "Etat systeme.",
+      "patterns": [
+        "^(?:etat|sante)\\s+(?:du\\s+)?systeme",
+        "^comment\\s+va\\s+(?:le\\s+)?(?:pc|systeme)"
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "refresh_inventory",
+      "enabled": true,
+      "skillId": "refresh_inventory",
+      "say": "Inventaire mis a jour.",
+      "patterns": [
+        "^(?:rafraichis|actualise|met\\s+a\\s+jour)\\s+(?:l[' ]?)?inventaire"
+      ],
+      "parameters": {}
+    }
+  ]
+}

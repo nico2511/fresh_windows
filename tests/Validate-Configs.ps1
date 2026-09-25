@@ -284,8 +284,11 @@ if (Test-Path -LiteralPath $agentAiPath) {
     elseif (-not $ai.ollama -or -not $ai.ollama.defaultModel) {
         Fail 'agent-ai.json : ollama.defaultModel manquant'
     }
-    elseif ($ai.stt.provider -ne 'windows' -and $ai.stt.provider -ne 'cyberScribe') {
-        Fail 'agent-ai.json : stt.provider doit etre windows ou cyberScribe'
+    elseif ($ai.stt.provider -ne 'windows' -and $ai.stt.provider -ne 'cyberScribe' -and $ai.stt.provider -ne 'voiceWorker' -and $ai.stt.provider -ne 'off') {
+        Fail 'agent-ai.json : stt.provider doit etre voiceWorker, windows, cyberScribe ou off'
+    }
+    elseif ($ai.tts.provider -ne 'off' -and $ai.tts.provider -ne 'edge' -and $ai.tts.provider -ne 'windows' -and $ai.tts.provider -ne 'piper') {
+        Fail 'agent-ai.json : tts.provider doit etre off, edge, windows ou piper'
     }
     elseif ($ai.stt.provider -eq 'windows' -and $null -eq $ai.stt.listenSeconds) {
         Fail 'agent-ai.json : stt.listenSeconds manquant (windows)'

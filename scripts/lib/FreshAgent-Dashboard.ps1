@@ -51,9 +51,21 @@ $script:FreshAgentDashboardUpdateUi = {
         if ($Ui.LblStatus -and $State.TraySummary) {
             $Ui.LblStatus.Text = [string]$State.TraySummary
         }
-        if ($Ui.ChkAi) { $Ui.ChkAi.Enabled = [bool]$State.FreshAgentReady }
-        if ($Ui.ChkRag) { $Ui.ChkRag.Enabled = [bool]$State.FreshAgentReady }
-        if ($Ui.BtnListen) { $Ui.BtnListen.Enabled = [bool]$State.ListenEnabled }
+        if ($Ui.LblAiNotice -and $State.AiNotice) {
+            $Ui.LblAiNotice.Text = [string]$State.AiNotice
+        }
+        if ($Ui.ChkAi) { $Ui.ChkAi.Enabled = [bool]$State.AiControlsEnabled }
+        if ($Ui.ChkRag) { $Ui.ChkRag.Enabled = [bool]$State.AiControlsEnabled }
+        if ($Ui.BtnListen) {
+            $Ui.BtnListen.Enabled = [bool]$State.ListenEnabled
+            if ($State.ListenButtonText) { $Ui.BtnListen.Text = [string]$State.ListenButtonText }
+        }
+        if ($Ui.BtnListenOff) {
+            $Ui.BtnListenOff.Enabled = [bool]$State.ListenOffEnabled
+        }
+        foreach ($name in @('BtnStartOllama', 'BtnEnsureModel', 'BtnTtsCycle', 'BtnAiTest', 'BtnAiHistory')) {
+            if ($Ui[$name]) { $Ui[$name].Enabled = [bool]$State.AiControlsEnabled }
+        }
     }
     finally {
         $Ui._suppress = $false
@@ -301,19 +313,21 @@ function Show-FreshAgentDashboard {
     $form.FormBorderStyle = 'FixedDialog'
     $form.MaximizeBox = $false
     $form.MinimizeBox = $false
-    $form.ClientSize = New-Object System.Drawing.Size(520, 420)
+    $form.ClientSize = New-Object System.Drawing.Size(540, 460)
     $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+    $form.BackColor = [System.Drawing.Color]::FromArgb(248, 249, 251)
 
     $lblStatus = New-Object System.Windows.Forms.Label
     $lblStatus.AutoSize = $false
-    $lblStatus.Location = New-Object System.Drawing.Point(12, 8)
-    $lblStatus.Size = New-Object System.Drawing.Size(496, 36)
+    $lblStatus.Location = New-Object System.Drawing.Point(16, 10)
+    $lblStatus.Size = New-Object System.Drawing.Size(508, 32)
     $lblStatus.Text = 'Fresh Agent'
+    $lblStatus.Font = New-Object System.Drawing.Font('Segoe UI', 9.5, [System.Drawing.FontStyle]::Bold)
     $form.Controls.Add($lblStatus) | Out-Null
 
     $tabs = New-Object System.Windows.Forms.TabControl
-    $tabs.Location = New-Object System.Drawing.Point(12, 48)
-    $tabs.Size = New-Object System.Drawing.Size(496, 320)
+    $tabs.Location = New-Object System.Drawing.Point(16, 48)
+    $tabs.Size = New-Object System.Drawing.Size(508, 350)
     $form.Controls.Add($tabs) | Out-Null
 
     $ui = @{
@@ -323,63 +337,79 @@ function Show-FreshAgentDashboard {
 
     # --- Jeu ---
     $tabGame = New-FreshAgentDashboardTabPage -Title 'Jeu' -TabControl $tabs
-    $ui.ChkAuto = Add-FreshAgentDashboardCheck -Parent $tabGame -Text 'Detection auto (suggestions kill)' -X 8 -Y 12 -ActionKey 'ToggleAutoSuggest'
-    $ui.ChkMon = Add-FreshAgentDashboardCheck -Parent $tabGame -Text 'Surveillance CPU / alertes' -X 8 -Y 40 -ActionKey 'ToggleMonitor'
-    Add-FreshAgentDashboardButton -Parent $tabGame -Text 'Mode jeu (liste + launchers)' -X 8 -Y 80 -W 240 -ActionKey 'GameModeKill' | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabGame -Text 'Fermer launchers inactifs' -X 8 -Y 118 -W 240 -ActionKey 'IdleLaunchers' | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabGame -Text 'Tuer suggestions en attente' -X 8 -Y 156 -W 240 -ActionKey 'PendingKill' | Out-Null
+    $ui.ChkAuto = Add-FreshAgentDashboardCheck -Parent $tabGame -Text 'Detection auto (suggestions kill)' -X 12 -Y 16 -ActionKey 'ToggleAutoSuggest'
+    $ui.ChkMon = Add-FreshAgentDashboardCheck -Parent $tabGame -Text 'Surveillance CPU / alertes' -X 12 -Y 48 -ActionKey 'ToggleMonitor'
+    Add-FreshAgentDashboardButton -Parent $tabGame -Text 'Mode jeu (liste + launchers)' -X 12 -Y 96 -W 460 -H 36 -ActionKey 'GameModeKill' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabGame -Text 'Fermer launchers inactifs' -X 12 -Y 142 -W 460 -H 36 -ActionKey 'IdleLaunchers' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabGame -Text 'Tuer suggestions en attente' -X 12 -Y 188 -W 460 -H 36 -ActionKey 'PendingKill' | Out-Null
 
     # --- Skills & profils ---
     $tabSkills = New-FreshAgentDashboardTabPage -Title 'Skills' -TabControl $tabs
-    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Profil Jeu' -X 8 -Y 12 -W 150 -ActionKey 'ProfileGame' | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Profil Travail' -X 168 -Y 12 -W 150 -ActionKey 'ProfileWork' | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Profil Clean' -X 328 -Y 12 -W 150 -ActionKey 'ProfileClean' | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Etat systeme' -X 8 -Y 56 -W 220 -ActionKey 'SkillHealth' | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Session jeu (DND)' -X 8 -Y 94 -W 220 -ActionKey 'SkillGameSession' | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Fin session jeu' -X 8 -Y 132 -W 220 -ActionKey 'SkillEndGame' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Profil Jeu' -X 12 -Y 16 -W 148 -H 34 -ActionKey 'ProfileGame' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Profil Travail' -X 168 -Y 16 -W 148 -H 34 -ActionKey 'ProfileWork' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Profil Clean' -X 324 -Y 16 -W 148 -H 34 -ActionKey 'ProfileClean' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Etat systeme' -X 12 -Y 68 -W 460 -H 34 -ActionKey 'SkillHealth' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Session jeu (DND)' -X 12 -Y 112 -W 226 -H 34 -ActionKey 'SkillGameSession' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabSkills -Text 'Fin session jeu' -X 246 -Y 112 -W 226 -H 34 -ActionKey 'SkillEndGame' | Out-Null
 
-    # --- IA ---
+    # --- IA / Voix ---
     $tabAi = New-FreshAgentDashboardTabPage -Title 'IA' -TabControl $tabs
-    $ui.ChkAi = Add-FreshAgentDashboardCheck -Parent $tabAi -Text 'Intelligence artificielle (Ollama)' -X 8 -Y 12 -ActionKey 'SetAiEnabled'
-    $ui.ChkRag = Add-FreshAgentDashboardCheck -Parent $tabAi -Text 'RAG guides Fresh Windows' -X 8 -Y 40 -ActionKey 'SetRagEnabled'
+    $ui.LblAiNotice = New-Object System.Windows.Forms.Label
+    $ui.LblAiNotice.AutoSize = $false
+    $ui.LblAiNotice.Location = New-Object System.Drawing.Point(12, 12)
+    $ui.LblAiNotice.Size = New-Object System.Drawing.Size(460, 48)
+    $ui.LblAiNotice.Text = 'Voix / IA : chantier en reconstruction. Core mode jeu et skills restent actifs.'
+    $tabAi.Controls.Add($ui.LblAiNotice) | Out-Null
+    $ui.ChkAi = Add-FreshAgentDashboardCheck -Parent $tabAi -Text 'Intelligence artificielle (Ollama)' -X 12 -Y 68 -ActionKey 'SetAiEnabled'
+    $ui.ChkRag = Add-FreshAgentDashboardCheck -Parent $tabAi -Text 'RAG guides Fresh Windows' -X 12 -Y 100 -ActionKey 'SetRagEnabled'
     $ui.LblOllama = New-Object System.Windows.Forms.Label
     $ui.LblOllama.AutoSize = $true
-    $ui.LblOllama.Location = New-Object System.Drawing.Point(8, 72)
+    $ui.LblOllama.Location = New-Object System.Drawing.Point(12, 136)
     $ui.LblOllama.Text = 'Ollama : ?'
     $tabAi.Controls.Add($ui.LblOllama) | Out-Null
     $ui.LblStt = New-Object System.Windows.Forms.Label
     $ui.LblStt.AutoSize = $true
-    $ui.LblStt.Location = New-Object System.Drawing.Point(8, 92)
-    $ui.LblStt.Text = 'STT : ?'
+    $ui.LblStt.Location = New-Object System.Drawing.Point(12, 158)
+    $ui.LblStt.Text = 'STT : off'
     $tabAi.Controls.Add($ui.LblStt) | Out-Null
 
-    Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Demarrer Ollama' -X 8 -Y 120 -W 160 -ActionKey 'StartOllama' | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Telecharger modele' -X 176 -Y 120 -W 160 -ActionKey 'EnsureModel' | Out-Null
-    $ui.BtnListen = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Ecouter (STT)' -X 8 -Y 158 -W 160 -ActionKey 'VoiceListen'
-    Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Cycle TTS' -X 176 -Y 158 -W 160 -ActionKey 'TtsCycle' | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Tester IA (prompt)' -X 8 -Y 196 -W 160 -ActionKey 'AiTest' | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Historique IA' -X 176 -Y 196 -W 160 -ActionKey 'AiHistory' | Out-Null
+    $ui.BtnListen = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Ecoute ON' -X 12 -Y 190 -W 226 -H 34 -ActionKey 'VoiceListenOn'
+    $ui.BtnListenOff = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Ecoute OFF' -X 246 -Y 190 -W 226 -H 34 -ActionKey 'VoiceListenOff'
+    $ui.BtnStartOllama = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Demarrer Ollama' -X 12 -Y 234 -W 148 -H 32 -ActionKey 'StartOllama'
+    $ui.BtnEnsureModel = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Modele' -X 168 -Y 234 -W 100 -H 32 -ActionKey 'EnsureModel'
+    $ui.BtnTtsCycle = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Cycle TTS' -X 276 -Y 234 -W 100 -H 32 -ActionKey 'TtsCycle'
+    $ui.BtnAiTest = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Tester IA' -X 12 -Y 276 -W 226 -H 32 -ActionKey 'AiTest'
+    $ui.BtnAiHistory = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Historique' -X 246 -Y 276 -W 226 -H 32 -ActionKey 'AiHistory'
 
     # --- Fresh Windows ---
     $tabFw = New-FreshAgentDashboardTabPage -Title 'Fresh Windows' -TabControl $tabs
-    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'Menu interactif (admin)' -X 8 -Y 12 -W 240 -ActionKey 'FwMenu' | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'Maintenance WinUtil' -X 8 -Y 50 -W 240 -ActionKey 'FwMaintenance' | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'Mode jeu (launcher admin)' -X 8 -Y 88 -W 240 -ActionKey 'FwGameMode' | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'Mettre a jour scripts locaux' -X 8 -Y 126 -W 240 -ActionKey 'SyncScripts' | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'PowerShell (sans admin)' -X 8 -Y 164 -W 240 -ActionKey 'OpenPowerShell' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'Menu interactif (admin)' -X 12 -Y 16 -W 460 -H 36 -ActionKey 'FwMenu' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'Maintenance WinUtil' -X 12 -Y 62 -W 460 -H 36 -ActionKey 'FwMaintenance' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'Mode jeu (launcher admin)' -X 12 -Y 108 -W 460 -H 36 -ActionKey 'FwGameMode' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'Mettre a jour scripts locaux' -X 12 -Y 154 -W 460 -H 36 -ActionKey 'SyncScripts' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabFw -Text 'PowerShell (sans admin)' -X 12 -Y 200 -W 460 -H 36 -ActionKey 'OpenPowerShell' | Out-Null
 
+    $script:FreshAgentDashboardForm = $form
     $btnClose = New-Object System.Windows.Forms.Button
     $btnClose.Text = 'Fermer'
-    $btnClose.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-    $btnClose.Location = New-Object System.Drawing.Point(332, 378)
-    $btnClose.Size = New-Object System.Drawing.Size(84, 28)
+    $btnClose.Location = New-Object System.Drawing.Point(348, 412)
+    $btnClose.Size = New-Object System.Drawing.Size(84, 30)
+    $btnClose.Add_Click({
+            $f = $script:FreshAgentDashboardForm
+            if ($f -and -not $f.IsDisposed) { $f.Hide() }
+        })
     $form.Controls.Add($btnClose) | Out-Null
-    $form.CancelButton = $btnClose
+    $form.Add_FormClosing({
+            param($sender, $e)
+            if ($script:WatchAgentExitRequested) { return }
+            $e.Cancel = $true
+            if ($sender -and -not $sender.IsDisposed) { $sender.Hide() }
+        })
 
     $btnQuit = New-Object System.Windows.Forms.Button
     $btnQuit.Text = 'Quitter agent'
-    $btnQuit.Location = New-Object System.Drawing.Point(424, 378)
-    $btnQuit.Size = New-Object System.Drawing.Size(84, 28)
+    $btnQuit.Location = New-Object System.Drawing.Point(440, 412)
+    $btnQuit.Size = New-Object System.Drawing.Size(84, 30)
     $btnQuit.Tag = 'QuitAgent'
     $btnQuit.Add_Click({
             param($sender, $e)

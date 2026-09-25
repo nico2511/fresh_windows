@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 <#
-  TTS Fresh Agent : Windows SAPI (defaut) ou Piper (opt-in).
+  TTS Fresh Agent : edge-tts (defaut), Windows SAPI (secours), Piper (legacy).
 #>
 
 function Get-FreshAgentTtsProvider {
@@ -23,6 +23,23 @@ function Test-FreshAgentShouldSpeakSkillResults {
     return [bool]$AiConfig.tts.speakSkillResults
 }
 
+function Find-FreshAgentPythonExe {
+    foreach ($c in @(
+            (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python312\python.exe'),
+            (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python311\python.exe'),
+            (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python310\python.exe'),
+            'python'
+        )) {
+        if ($c -eq 'python') {
+            $cmd = Get-Command python -ErrorAction SilentlyContinue
+            if ($cmd) { return $cmd.Source }
+            continue
+        }
+        if (Test-Path -LiteralPath $c) { return $c }
+    }
+    return $null
+}
+
 function Invoke-FreshAgentWindowsTts {
     param(
         [Parameter(Mandatory)]
@@ -37,12 +54,16 @@ function Invoke-FreshAgentWindowsTts {
         if ($AiConfig -and $AiConfig.tts -and $AiConfig.tts.windows -and $AiConfig.tts.windows.culture) {
             $culture = [string]$AiConfig.tts.windows.culture
         }
-        try {
-            $synth.SelectVoiceByHints([System.Speech.Synthesis.VoiceGender]::Neutral, `
-                [System.Speech.Synthesis.VoiceAge]::Adult, 0, `
-                [System.Globalization.CultureInfo]::GetCultureInfo($culture))
+        $voiceName = $null
+        $enabled = @($synth.GetInstalledVoices() | Where-Object { $_.Enabled })
+        $fr = @($enabled | Where-Object { $_.VoiceInfo.Culture -and $_.VoiceInfo.Culture.Name -like 'fr*' })
+        $pool = if ($fr.Count -gt 0) { $fr } else { $enabled }
+        $fem = @($pool | Where-Object { $_.VoiceInfo.Gender -eq [System.Speech.Synthesis.VoiceGender]::Female })
+        $pick = if ($fem.Count -gt 0) { $fem[0] } elseif ($pool.Count -gt 0) { $pool[0] } else { $null }
+        if ($pick) {
+            $voiceName = [string]$pick.VoiceInfo.Name
+            $synth.SelectVoice($voiceName)
         }
-        catch { }
         if ($AiConfig -and $AiConfig.tts -and $AiConfig.tts.windows) {
             if ($null -ne $AiConfig.tts.windows.rate) {
                 $synth.Rate = [int]$AiConfig.tts.windows.rate
@@ -51,11 +72,85 @@ function Invoke-FreshAgentWindowsTts {
                 $synth.Volume = [int]$AiConfig.tts.windows.volume
             }
         }
-        $synth.SpeakAsync($Text) | Out-Null
+        $synth.Speak($Text)
         return $true
     }
     finally {
-        $synth.Dispose()
+        try { $synth.Dispose() } catch { }
+    }
+}
+
+function Invoke-FreshAgentEdgeTts {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Text,
+        $AiConfig,
+        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
+    )
+    $py = Find-FreshAgentPythonExe
+    if (-not $py) { return $false }
+
+    $voice = 'fr-FR-DeniseNeural'
+    $rate = '+0%'
+    $volume = '+0%'
+    if ($AiConfig -and $AiConfig.tts -and $AiConfig.tts.edge) {
+        if ($AiConfig.tts.edge.voice) { $voice = [string]$AiConfig.tts.edge.voice }
+        if ($AiConfig.tts.edge.rate) { $rate = [string]$AiConfig.tts.edge.rate }
+        if ($AiConfig.tts.edge.volume) { $volume = [string]$AiConfig.tts.edge.volume }
+    }
+
+    $outDir = Join-Path $FreshAppData 'tts-cache'
+    New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+    $mp3 = Join-Path $outDir ('edge-{0}.mp3' -f ([guid]::NewGuid().ToString('N')))
+
+    # Ensure edge-tts quietly (once per process)
+    if (-not $script:FreshAgentEdgeTtsReady) {
+        $check = & $py -c "import edge_tts" 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            & $py -m pip install --user --quiet edge-tts 2>&1 | Out-Null
+        }
+        $script:FreshAgentEdgeTtsReady = $true
+    }
+
+    $code = @"
+import asyncio, edge_tts, sys
+async def main():
+    communicate = edge_tts.Communicate(sys.argv[1], sys.argv[2], rate=sys.argv[3], volume=sys.argv[4])
+    await communicate.save(sys.argv[5])
+asyncio.run(main())
+"@
+    $pyFile = Join-Path $outDir 'edge_speak.py'
+    Set-Content -LiteralPath $pyFile -Value $code -Encoding UTF8
+    $p = Start-Process -FilePath $py -ArgumentList @($pyFile, $Text, $voice, $rate, $volume, $mp3) -Wait -PassThru -WindowStyle Hidden
+    if ($p.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $mp3)) {
+        return $false
+    }
+    try {
+        Add-Type -AssemblyName presentationCore -ErrorAction SilentlyContinue
+        $player = New-Object System.Windows.Media.MediaPlayer
+        $uri = [uri]::new((Resolve-Path -LiteralPath $mp3).Path)
+        $player.Open($uri)
+        $player.Play()
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        while ($sw.ElapsedMilliseconds -lt 120000) {
+            Start-Sleep -Milliseconds 200
+            if ($player.NaturalDuration.HasTimeSpan -and $player.Position -ge $player.NaturalDuration.TimeSpan) { break }
+            if ($sw.ElapsedMilliseconds -gt 2000 -and $player.NaturalDuration.HasTimeSpan -eq $false) { break }
+        }
+        $player.Close()
+        return $true
+    }
+    catch {
+        # Fallback: start default associated player briefly
+        try {
+            Start-Process -FilePath $mp3 -WindowStyle Hidden | Out-Null
+            Start-Sleep -Seconds 2
+            return $true
+        }
+        catch { return $false }
+    }
+    finally {
+        try { Remove-Item -LiteralPath $mp3 -Force -ErrorAction SilentlyContinue } catch { }
     }
 }
 
@@ -68,6 +163,7 @@ function Invoke-FreshAgentPiperTts {
     )
     $piper = $AiConfig.tts.piper
     if (-not $piper) { return $false }
+    if (-not (Get-Command Expand-FreshAgentPath -ErrorAction SilentlyContinue)) { return $false }
     $exe = Expand-FreshAgentPath -Path ([string]$piper.exe)
     $model = Expand-FreshAgentPath -Path ([string]$piper.model)
     if (-not (Test-Path -LiteralPath $exe) -or -not (Test-Path -LiteralPath $model)) {
@@ -76,8 +172,6 @@ function Invoke-FreshAgentPiperTts {
     $outDir = Join-Path $FreshAppData 'tts-cache'
     New-Item -ItemType Directory -Path $outDir -Force | Out-Null
     $wav = Join-Path $outDir ('out-{0}.wav' -f ([guid]::NewGuid().ToString('N')))
-    $inFile = Join-Path $outDir 'piper-in.txt'
-    Set-Content -LiteralPath $inFile -Value $Text -Encoding UTF8
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $exe
@@ -97,12 +191,12 @@ function Invoke-FreshAgentPiperTts {
     try {
         $player = New-Object System.Media.SoundPlayer($wav)
         $player.PlaySync()
+        return $true
     }
     catch { return $false }
     finally {
         try { Remove-Item -LiteralPath $wav -Force -ErrorAction SilentlyContinue } catch { }
     }
-    return $true
 }
 
 function Invoke-FreshAgentSpeak {
@@ -113,23 +207,25 @@ function Invoke-FreshAgentSpeak {
         [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
     )
     if ([string]::IsNullOrWhiteSpace($Text)) { return $false }
-    $provider = Get-FreshAgentTtsProvider -AiConfig $AiConfig
-    if ($provider -eq 'off') { return $false }
-
     $spoken = $Text
     if ($spoken.Length -gt 320) {
         $spoken = $spoken.Substring(0, 317) + '...'
     }
-
-    if ($provider -eq 'windows') {
-        return (Invoke-FreshAgentWindowsTts -Text $spoken -AiConfig $AiConfig)
+    $provider = Get-FreshAgentTtsProvider -AiConfig $AiConfig
+    switch ($provider) {
+        'edge' {
+            if (Invoke-FreshAgentEdgeTts -Text $spoken -AiConfig $AiConfig -FreshAppData $FreshAppData) { return $true }
+            return (Invoke-FreshAgentWindowsTts -Text $spoken -AiConfig $AiConfig)
+        }
+        'windows' {
+            return (Invoke-FreshAgentWindowsTts -Text $spoken -AiConfig $AiConfig)
+        }
+        'piper' {
+            if (Invoke-FreshAgentPiperTts -Text $spoken -AiConfig $AiConfig -FreshAppData $FreshAppData) { return $true }
+            return (Invoke-FreshAgentWindowsTts -Text $spoken -AiConfig $AiConfig)
+        }
+        default { return $false }
     }
-    if ($provider -eq 'piper') {
-        $ok = Invoke-FreshAgentPiperTts -Text $spoken -AiConfig $AiConfig -FreshAppData $FreshAppData
-        if ($ok) { return $true }
-        return (Invoke-FreshAgentWindowsTts -Text $spoken -AiConfig $AiConfig)
-    }
-    return $false
 }
 
 function Invoke-FreshAgentSpeakSkillResult {

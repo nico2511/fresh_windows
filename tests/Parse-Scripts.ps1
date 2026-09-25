@@ -4,6 +4,8 @@ $files = @(
     'scripts\Invoke-GameModeKill.ps1',
     'scripts\GameMode-WatchAgent.ps1',
     'scripts\Sync-FreshWindowsAgent.ps1',
+    'scripts\Start-FreshAgentDev.ps1',
+    'scripts\Stop-FreshAgentDev.ps1',
     'scripts\lib\Launcher-WinUtil.ps1',
     'scripts\lib\Launcher-GpuMenus.ps1',
     'scripts\lib\Launcher-Tasks.ps1',
@@ -13,9 +15,15 @@ $files = @(
     'scripts\lib\FreshAgent-SkillsEngine.ps1',
     'scripts\lib\FreshAgent-SkillHandlers.ps1',
     'scripts\lib\FreshAgent-GameSession.ps1',
+    'scripts\lib\FreshAgent-Overlay.ps1',
+    'scripts\lib\FreshAgent-VoiceRouter.ps1',
+    'scripts\lib\FreshAgent-IdleSuggest.ps1',
+    'scripts\lib\FreshAgent-Dashboard.ps1',
     'scripts\ai\Ollama-Manager.ps1',
     'scripts\ai\Windows-Stt.ps1',
-    'scripts\ai\FreshAgent-OllamaBridge.ps1'
+    'scripts\ai\FreshAgent-OllamaBridge.ps1',
+    'scripts\ai\FreshAgent-Tts.ps1',
+    'scripts\ai\FreshAgent-VoiceWorker.ps1'
 )
 $bad = 0
 foreach ($f in $files) {
