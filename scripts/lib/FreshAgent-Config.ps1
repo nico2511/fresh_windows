@@ -326,7 +326,7 @@ function Import-FreshAgentFileIntoScriptScope {
     # Dot depuis une fonction ne survit pas au return. function script: reste dans le script agent.
     $raw = [System.IO.File]::ReadAllText($LiteralPath)
     $raw = [regex]::Replace($raw, '(?m)^(\s*)#Requires[^\r\n]*', '${1}# requires stripped')
-    $raw = [regex]::Replace($raw, '(?m)^(\s*)function\s+(?!script:)', '${1}function script:')
+    $raw = [regex]::Replace($raw, '(?m)^(\s*)function\s+(?!script:)([A-Za-z_][\w-]*)', '${1}function script:${2}')
     Invoke-Expression $raw
 }
 

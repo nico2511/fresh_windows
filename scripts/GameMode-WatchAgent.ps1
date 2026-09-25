@@ -19,6 +19,26 @@ function Write-WatchLog {
     } catch { }
 }
 
+# FreshAppData AVANT le mutex (sinon Split-Path null).
+$RepoRef = if ($env:FRESH_WIN_REF) { $env:FRESH_WIN_REF.Trim() } else { 'main' }
+$RepoRawRoot = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef"
+if ($env:FRESH_WIN_APPDATA -and -not [string]::IsNullOrWhiteSpace($env:FRESH_WIN_APPDATA)) {
+    $FreshAppData = $env:FRESH_WIN_APPDATA.Trim()
+}
+elseif ($PSScriptRoot -and ((Split-Path $PSScriptRoot -Leaf) -match 'FreshWindows')) {
+    $FreshAppData = $PSScriptRoot
+}
+else {
+    $FreshAppData = Join-Path $env:LOCALAPPDATA 'FreshWindows'
+}
+$WatchLog = Join-Path $FreshAppData 'watch-agent.log'
+$script:RepoRef = $RepoRef
+$script:FreshAppData = $FreshAppData
+$script:RepoRawRoot = $RepoRawRoot
+$UserSettingsPath = Join-Path $FreshAppData 'watch-agent-user.json'
+$WatchConfigUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/configs/game-mode-watch.json"
+try { New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null } catch { }
+
 function Set-WatchScriptUtf8Bom {
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) { return }
@@ -195,7 +215,12 @@ function Get-FreshWatchAgentPeerProcesses {
 }
 
 function Enter-FreshWatchAgentSingleInstance {
-    $leaf = Split-Path $script:FreshAppData -Leaf
+    $appData = $script:FreshAppData
+    if ([string]::IsNullOrWhiteSpace($appData)) {
+        $appData = Join-Path $env:LOCALAPPDATA 'FreshWindows'
+        $script:FreshAppData = $appData
+    }
+    $leaf = Split-Path $appData -Leaf
     if ([string]::IsNullOrWhiteSpace($leaf)) { $leaf = 'FreshWindows' }
     $mutexName = "Global\FreshWindows-WatchAgent-$leaf"
     $script:WatchMutex = $null
@@ -296,23 +321,79 @@ try {
         [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 } catch { }
 
-$RepoRef = if ($env:FRESH_WIN_REF) { $env:FRESH_WIN_REF.Trim() } else { 'main' }
-$RepoRawRoot = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef"
-if ($env:FRESH_WIN_APPDATA -and -not [string]::IsNullOrWhiteSpace($env:FRESH_WIN_APPDATA)) {
-    $FreshAppData = $env:FRESH_WIN_APPDATA.Trim()
+# RepoRef / FreshAppData deja initialises en tete de script (avant mutex).
+Write-WatchLog ("AppData={0} Ref={1}" -f $script:FreshAppData, $script:RepoRef)
+
+function Ensure-WatchAgentTrayIconFile {
+    param([string]$FreshAppData = $(if ($script:FreshAppData) { $script:FreshAppData } else { Join-Path $env:LOCALAPPDATA 'FreshWindows' }))
+    $iconPath = Join-Path $FreshAppData 'fresh-windows.ico'
+    if ((Test-Path -LiteralPath $iconPath) -and ((Get-Item -LiteralPath $iconPath).Length -gt 1000)) {
+        return $iconPath
+    }
+    $candidates = @(
+        (Join-Path $env:LOCALAPPDATA 'FreshWindows\fresh-windows.ico'),
+        (Join-Path $PSScriptRoot '..\assets\fresh-windows.ico')
+    )
+    foreach ($c in $candidates) {
+        if ($c -and (Test-Path -LiteralPath $c) -and ((Get-Item -LiteralPath $c).Length -gt 1000)) {
+            try {
+                Copy-Item -LiteralPath $c -Destination $iconPath -Force
+                Write-WatchLog ("Icone copiee depuis {0}" -f $c)
+                return $iconPath
+            }
+            catch { }
+        }
+    }
+    $ref = if ($script:RepoRef) { $script:RepoRef } else { 'main' }
+    $url = "https://raw.githubusercontent.com/nico2511/fresh_windows/$ref/assets/fresh-windows.ico"
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $iconPath -UseBasicParsing -TimeoutSec 20
+        if ((Test-Path -LiteralPath $iconPath) -and ((Get-Item -LiteralPath $iconPath).Length -gt 1000)) {
+            Write-WatchLog ("Icone telechargee ({0} octets)" -f (Get-Item -LiteralPath $iconPath).Length)
+            return $iconPath
+        }
+    }
+    catch {
+        Write-WatchLog ("Icone download: {0}" -f $_.Exception.Message)
+    }
+    return $null
 }
-elseif ($PSScriptRoot -and ((Split-Path $PSScriptRoot -Leaf) -match 'FreshWindows')) {
-    $FreshAppData = $PSScriptRoot
+
+function Set-WatchAgentTrayIcon {
+    if (-not $script:NotifyIcon) { return }
+    $iconPath = Ensure-WatchAgentTrayIconFile
+    try {
+        if ($iconPath) {
+            $script:NotifyIcon.Icon = New-Object System.Drawing.Icon($iconPath)
+            Write-WatchLog ("Tray icon file: {0}" -f $iconPath)
+        }
+        else {
+            # Secours visible: icone Information (pas Application, trop generique)
+            $script:NotifyIcon.Icon = [System.Drawing.SystemIcons]::Information
+            Write-WatchLog 'Tray icon: SystemIcons.Information (pas de .ico)'
+        }
+    }
+    catch {
+        Write-WatchLog ("Tray icon set: {0}" -f $_.Exception.Message)
+        try { $script:NotifyIcon.Icon = [System.Drawing.SystemIcons]::Information } catch { }
+    }
 }
-else {
-    $FreshAppData = Join-Path $env:LOCALAPPDATA 'FreshWindows'
+
+function Refresh-WatchAgentTrayVisibility {
+    if (-not $script:NotifyIcon) { return }
+    try {
+        Set-WatchAgentTrayIcon
+        $script:NotifyIcon.Text = 'Fresh Agent'
+        $script:NotifyIcon.Visible = $false
+        [System.Windows.Forms.Application]::DoEvents()
+        $script:NotifyIcon.Visible = $true
+        [System.Windows.Forms.Application]::DoEvents()
+        Write-WatchLog ("Tray Visible={0} HasIcon={1}" -f $script:NotifyIcon.Visible, ($null -ne $script:NotifyIcon.Icon))
+    }
+    catch {
+        Write-WatchLog ("Tray refresh: {0}" -f $_.Exception.Message)
+    }
 }
-$WatchLog = Join-Path $FreshAppData 'watch-agent.log'
-$script:RepoRef = $RepoRef
-$script:FreshAppData = $FreshAppData
-$script:RepoRawRoot = $RepoRawRoot
-$UserSettingsPath = Join-Path $FreshAppData 'watch-agent-user.json'
-$WatchConfigUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/configs/game-mode-watch.json"
 
 function Initialize-WatchAgentSystrayEarly {
     if (Test-WatchAgentSystrayLive) { return }
@@ -320,11 +401,12 @@ function Initialize-WatchAgentSystrayEarly {
     Write-WatchLog 'Init UI (early)'
     $script:HiddenForm = New-Object System.Windows.Forms.Form
     $script:HiddenForm.Text = 'Fresh Windows Watch'
-    $script:HiddenForm.WindowState = 'Minimized'
+    # Pas Opacity=0: certains builds Win11 n'accrochent pas le NotifyIcon.
     $script:HiddenForm.ShowInTaskbar = $false
     $script:HiddenForm.FormBorderStyle = 'FixedToolWindow'
     $script:HiddenForm.Size = New-Object System.Drawing.Size(1, 1)
-    $script:HiddenForm.Opacity = 0
+    $script:HiddenForm.StartPosition = 'Manual'
+    $script:HiddenForm.Location = New-Object System.Drawing.Point(-32000, -32000)
     $script:HiddenForm.Add_FormClosed((Register-WatchUiHandler {
             if ($script:NotifyIcon) {
                 $script:NotifyIcon.Visible = $false
@@ -336,19 +418,7 @@ function Initialize-WatchAgentSystrayEarly {
         }))
 
     $script:NotifyIcon = New-Object System.Windows.Forms.NotifyIcon
-    $iconPath = Join-Path $script:FreshAppData 'fresh-windows.ico'
-    try {
-        if (Test-Path -LiteralPath $iconPath) {
-            $script:NotifyIcon.Icon = New-Object System.Drawing.Icon($iconPath)
-        }
-        else {
-            $script:NotifyIcon.Icon = [System.Drawing.SystemIcons]::Application
-        }
-    }
-    catch {
-        Write-WatchLog ("Icone early: {0}" -f $_.Exception.Message)
-        $script:NotifyIcon.Icon = [System.Drawing.SystemIcons]::Application
-    }
+    Set-WatchAgentTrayIcon
     $script:NotifyIcon.Text = 'Fresh Agent (demarrage...)'
     $script:WatchEarlyContextMenu = New-Object System.Windows.Forms.ContextMenuStrip
     $miLoadEarly = $script:WatchEarlyContextMenu.Items.Add('Chargement des modules...')
@@ -701,7 +771,7 @@ function Invoke-WatchAgentDotModuleAtScript {
         else {
             $raw = [System.IO.File]::ReadAllText($path)
             $raw = [regex]::Replace($raw, '(?m)^(\s*)#Requires[^\r\n]*', '${1}# requires stripped')
-            $raw = [regex]::Replace($raw, '(?m)^(\s*)function\s+(?!script:)', '${1}function script:')
+            $raw = [regex]::Replace($raw, '(?m)^(\s*)function\s+(?!script:)([A-Za-z_][\w-]*)', '${1}function script:${2}')
             Invoke-Expression $raw
         }
         return $true
@@ -728,7 +798,7 @@ function Ensure-FreshAgentSttLoaded {
         else {
             $raw = [System.IO.File]::ReadAllText($path)
             $raw = [regex]::Replace($raw, '(?m)^(\s*)#Requires[^\r\n]*', '${1}# requires stripped')
-            $raw = [regex]::Replace($raw, '(?m)^(\s*)function\s+(?!script:)', '${1}function script:')
+            $raw = [regex]::Replace($raw, '(?m)^(\s*)function\s+(?!script:)([A-Za-z_][\w-]*)', '${1}function script:${2}')
             Invoke-Expression $raw
         }
         Write-WatchLog 'STT module force-loaded'
@@ -2650,7 +2720,13 @@ function Start-WatchAgentUiBootstrap {
     try {
         Install-WatchAgentFullTrayMenu
         Start-WatchAgentTimers
-        Show-Balloon -Title 'Fresh Windows' -Text 'Agent actif — clic gauche = panneau, clic droit = menu.' -Icon Info
+        Refresh-WatchAgentTrayVisibility
+        if (Get-Command Show-FreshAgentOverlay -ErrorAction SilentlyContinue) {
+            Show-FreshAgentOverlay -Title 'Fresh Agent' -Text 'Actif — icone dans la zone de notification (chevron ^ si masquee).' -Level Info -FadeMs 6000
+        }
+        else {
+            Show-Balloon -Title 'Fresh Agent' -Text 'Agent actif — regardez la zone de notification (icones cachees ^).' -Icon Info
+        }
         Write-WatchLog 'UI bootstrap OK'
     }
     catch {

@@ -77,6 +77,29 @@ if (Test-Path -LiteralPath $configsSrc) {
     Write-Host '-> configs\*' -ForegroundColor DarkGray
 }
 
+# Icone systray (absente = icone invisible / generique)
+$iconDst = Join-Path $FreshAppData 'fresh-windows.ico'
+$iconSrc = Join-Path $RepoRoot 'assets\fresh-windows.ico'
+$iconProd = Join-Path $env:LOCALAPPDATA 'FreshWindows\fresh-windows.ico'
+if (Test-Path -LiteralPath $iconSrc) {
+    Copy-Item -LiteralPath $iconSrc -Destination $iconDst -Force
+    Write-Host '-> fresh-windows.ico (repo)' -ForegroundColor DarkGray
+}
+elseif (Test-Path -LiteralPath $iconProd) {
+    Copy-Item -LiteralPath $iconProd -Destination $iconDst -Force
+    Write-Host '-> fresh-windows.ico (prod AppData)' -ForegroundColor DarkGray
+}
+else {
+    try {
+        Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/nico2511/fresh_windows/main/assets/fresh-windows.ico' `
+            -OutFile $iconDst -UseBasicParsing -TimeoutSec 20
+        Write-Host '-> fresh-windows.ico (GitHub)' -ForegroundColor DarkGray
+    }
+    catch {
+        Write-Host '!! fresh-windows.ico manquant' -ForegroundColor Yellow
+    }
+}
+
 $configLib = Join-Path $FreshAppData 'lib\FreshAgent-Config.ps1'
 if (-not (Test-Path -LiteralPath $configLib)) {
     throw 'FreshAgent-Config.ps1 manquant apres copie.'

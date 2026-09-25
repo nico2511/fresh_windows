@@ -199,7 +199,7 @@ function Invoke-FreshAgentAiTurn {
             if ($fallback -and $round -lt ($maxRounds - 1)) {
                 $toolCalls = @(
                     @{
-                        function = @{
+                        'function' = @{
                             name      = $fallback.SkillId
                             arguments = ($fallback.Parameters | ConvertTo-Json -Compress)
                         }
