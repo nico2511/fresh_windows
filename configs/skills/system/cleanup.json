@@ -1,0 +1,16 @@
+{
+  "id": "cleanup",
+  "title": "Nettoyage systeme",
+  "handler": "Invoke-SkillCleanup",
+  "menuVisible": true,
+  "requiresAdmin": false,
+  "requiresConfirm": true,
+  "parameters": {
+    "Temp": { "type": "boolean", "required": false },
+    "RecycleBin": { "type": "boolean", "required": false },
+    "WuCache": { "type": "boolean", "required": false },
+    "Dism": { "type": "boolean", "required": false },
+    "CreateRestorePoint": { "type": "boolean", "required": false }
+  },
+  "ai": { "expose": true, "description": "Nettoyage temp/corbeille/cache WU/DISM avec confirmation." }
+}

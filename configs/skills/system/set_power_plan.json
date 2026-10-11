@@ -1,0 +1,12 @@
+{
+  "id": "set_power_plan",
+  "title": "Plan d alimentation",
+  "handler": "Invoke-SkillSetPowerPlan",
+  "menuVisible": false,
+  "requiresAdmin": false,
+  "requiresConfirm": true,
+  "parameters": {
+    "Plan": { "type": "string", "required": true, "description": "balanced|high|power_saver|ultimate" }
+  },
+  "ai": { "expose": true, "description": "Change le plan d alimentation." }
+}

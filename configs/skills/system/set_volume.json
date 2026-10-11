@@ -1,0 +1,12 @@
+{
+  "id": "set_volume",
+  "title": "Regler le volume",
+  "handler": "Invoke-SkillSetVolume",
+  "menuVisible": false,
+  "requiresAdmin": false,
+  "requiresConfirm": false,
+  "parameters": {
+    "Action": { "type": "string", "required": true, "description": "up|down|mute|unmute" }
+  },
+  "ai": { "expose": true, "description": "Regle le volume (up/down/mute)." }
+}

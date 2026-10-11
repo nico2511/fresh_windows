@@ -1,0 +1,14 @@
+{
+  "id": "kill_process",
+  "title": "Fermer un processus",
+  "handler": "Invoke-SkillKillProcess",
+  "menuVisible": false,
+  "requiresAdmin": false,
+  "requiresConfirm": true,
+  "parameters": {
+    "ProcessId": { "type": "integer", "required": true, "description": "PID" },
+    "ProcessName": { "type": "string", "required": false, "description": "Nom pour verification anti-recycle" },
+    "MainModulePath": { "type": "string", "required": false, "description": "Chemin module optionnel" }
+  },
+  "ai": { "expose": true, "description": "Ferme un processus apres verification d identite." }
+}

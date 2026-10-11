@@ -13,15 +13,48 @@
       "aliases": ["discord"],
       "process": "Discord",
       "paths": [
-        "%LOCALAPPDATA%\\Discord\\Update.exe"
+        "%LOCALAPPDATA%\\Programs\\legcord\\Legcord.exe",
+        "%LOCALAPPDATA%\\legcord\\Legcord.exe",
+        "%LOCALAPPDATA%\\Programs\\Vesktop\\Vesktop.exe",
+        "%LOCALAPPDATA%\\Discord\\app-*"
       ],
-      "launchArgs": ["--processStart", "Discord.exe"]
+      "comment": "Prefere Legcord/Vesktop si presents; sinon Discord officiel. Alias user possible: 'alias discord vers legcord'."
     },
     "cursor": {
       "aliases": ["cursor", "ide"],
       "process": "Cursor",
       "paths": [
         "%LOCALAPPDATA%\\Programs\\cursor\\Cursor.exe"
+      ]
+    },
+    "cyberscribe": {
+      "aliases": ["cyberscribe", "cyber scribe", "scribe", "scribe note", "cyberscribenote"],
+      "process": "CyberScribe",
+      "paths": [
+        "%LOCALAPPDATA%\\Programs\\CyberScribe\\CyberScribe.exe"
+      ]
+    },
+    "battlefield6": {
+      "aliases": ["battlefield 6", "battlefield6", "bf6", "battlefield"],
+      "process": "bf6",
+      "paths": [
+        "D:\\Jeux\\Battlefield 6\\bf6.exe"
+      ]
+    },
+    "notepad": {
+      "aliases": [
+        "notepad",
+        "bloc notes",
+        "bloc-notes",
+        "bloc note",
+        "bloc net",
+        "notes",
+        "editeur de texte"
+      ],
+      "process": "notepad",
+      "paths": [
+        "%SystemRoot%\\System32\\notepad.exe",
+        "%WINDIR%\\notepad.exe"
       ]
     }
   }

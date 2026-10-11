@@ -80,14 +80,32 @@ function Get-InstalledBrowserPaths {
 function Build-FreshAgentMachineInventory {
     param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
     $games = Get-SteamInstalledGameNames
+    $startApps = @()
+    $installed = @()
+    try {
+        if (Get-Command Get-FreshAgentStartMenuCatalog -ErrorAction SilentlyContinue) {
+            $startApps = @(Get-FreshAgentStartMenuCatalog -ForceRefresh | Select-Object -ExpandProperty Name | Sort-Object -Unique)
+        }
+        if (Get-Command Get-FreshAgentInstalledAppCatalog -ErrorAction SilentlyContinue) {
+            $installed = @(Get-FreshAgentInstalledAppCatalog -ForceRefresh | Select-Object -ExpandProperty Name | Sort-Object -Unique)
+        }
+        if (Get-Command Ensure-FreshAgentCommonAppAliases -ErrorAction SilentlyContinue) {
+            Ensure-FreshAgentCommonAppAliases -FreshAppData $FreshAppData | Out-Null
+        }
+    }
+    catch { }
     $inv = [ordered]@{
-        schemaVersion = 1
-        generatedAt   = (Get-Date).ToString('o')
-        hostname      = $env:COMPUTERNAME
-        defaultBrowser = Get-DefaultBrowserName
-        browsers      = @(Get-InstalledBrowserPaths)
-        steamGames    = @($games)
-        steamGameCount = $games.Count
+        schemaVersion   = 1
+        generatedAt     = (Get-Date).ToString('o')
+        hostname        = $env:COMPUTERNAME
+        defaultBrowser  = Get-DefaultBrowserName
+        browsers        = @(Get-InstalledBrowserPaths)
+        steamGames      = @($games)
+        steamGameCount  = $games.Count
+        startMenuApps   = @($startApps)
+        startMenuCount  = $startApps.Count
+        installedApps   = @($installed)
+        installedCount  = $installed.Count
     }
     $path = Get-FreshAgentInventoryPath -FreshAppData $FreshAppData
     New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force | Out-Null
@@ -132,7 +150,7 @@ function Get-FreshAgentInventoryContextText {
 function Invoke-SkillRefreshInventory {
     param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
     $inv = Build-FreshAgentMachineInventory -FreshAppData $FreshAppData
-    $msg = "Inventaire MAJ: $($inv.steamGameCount) jeux Steam, navigateur $($inv.defaultBrowser)."
+    $msg = "Inventaire MAJ: $($inv.steamGameCount) jeux Steam, $($inv.startMenuCount) Start Menu, $($inv.installedCount) installes, navigateur $($inv.defaultBrowser)."
     return @{ ok = $true; message = $msg }
 }
 
@@ -142,7 +160,8 @@ function Invoke-SkillListMachineInventory {
     if (-not $inv) {
         return @{ ok = $false; message = 'Inventaire indisponible.' }
     }
-    $sample = @($inv.steamGames | Select-Object -First 15) -join ', '
-    $msg = "Navigateur: $($inv.defaultBrowser). Jeux Steam: $($inv.steamGameCount). Exemples: $sample"
+    $sample = @($inv.steamGames | Select-Object -First 10) -join ', '
+    $apps = @($inv.startMenuApps | Select-Object -First 8) -join ', '
+    $msg = "Navigateur: $($inv.defaultBrowser). Steam: $($inv.steamGameCount) ($sample). Start Menu: $($inv.startMenuCount) ($apps)."
     return @{ ok = $true; message = $msg }
 }

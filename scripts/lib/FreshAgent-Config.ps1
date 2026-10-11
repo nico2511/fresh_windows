@@ -128,11 +128,20 @@ function Get-FreshAgentAiConfig {
     }
     if (-not $defaults) {
         $defaults = @{
-            schemaVersion = 1
+            schemaVersion = 2
             enabled       = $false
-            ollama        = @{ baseUrl = 'http://127.0.0.1:11434'; defaultModel = 'qwen2.5:3b'; autoStart = $true }
-            stt           = @{ provider = 'cyberScribe'; listenSeconds = 20; culture = 'fr-FR'; route = 'auto'; minConfidence = 0.42 }
-            tts           = @{ provider = 'windows' }
+            ollama        = @{ baseUrl = 'http://127.0.0.1:11434'; defaultModel = 'qwen2.5:3b'; autoStart = $true; pullOnEnable = $true }
+            stt           = @{
+                provider       = 'voiceWorker'
+                listenSeconds  = 20
+                culture        = 'fr-FR'
+                route          = 'skills'
+                minConfidence  = 0.42
+                listenMode     = 'pushToTalk'
+                pushToTalk     = $true
+                pttHotkey      = 'Ctrl+Alt+Space'
+            }
+            tts           = @{ provider = 'edge' }
         } | ConvertTo-Json -Depth 6 | ConvertFrom-Json
     }
 
@@ -165,23 +174,173 @@ function Set-FreshAgentAiUserConfig {
     $merged | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $userPath -Encoding UTF8
 }
 
+function Get-FreshAgentSkillsAppsUserPath {
+    param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
+    return Join-Path $FreshAppData 'skills-apps.user.json'
+}
+
+function Get-FreshAgentSkillsAppsDefaults {
+    param(
+        [string]$RepoRef,
+        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
+    )
+    $path = Get-FreshAgentConfigFilePath -RelativePath 'configs/skills-apps.json' -FreshAppData $FreshAppData
+    if (Test-Path -LiteralPath $path) {
+        try { return Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json } catch { }
+    }
+    if ($RepoRef) {
+        $raw = Get-FreshAgentRepoRawRoot -RepoRef $RepoRef
+        $remote = Invoke-FreshAgentRestJson -Url "$raw/configs/skills-apps.json"
+        if ($remote) { return $remote }
+    }
+    return @{ schemaVersion = 1; apps = @{} }
+}
+
 function Get-FreshAgentSkillsAppsConfig {
     param(
         [string]$RepoRef,
         [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
     )
-    $local = Join-Path $FreshAppData 'skills-apps.user.json'
-    if (Test-Path -LiteralPath $local) {
-        return Get-Content -LiteralPath $local -Raw -Encoding UTF8 | ConvertFrom-Json
+    $defaults = Get-FreshAgentSkillsAppsDefaults -RepoRef $RepoRef -FreshAppData $FreshAppData
+    $userPath = Get-FreshAgentSkillsAppsUserPath -FreshAppData $FreshAppData
+    if (-not (Test-Path -LiteralPath $userPath)) {
+        return $defaults
     }
-    $raw = Get-FreshAgentRepoRawRoot -RepoRef $RepoRef
-    $remote = Invoke-FreshAgentRestJson -Url "$raw/configs/skills-apps.json"
-    if ($remote) { return $remote }
-    $path = Get-FreshAgentConfigFilePath -RelativePath 'configs/skills-apps.json' -FreshAppData $FreshAppData
-    if (Test-Path -LiteralPath $path) {
-        return Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+    try {
+        $user = Get-Content -LiteralPath $userPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        # Merge apps: user gagne; aliases = union
+        $baseApps = @{}
+        if ($defaults.apps) {
+            foreach ($p in $defaults.apps.PSObject.Properties) { $baseApps[$p.Name] = $p.Value }
+        }
+        if ($user.apps) {
+            foreach ($p in $user.apps.PSObject.Properties) {
+                $key = $p.Name
+                if (-not $baseApps.ContainsKey($key)) {
+                    $baseApps[$key] = $p.Value
+                    continue
+                }
+                $merged = Merge-FreshAgentJsonObject -Base $baseApps[$key] -Override $p.Value
+                # Union aliases
+                $aliases = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                foreach ($a in @($baseApps[$key].aliases)) { if ($a) { [void]$aliases.Add([string]$a) } }
+                foreach ($a in @($p.Value.aliases)) { if ($a) { [void]$aliases.Add([string]$a) } }
+                try {
+                    $merged | Add-Member -NotePropertyName aliases -NotePropertyValue @($aliases) -Force
+                }
+                catch {
+                    $merged = [pscustomobject]@{
+                        aliases = @($aliases)
+                        process = $(if ($merged.process) { $merged.process } elseif ($p.Value.process) { $p.Value.process } else { $null })
+                        paths   = $(if ($p.Value.paths) { @($p.Value.paths) } elseif ($merged.paths) { @($merged.paths) } else { @() })
+                    }
+                }
+                $baseApps[$key] = $merged
+            }
+        }
+        return [pscustomobject]@{
+            schemaVersion = 1
+            apps          = [pscustomobject]$baseApps
+        }
     }
-    return @{ apps = @{} }
+    catch {
+        return $defaults
+    }
+}
+
+function Set-FreshAgentAppAlias {
+    <#
+      Alias utilisateur: "discord" -> Legcord.exe (persiste dans skills-apps.user.json).
+    #>
+    param(
+        [Parameter(Mandatory)][string]$SpokenName,
+        [Parameter(Mandatory)][string]$TargetName,
+        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot),
+        [string]$ExePath = ''
+    )
+    $spoken = $SpokenName.Trim()
+    $target = $TargetName.Trim()
+    if (-not $spoken -or -not $target) {
+        return @{ ok = $false; message = 'Alias: noms manquants.' }
+    }
+    $key = ($spoken.ToLowerInvariant() -replace '[^a-z0-9]+', '')
+    if (-not $key) { $key = 'app' }
+
+    $exe = $ExePath
+    if (-not $exe -and (Get-Command Resolve-FreshAgentSpokenAppName -ErrorAction SilentlyContinue)) {
+        $resolved = Resolve-FreshAgentSpokenAppName -Name $target -FreshAppData $FreshAppData
+        $hits = @()
+        if (Get-Command Find-FreshAgentStartMenuApps -ErrorAction SilentlyContinue) {
+            $hits = @(Find-FreshAgentStartMenuApps -Name $resolved | Where-Object { $_.Score -ge 400 })
+        }
+        if ($hits.Count -eq 0 -and (Get-Command Find-FreshAgentInstalledApps -ErrorAction SilentlyContinue)) {
+            $hits = @(Find-FreshAgentInstalledApps -Name $resolved | Where-Object { $_.Score -ge 400 })
+        }
+        if ($hits.Count -gt 0) {
+            $exe = [string]$hits[0].Path
+            # .lnk -> keep lnk (Start-Process OK); prefer display name
+            $target = [string]$hits[0].Name
+        }
+    }
+    if (-not $exe -and (Get-Command Find-FreshAgentInstalledApps -ErrorAction SilentlyContinue)) {
+        $inst = @(Find-FreshAgentInstalledApps -Name $target)
+        if ($inst.Count -gt 0) { $exe = [string]$inst[0].Path; $target = [string]$inst[0].Name }
+    }
+
+    $userPath = Get-FreshAgentSkillsAppsUserPath -FreshAppData $FreshAppData
+    $user = @{ schemaVersion = 1; apps = @{} }
+    if (Test-Path -LiteralPath $userPath) {
+        try {
+            $raw = Get-Content -LiteralPath $userPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $appsHash = @{}
+            if ($raw.apps) {
+                foreach ($p in $raw.apps.PSObject.Properties) { $appsHash[$p.Name] = $p.Value }
+            }
+            $user = @{ schemaVersion = 1; apps = $appsHash }
+        }
+        catch { }
+    }
+
+    $aliases = [System.Collections.Generic.List[string]]::new()
+    foreach ($a in @($spoken, $target, $key)) {
+        if ($a -and -not $aliases.Contains($a)) { $aliases.Add($a) }
+    }
+    $existing = $null
+    if ($user.apps.ContainsKey($key)) { $existing = $user.apps[$key] }
+    if ($existing -and $existing.aliases) {
+        foreach ($a in @($existing.aliases)) {
+            if ($a -and -not $aliases.Contains([string]$a)) { $aliases.Add([string]$a) }
+        }
+    }
+    $paths = @()
+    if ($exe) { $paths = @($exe) }
+    elseif ($existing -and $existing.paths) { $paths = @($existing.paths) }
+
+    $user.apps[$key] = [pscustomobject]@{
+        aliases = @($aliases)
+        process = ($target -replace '\s+', '')
+        paths   = $paths
+        comment = "Alias: dit '$spoken' -> $target"
+    }
+
+    New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null
+    # Convert apps hashtable to object for JSON
+    $out = [ordered]@{
+        schemaVersion = 1
+        apps          = [pscustomobject]$user.apps
+    }
+    ($out | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $userPath -Encoding UTF8
+    # Invalidate caches that might hold old catalog
+    $script:FaStartMenuCatalog = $null
+    $script:FaInstalledAppCatalog = $null
+
+    $msg = if ($exe) {
+        "Alias OK: '$spoken' -> $target ($exe)"
+    }
+    else {
+        "Alias OK: '$spoken' -> $target (resolu au lancement)"
+    }
+    return @{ ok = $true; message = $msg; key = $key; path = $userPath }
 }
 
 function Get-FreshAgentSkillsWebConfig {
@@ -231,6 +390,7 @@ function Get-FreshAgentRepoConfigSyncList {
             'configs/skills-apps.json',
             'configs/skills-web.json',
             'configs/skills/registry.json',
+            'configs/skills/router/fr-pc.json',
             'configs/agent-profiles.json',
             'configs/services-allowlist.json'
         )) {
@@ -272,12 +432,23 @@ function Sync-FreshAgentLocalAssets {
         'ai/FreshAgent-BackgroundWorker.ps1',
         'ai/Windows-Stt.ps1',
         'ai/FreshAgent-Tts.ps1',
+        'ai/FreshAgent-VoiceWorker.ps1',
+        'ai/FreshAgent-VoiceHost.ps1',
         'lib/FreshAgent-Inventory.ps1',
         'lib/FreshAgent-Rag.ps1',
         'lib/FreshAgent-History.ps1',
         'lib/FreshAgent-Profiles.ps1',
         'lib/FreshAgent-Log.ps1',
-        'lib/FreshAgent-Dashboard.ps1'
+        'lib/FreshAgent-Dashboard.ps1',
+        'lib/FreshAgent-Overlay.ps1',
+        'lib/FreshAgent-VoiceRouter.ps1',
+        'lib/FreshAgent-IdleSuggest.ps1',
+        'lib/FreshAgent-AiLifecycle.ps1',
+        'lib/FreshAgent-ActionLog.ps1',
+        'lib/FreshAgent-Confirm.ps1',
+        'lib/FreshAgent-WindowsActions.ps1',
+        'lib/FreshAgent-Health.ps1',
+        'lib/FreshAgent-Optimize.ps1'
     )
     foreach ($rel in $scriptPaths) {
         $dest = Join-Path $FreshAppData ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)
@@ -436,6 +607,12 @@ function Import-FreshAgentStandardModules {
             'lib/FreshAgent-Overlay.ps1',
             'lib/FreshAgent-VoiceRouter.ps1',
             'lib/FreshAgent-IdleSuggest.ps1',
+            'lib/FreshAgent-AiLifecycle.ps1',
+            'lib/FreshAgent-ActionLog.ps1',
+            'lib/FreshAgent-Confirm.ps1',
+            'lib/FreshAgent-WindowsActions.ps1',
+            'lib/FreshAgent-Health.ps1',
+            'lib/FreshAgent-Optimize.ps1',
             'ai/Ollama-Manager.ps1',
             'ai/FreshAgent-OllamaBridge.ps1',
             'ai/Windows-Stt.ps1',

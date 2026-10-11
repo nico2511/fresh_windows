@@ -20,7 +20,12 @@ function New-FreshAgentDashboardTabPage {
 $script:FreshAgentUiLog = {
     param([string]$Message)
     try {
-        $log = Join-Path $env:LOCALAPPDATA 'FreshWindows\watch-agent.log'
+        $root = $env:FRESH_WIN_APPDATA
+        if ([string]::IsNullOrWhiteSpace($root)) {
+            if ($script:FreshAppData) { $root = [string]$script:FreshAppData }
+            else { $root = Join-Path $env:LOCALAPPDATA 'FreshWindows' }
+        }
+        $log = Join-Path $root 'watch-agent.log'
         $dir = Split-Path $log
         if (-not (Test-Path -LiteralPath $dir)) {
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -63,8 +68,20 @@ $script:FreshAgentDashboardUpdateUi = {
         if ($Ui.BtnListenOff) {
             $Ui.BtnListenOff.Enabled = [bool]$State.ListenOffEnabled
         }
-        foreach ($name in @('BtnStartOllama', 'BtnEnsureModel', 'BtnTtsCycle', 'BtnAiTest', 'BtnAiHistory')) {
+        if ($Ui.BtnListenMode) {
+            $Ui.BtnListenMode.Enabled = [bool]$State.AiControlsEnabled
+            if ($State.ListenModeButtonText) { $Ui.BtnListenMode.Text = [string]$State.ListenModeButtonText }
+        }
+        if ($Ui.BtnPttHotkey) {
+            $Ui.BtnPttHotkey.Enabled = [bool]$State.AiControlsEnabled
+            if ($State.PttHotkeyButtonText) { $Ui.BtnPttHotkey.Text = [string]$State.PttHotkeyButtonText }
+        }
+        foreach ($name in @('BtnStartOllama', 'BtnEnsureModel', 'BtnTtsCycle', 'BtnAiTest', 'BtnAiHistory', 'BtnCmdSend')) {
             if ($Ui[$name]) { $Ui[$name].Enabled = [bool]$State.AiControlsEnabled }
+        }
+        if ($Ui.TxtCmd) { $Ui.TxtCmd.Enabled = [bool]$State.AiControlsEnabled }
+        if ($Ui.LblHealth -and $State.HealthSummary) {
+            $Ui.LblHealth.Text = [string]$State.HealthSummary
         }
     }
     finally {
@@ -356,12 +373,20 @@ function Show-FreshAgentDashboard {
     $tabAi = New-FreshAgentDashboardTabPage -Title 'IA' -TabControl $tabs
     $ui.LblAiNotice = New-Object System.Windows.Forms.Label
     $ui.LblAiNotice.AutoSize = $false
-    $ui.LblAiNotice.Location = New-Object System.Drawing.Point(12, 12)
-    $ui.LblAiNotice.Size = New-Object System.Drawing.Size(460, 48)
-    $ui.LblAiNotice.Text = 'Voix / IA : chantier en reconstruction. Core mode jeu et skills restent actifs.'
+    $ui.LblAiNotice.Location = New-Object System.Drawing.Point(12, 8)
+    $ui.LblAiNotice.Size = New-Object System.Drawing.Size(460, 28)
+    $ui.LblAiNotice.Text = 'Commande texte = meme routeur que la voix (Ollama en secours).'
     $tabAi.Controls.Add($ui.LblAiNotice) | Out-Null
-    $ui.ChkAi = Add-FreshAgentDashboardCheck -Parent $tabAi -Text 'Intelligence artificielle (Ollama)' -X 12 -Y 68 -ActionKey 'SetAiEnabled'
-    $ui.ChkRag = Add-FreshAgentDashboardCheck -Parent $tabAi -Text 'RAG guides Fresh Windows' -X 12 -Y 100 -ActionKey 'SetRagEnabled'
+
+    $ui.TxtCmd = New-Object System.Windows.Forms.TextBox
+    $ui.TxtCmd.Location = New-Object System.Drawing.Point(12, 40)
+    $ui.TxtCmd.Size = New-Object System.Drawing.Size(340, 24)
+    $ui.TxtCmd.Tag = 'TxtCmd'
+    $tabAi.Controls.Add($ui.TxtCmd) | Out-Null
+    $ui.BtnCmdSend = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Envoyer' -X 360 -Y 38 -W 112 -H 28 -ActionKey 'SubmitTextCommand'
+
+    $ui.ChkAi = Add-FreshAgentDashboardCheck -Parent $tabAi -Text 'Intelligence artificielle (Ollama)' -X 12 -Y 76 -ActionKey 'SetAiEnabled'
+    $ui.ChkRag = Add-FreshAgentDashboardCheck -Parent $tabAi -Text 'RAG guides Fresh Windows' -X 12 -Y 104 -ActionKey 'SetRagEnabled'
     $ui.LblOllama = New-Object System.Windows.Forms.Label
     $ui.LblOllama.AutoSize = $true
     $ui.LblOllama.Location = New-Object System.Drawing.Point(12, 136)
@@ -373,13 +398,32 @@ function Show-FreshAgentDashboard {
     $ui.LblStt.Text = 'STT : off'
     $tabAi.Controls.Add($ui.LblStt) | Out-Null
 
-    $ui.BtnListen = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Ecoute ON' -X 12 -Y 190 -W 226 -H 34 -ActionKey 'VoiceListenOn'
-    $ui.BtnListenOff = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Ecoute OFF' -X 246 -Y 190 -W 226 -H 34 -ActionKey 'VoiceListenOff'
-    $ui.BtnStartOllama = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Demarrer Ollama' -X 12 -Y 234 -W 148 -H 32 -ActionKey 'StartOllama'
-    $ui.BtnEnsureModel = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Modele' -X 168 -Y 234 -W 100 -H 32 -ActionKey 'EnsureModel'
-    $ui.BtnTtsCycle = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Cycle TTS' -X 276 -Y 234 -W 100 -H 32 -ActionKey 'TtsCycle'
-    $ui.BtnAiTest = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Tester IA' -X 12 -Y 276 -W 226 -H 32 -ActionKey 'AiTest'
-    $ui.BtnAiHistory = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Historique' -X 246 -Y 276 -W 226 -H 32 -ActionKey 'AiHistory'
+    $ui.BtnListenMode = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Mode : Appui maintenu' -X 12 -Y 186 -W 226 -H 28 -ActionKey 'ListenModeCycle'
+    $ui.BtnPttHotkey = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Raccourci PTT : Ctrl+Alt+Space' -X 246 -Y 186 -W 226 -H 28 -ActionKey 'PttHotkeyPick'
+    $ui.BtnListen = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Ecoute ON' -X 12 -Y 220 -W 226 -H 32 -ActionKey 'VoiceListenOn'
+    $ui.BtnListenOff = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Ecoute OFF' -X 246 -Y 220 -W 226 -H 32 -ActionKey 'VoiceListenOff'
+    $ui.BtnStartOllama = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Demarrer Ollama' -X 12 -Y 260 -W 148 -H 30 -ActionKey 'StartOllama'
+    $ui.BtnEnsureModel = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Modele' -X 168 -Y 260 -W 100 -H 30 -ActionKey 'EnsureModel'
+    $ui.BtnTtsCycle = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Cycle TTS' -X 276 -Y 260 -W 100 -H 30 -ActionKey 'TtsCycle'
+    $ui.BtnAiTest = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Tester IA' -X 12 -Y 298 -W 110 -H 30 -ActionKey 'AiTest'
+    $ui.BtnAiHistory = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Historique' -X 130 -Y 298 -W 110 -H 30 -ActionKey 'AiHistory'
+    $ui.BtnCmdHelp = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Aide cmds' -X 248 -Y 298 -W 110 -H 30 -ActionKey 'VoiceCommandsHelp'
+    $ui.BtnAppInv = Add-FreshAgentDashboardButton -Parent $tabAi -Text 'Apps/alias' -X 366 -Y 298 -W 106 -H 30 -ActionKey 'AppInventoryHelp'
+    # Note: bouton Apps/alias = inventaire Start Menu + aliases (ex: discord -> Legcord)
+
+    # --- Sante ---
+    $tabHealth = New-FreshAgentDashboardTabPage -Title 'Sante' -TabControl $tabs
+    $ui.LblHealth = New-Object System.Windows.Forms.Label
+    $ui.LblHealth.AutoSize = $false
+    $ui.LblHealth.Location = New-Object System.Drawing.Point(12, 16)
+    $ui.LblHealth.Size = New-Object System.Drawing.Size(460, 120)
+    $ui.LblHealth.Text = 'CPU / RAM / disque — actualisation automatique.'
+    $tabHealth.Controls.Add($ui.LblHealth) | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabHealth -Text 'Rafraichir sante' -X 12 -Y 150 -W 226 -H 34 -ActionKey 'RefreshHealth' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabHealth -Text 'Rapport hebdo' -X 246 -Y 150 -W 226 -H 34 -ActionKey 'WeeklyReport' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabHealth -Text 'Audit demarrage' -X 12 -Y 196 -W 226 -H 34 -ActionKey 'AuditStartup' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabHealth -Text 'Audit services' -X 246 -Y 196 -W 226 -H 34 -ActionKey 'AuditServices' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabHealth -Text 'Nettoyage (confirm)' -X 12 -Y 242 -W 460 -H 34 -ActionKey 'CleanupConfirm' | Out-Null
 
     # --- Fresh Windows ---
     $tabFw = New-FreshAgentDashboardTabPage -Title 'Fresh Windows' -TabControl $tabs

@@ -20,10 +20,41 @@ function Resolve-FreshAgentAppEntry {
     return $null
 }
 
+function Get-FreshAgentAppEntryPaths {
+    param($Entry)
+    if ($null -eq $Entry -or $null -eq $Entry.paths) { return @() }
+    # ConvertFrom-Json: un seul path devient [string] (pas un tableau)
+    if ($Entry.paths -is [string]) { return @([string]$Entry.paths) }
+    return @($Entry.paths | ForEach-Object { [string]$_ } | Where-Object { $_ })
+}
+
 function Start-FreshAgentAppEntry {
     param($Entry)
-    foreach ($p in @($Entry.paths)) {
+    foreach ($p in (Get-FreshAgentAppEntryPaths -Entry $Entry)) {
         $expanded = Expand-FreshAgentPath -Path $p
+        # Glob (Discord app-*)
+        if ($expanded -match '[\*\?]') {
+            $parent = Split-Path -Parent $expanded
+            $leaf = Split-Path -Leaf $expanded
+            if (Test-Path -LiteralPath $parent) {
+                $hit = Get-ChildItem -LiteralPath $parent -Directory -Filter $leaf -ErrorAction SilentlyContinue |
+                    Sort-Object Name -Descending |
+                    Select-Object -First 1
+                if ($hit) {
+                    $exe = Join-Path $hit.FullName 'Discord.exe'
+                    if (-not (Test-Path -LiteralPath $exe)) {
+                        $exe = Get-ChildItem -LiteralPath $hit.FullName -Filter '*.exe' -File -EA SilentlyContinue |
+                            Where-Object { $_.Name -notmatch '(?i)update|unins' } |
+                            Select-Object -First 1 -ExpandProperty FullName
+                    }
+                    if ($exe -and (Test-Path -LiteralPath $exe)) {
+                        Start-Process -FilePath $exe
+                        return $exe
+                    }
+                }
+            }
+            continue
+        }
         if (Test-Path -LiteralPath $expanded) {
             $args = @($Entry.launchArgs)
             if ($args -and $args.Count -gt 0) {
@@ -43,7 +74,13 @@ function Start-FreshAgentAppEntry {
 }
 
 function Invoke-SkillCheckSystemHealth {
-    # CIM Win32_Processor.LoadPercentage peut bloquer longtemps — timeout via job.
+    param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
+    # Prefer snapshot + analyse orale (Health.ps1) quand le module est charge.
+    if (Get-Command Invoke-SkillCheckHealthV2 -ErrorAction SilentlyContinue) {
+        return Invoke-SkillCheckHealthV2 -FreshAppData $FreshAppData
+    }
+
+    # Fallback legacy si Health.ps1 absent.
     $totalRam = '?'
     $freeRam = '?'
     $usedPct = '?'
@@ -54,7 +91,6 @@ function Invoke-SkillCheckSystemHealth {
         $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
         $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
         $totalRam = [math]::Round($cs.TotalPhysicalMemory / 1GB, 1)
-        # Win32_OperatingSystem.FreePhysicalMemory est en kilo-octets
         $freeRam = [math]::Round($os.FreePhysicalMemory / 1MB, 1)
         if ($totalRam -gt 0) {
             $usedPct = [math]::Round((($totalRam - $freeRam) / $totalRam) * 100, 1)
@@ -97,7 +133,8 @@ function Invoke-SkillCheckSystemHealth {
 
     $msg = 'CPU ~{0}% | RAM {1} Go libres / {2} Go ({3}% utilise) | C: {4} Go libres | Plan {5}' -f `
         $cpuLoad, $freeRam, $totalRam, $usedPct, $diskFree, $power
-    return @{ ok = $true; message = $msg }
+    $spoken = "Le PC repond : environ $cpuLoad pour cent CPU, $freeRam Go de memoire libres, et $diskFree Go sur C."
+    return @{ ok = $true; message = $msg; spoken = $spoken }
 }
 
 function Invoke-SkillLaunchApp {
@@ -106,13 +143,27 @@ function Invoke-SkillLaunchApp {
         [string]$Name,
         [string]$RepoRef = $(if ($env:FRESH_WIN_REF) { $env:FRESH_WIN_REF.Trim() } else { 'main' })
     )
+    # "grokbot" / "Grok Bot" / coquilles proches: resolut flou avant alias exact
+    if (Get-Command Resolve-FreshAgentSpokenAppName -ErrorAction SilentlyContinue) {
+        $Name = Resolve-FreshAgentSpokenAppName -Name $Name
+    }
     $apps = Get-FreshAgentSkillsAppsConfig -RepoRef $RepoRef
     $resolved = Resolve-FreshAgentAppEntry -Name $Name -AppsConfig $apps
-    if (-not $resolved) {
-        return @{ ok = $false; message = "Alias inconnu: $Name" }
+    if ($resolved) {
+        $started = Start-FreshAgentAppEntry -Entry $resolved.Entry
+        $label = if ($resolved.Key) { [string]$resolved.Key } elseif ($resolved.Entry.title) { [string]$resolved.Entry.title } else { $Name }
+        if ($label -match '(?i)^notepad$') { $label = 'Bloc-notes' }
+        return @{
+            ok      = $true
+            message = "Lance: $started"
+            spoken  = ("J'ouvre {0}." -f $label)
+        }
     }
-    $started = Start-FreshAgentAppEntry -Entry $resolved.Entry
-    return @{ ok = $true; message = "Lance: $started" }
+    # Fallback: discovery Start Menu (meme matching compact/fuzzy)
+    if (Get-Command Start-FreshAgentStartMenuApp -ErrorAction SilentlyContinue) {
+        return Start-FreshAgentStartMenuApp -Name $Name
+    }
+    return @{ ok = $false; message = "Alias inconnu: $Name" }
 }
 
 function Invoke-SkillOpenUrl {

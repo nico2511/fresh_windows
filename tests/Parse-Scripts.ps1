@@ -18,12 +18,20 @@ $files = @(
     'scripts\lib\FreshAgent-Overlay.ps1',
     'scripts\lib\FreshAgent-VoiceRouter.ps1',
     'scripts\lib\FreshAgent-IdleSuggest.ps1',
+    'scripts\lib\FreshAgent-AiLifecycle.ps1',
     'scripts\lib\FreshAgent-Dashboard.ps1',
+    'scripts\lib\FreshAgent-ActionLog.ps1',
+    'scripts\lib\FreshAgent-Confirm.ps1',
+    'scripts\lib\FreshAgent-WindowsActions.ps1',
+    'scripts\lib\FreshAgent-Health.ps1',
+    'scripts\lib\FreshAgent-Optimize.ps1',
     'scripts\ai\Ollama-Manager.ps1',
     'scripts\ai\Windows-Stt.ps1',
     'scripts\ai\FreshAgent-OllamaBridge.ps1',
     'scripts\ai\FreshAgent-Tts.ps1',
-    'scripts\ai\FreshAgent-VoiceWorker.ps1'
+    'scripts\ai\FreshAgent-VoiceWorker.ps1',
+    'scripts\ai\FreshAgent-VoiceHost.ps1',
+    'scripts\ai\FreshAgent-BackgroundWorker.ps1'
 )
 $bad = 0
 foreach ($f in $files) {

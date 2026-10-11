@@ -1,0 +1,12 @@
+{
+  "id": "create_restore_point",
+  "title": "Point de restauration",
+  "handler": "Invoke-SkillCreateRestorePoint",
+  "menuVisible": false,
+  "requiresAdmin": true,
+  "requiresConfirm": true,
+  "parameters": {
+    "Description": { "type": "string", "required": false }
+  },
+  "ai": { "expose": true, "description": "Cree un point de restauration systeme." }
+}

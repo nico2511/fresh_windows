@@ -1,0 +1,10 @@
+{
+  "id": "audit_services",
+  "title": "Audit services",
+  "handler": "Invoke-SkillAuditServices",
+  "menuVisible": true,
+  "requiresAdmin": false,
+  "requiresConfirm": false,
+  "parameters": {},
+  "ai": { "expose": true, "description": "Suggestions services auto (aucune action auto)." }
+}

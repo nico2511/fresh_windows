@@ -9,34 +9,43 @@
   },
   "ollama": {
     "baseUrl": "http://127.0.0.1:11434",
-    "defaultModel": "qwen2.5:3b",
+    "defaultModel": "qwen2.5:7b",
     "models": [
+      "qwen2.5:7b",
       "qwen2.5:3b"
     ],
-    "autoStart": false,
+    "autoStart": true,
     "pullOnEnable": true,
     "keepAliveMinutes": 0,
     "toolCallMaxRounds": 4,
-    "chatTimeoutSec": 120
+    "chatTimeoutSec": 120,
+    "comment": "IA ON force EnsureModel (autoStart). Chat resout le modele local (default puis family puis premier installe)."
   },
   "systemPrompt": "",
   "stt": {
     "provider": "voiceWorker",
-    "comment": "voiceWorker = bin/voice_worker.exe (asset FreshWindows). windows = secours. off = desactive.",
-    "exe": "%LOCALAPPDATA%\\FreshWindows\\bin\\voice_worker.exe",
+    "comment": "listenMode alwaysOn|pushToTalk. PTT = hold hotkey (pttHotkey, UI tray/dashboard). Always-on = fenetres courtes + filtre bruit. modelsDir = cache CyberScribe.",
+    "exe": "",
     "downloadUrl": "https://github.com/nico2511/CyberScribeNote/releases/latest/download/CyberScribeNote-win.zip",
     "language": "fr",
     "modelSize": "base",
-    "transcriptionProfile": "fast",
-    "pushToTalk": false,
-    "listenSeconds": 20,
+    "transcriptionProfile": "accurate",
+    "modelsDir": "D:\\models\\cyberscribe_models",
+    "initialPrompt": "Dictée commandes PC en français clair: lance Steam, lance Discord, lance Grok Bot, lance Cursor, ouvre Chrome, état du système, mode jeu, nettoyage.",
+    "listenMode": "pushToTalk",
+    "pushToTalk": true,
+    "pttHotkey": "Ctrl+Alt+Space",
+    "listenSeconds": 6,
+    "maxRecordSeconds": 6,
+    "silenceMs": 450,
+    "minRecordMs": 350,
     "culture": "fr-FR",
     "route": "skills",
     "minConfidence": 0.42
   },
   "tts": {
     "provider": "edge",
-    "comment": "off | edge | windows | piper(legacy)",
+    "comment": "edge par defaut. Pas de fallback silencieux vers windows/piper si edge echoue.",
     "speakSkillResults": true,
     "edge": {
       "voice": "fr-FR-DeniseNeural",

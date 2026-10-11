@@ -3,14 +3,33 @@
   "comment": "Patterns FR -> skills PC (ordre important)",
   "rules": [
     {
+      "id": "confirm_yes",
+      "enabled": true,
+      "skillId": "__confirm_yes",
+      "say": "Confirme.",
+      "patterns": ["^(?:oui|ouais|ok|okey|daccord|d'accord|confirme|valide|vas-y|go|yes)$"],
+      "parameters": {}
+    },
+    {
+      "id": "confirm_no",
+      "enabled": true,
+      "skillId": "__confirm_no",
+      "say": "Annule.",
+      "patterns": ["^(?:non|annule|annuler|cancel|stop|laisse)$"],
+      "parameters": {}
+    },
+    {
       "id": "game_session",
       "enabled": true,
       "skillId": "game_session",
       "say": "Session jeu.",
       "patterns": [
-        "^(?:lance|demarre|active)\\s+(?:le\\s+)?mode\\s+jeu",
-        "^(?:session|mode)\\s+jeu",
-        "^mode\\s+jeu$"
+        "^(?:lance|demarre|active|active)\\s+(?:le\\s+)?mode\\s+jeu",
+        "^(?:lance|demarre|active|ouvre)\\s+(?:le\\s+)?profil\\s+jeu",
+        "^(?:session|mode|profil)\\s+jeu",
+        "^mode\\s+jeu$",
+        "^profil\\s+jeu$",
+        "^(?:prepare|prep)\\s+(?:la\\s+)?session\\s+jeu"
       ],
       "parameters": {}
     },
@@ -22,7 +41,172 @@
       "patterns": [
         "^(?:fin|arrete|stop|quitte)\\s+(?:la\\s+)?session\\s+jeu",
         "^(?:fin|arrete)\\s+(?:le\\s+)?mode\\s+jeu",
+        "^(?:fin|arrete)\\s+(?:le\\s+)?profil\\s+jeu",
         "^fin\\s+de\\s+partie"
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "close_app",
+      "enabled": true,
+      "skillId": "close_app",
+      "say": "Fermeture.",
+      "patterns": [
+        "^(?:ferme|fermer|fermez|quitte|quitter|quittez|close|kill)\\s+(?:l['']?)?(?:application\\s+)?(.+)$",
+        "^(?:arrete|arreter|arretez|stop)\\s+(?:l['']?)?(?:application\\s+)?(.+)$"
+      ],
+      "parameters": { "name": "$1" }
+    },
+    {
+      "id": "set_app_alias",
+      "enabled": true,
+      "skillId": "set_app_alias",
+      "say": "Alias enregistre.",
+      "patterns": [
+        "^(?:alias|associe|relie)\\s+(.+?)\\s+(?:vers|a|avec|sur)\\s+(.+)$",
+        "^(?:quand je dis|si je dis)\\s+(.+?)\\s+(?:lance|ouvre|demarre)\\s+(.+)$",
+        "^(?:appelle|nomme)\\s+(.+?)\\s+(?:pour|comme)\\s+(.+)$"
+      ],
+      "parameters": { "Spoken": "$1", "Target": "$2" }
+    },
+    {
+      "id": "list_app_aliases",
+      "enabled": true,
+      "skillId": "list_app_aliases",
+      "say": "Aliases.",
+      "patterns": [
+        "^(?:liste|affiche)\\s+(?:les\\s+)?alias(?:es)?",
+        "^mes\\s+alias(?:es)?$",
+        "^alias(?:es)?\\s+apps?$"
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "volume_mute",
+      "enabled": true,
+      "skillId": "set_volume",
+      "say": "Muet.",
+      "patterns": [
+        "^(?:coupe|couper|coupez|mute)\\s+(?:le\\s+)?son",
+        "^coupsons$",
+        "^coupe[sz]?son$",
+        "^muet$",
+        "^silence$",
+        "^mute$"
+      ],
+      "parameters": { "Action": "mute" }
+    },
+    {
+      "id": "volume_up",
+      "enabled": true,
+      "skillId": "set_volume",
+      "say": "Volume plus.",
+      "patterns": [
+        "^(?:monte|monter|montez|augmente|augmenter|augmentez)\\s+(?:le\\s+)?volume",
+        "^volume\\s+(?:plus|up)$"
+      ],
+      "parameters": { "Action": "up" }
+    },
+    {
+      "id": "volume_down",
+      "enabled": true,
+      "skillId": "set_volume",
+      "say": "Volume moins.",
+      "patterns": [
+        "^(?:baisse|baisser|baissez|diminue|diminuer|diminuez)\\s+(?:le\\s+)?volume",
+        "^volume\\s+(?:moins|down)$"
+      ],
+      "parameters": { "Action": "down" }
+    },
+    {
+      "id": "theme_dark",
+      "enabled": true,
+      "skillId": "set_theme",
+      "say": "Theme sombre.",
+      "patterns": ["^(?:theme|mode)\\s+sombre", "^mode\\s+nuit$"],
+      "parameters": { "Theme": "dark" }
+    },
+    {
+      "id": "theme_light",
+      "enabled": true,
+      "skillId": "set_theme",
+      "say": "Theme clair.",
+      "patterns": ["^(?:theme|mode)\\s+clair", "^mode\\s+jour$"],
+      "parameters": { "Theme": "light" }
+    },
+    {
+      "id": "open_settings",
+      "enabled": true,
+      "skillId": "open_settings",
+      "say": "Reglages.",
+      "patterns": [
+        "^(?:ouvre|affiche)\\s+(?:les\\s+)?reglages(?:\\s+(.+))?$",
+        "^(?:ouvre|affiche)\\s+(?:les\\s+)?parametres(?:\\s+(.+))?$"
+      ],
+      "parameters": { "Page": "$1" }
+    },
+    {
+      "id": "power_lock",
+      "enabled": true,
+      "skillId": "system_power",
+      "say": "Verrouillage.",
+      "patterns": ["^verrouille(?:\\s+(?:le\\s+)?(?:pc|session))?$", "^lock$"],
+      "parameters": { "Action": "lock" }
+    },
+    {
+      "id": "power_sleep",
+      "enabled": true,
+      "skillId": "system_power",
+      "say": "Veille.",
+      "patterns": ["^(?:mets?|mettre)\\s+(?:en\\s+)?veille", "^veille$"],
+      "parameters": { "Action": "sleep" }
+    },
+    {
+      "id": "power_restart",
+      "enabled": true,
+      "skillId": "system_power",
+      "say": "Redemarrage.",
+      "patterns": ["^redemarre(?:\\s+(?:le\\s+)?pc)?$", "^restart$"],
+      "parameters": { "Action": "restart" }
+    },
+    {
+      "id": "power_shutdown",
+      "enabled": true,
+      "skillId": "system_power",
+      "say": "Extinction.",
+      "patterns": ["^(?:eteins?|eteindre)(?:\\s+(?:le\\s+)?pc)?$", "^shutdown$"],
+      "parameters": { "Action": "shutdown" }
+    },
+    {
+      "id": "winget_upgrade",
+      "enabled": true,
+      "skillId": "winget_upgrade",
+      "say": "Mise a jour apps.",
+      "patterns": [
+        "^(?:lance|fais|demarre)\\s+(?:un\\s+)?winget\\s+upgrade",
+        "^mets?\\s+a\\s+jour\\s+(?:les\\s+)?(?:apps|applications|logiciels)"
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "winutil_maintenance",
+      "enabled": true,
+      "skillId": "winutil_maintenance",
+      "say": "Maintenance.",
+      "patterns": [
+        "^(?:lance|ouvre|demarre)\\s+(?:la\\s+)?maintenance(?:\\s+winutil)?",
+        "^(?:lance|ouvre)\\s+winutil"
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "cleanup",
+      "enabled": true,
+      "skillId": "cleanup",
+      "say": "Nettoyage.",
+      "patterns": [
+        "^(?:lance|fais|demarre)\\s+(?:un\\s+)?nettoyage",
+        "^nettoie\\s+(?:le\\s+)?(?:pc|systeme)"
       ],
       "parameters": {}
     },
@@ -65,7 +249,7 @@
       "skillId": "launch_app",
       "say": "Lancement.",
       "patterns": [
-        "^(?:lance|ouvre|demarre)\\s+(.+)$"
+        "^(?:lance|lancer|lancez|ouvre|ouvrir|ouvrez|demarre|demarrer|demarrez)\\s+(.+)$"
       ],
       "parameters": { "name": "$1" }
     },
@@ -73,10 +257,14 @@
       "id": "check_system_health",
       "enabled": true,
       "skillId": "check_system_health",
-      "say": "Etat systeme.",
+      "say": "Je regarde le PC.",
       "patterns": [
         "^(?:etat|sante)\\s+(?:du\\s+)?systeme",
-        "^comment\\s+va\\s+(?:le\\s+)?(?:pc|systeme)"
+        "^comment\\s+va\\s+(?:le\\s+)?(?:pc|systeme|ordi(?:nateur)?)",
+        "^(?:ca|ça)\\s+va\\s+(?:le\\s+)?(?:pc|systeme)?",
+        "^(?:analyse|check|verifie)\\s+(?:le\\s+)?(?:pc|systeme|sante)",
+        "^(?:donne|dis)\\s+(?:moi\\s+)?(?:l[' ]?)?(?:etat|sante)(?:\\s+du\\s+(?:pc|systeme))?",
+        "^sante(?:\\s+(?:pc|systeme))?$"
       ],
       "parameters": {}
     },
@@ -87,6 +275,17 @@
       "say": "Inventaire mis a jour.",
       "patterns": [
         "^(?:rafraichis|actualise|met\\s+a\\s+jour)\\s+(?:l[' ]?)?inventaire"
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "audit_startup",
+      "enabled": true,
+      "skillId": "audit_startup",
+      "say": "Audit demarrage.",
+      "patterns": [
+        "^(?:audit|analyse)\\s+(?:du\\s+)?demarrage",
+        "^apps?\\s+au\\s+demarrage"
       ],
       "parameters": {}
     }

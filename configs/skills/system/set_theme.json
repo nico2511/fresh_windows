@@ -1,0 +1,11 @@
+{
+  "id": "set_theme",
+  "title": "Theme clair ou sombre",
+  "handler": "Invoke-SkillSetTheme",
+  "menuVisible": false,
+  "requiresAdmin": false,
+  "parameters": {
+    "Theme": { "type": "string", "required": true, "description": "light|dark" }
+  },
+  "ai": { "expose": true, "description": "Change le theme Windows light/dark." }
+}
