@@ -1,0 +1,15 @@
+{
+  "id": "close_app",
+  "title": "Fermer une application",
+  "handler": "Invoke-SkillCloseApp",
+  "menuVisible": false,
+  "requiresAdmin": false,
+  "requiresConfirm": false,
+  "parameters": {
+    "name": { "type": "string", "required": true, "description": "Nom app / process a fermer" }
+  },
+  "ai": {
+    "expose": true,
+    "description": "Ferme une application en cours (confirmation vocale oui/annule)."
+  }
+}

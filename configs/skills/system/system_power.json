@@ -1,0 +1,12 @@
+{
+  "id": "system_power",
+  "title": "Verrouiller / veille / redemarrer / eteindre",
+  "handler": "Invoke-SkillSystemPower",
+  "menuVisible": false,
+  "requiresAdmin": false,
+  "requiresConfirm": true,
+  "parameters": {
+    "Action": { "type": "string", "required": true, "description": "lock|sleep|restart|shutdown" }
+  },
+  "ai": { "expose": true, "description": "Lock, sleep, restart or shutdown (requires confirm)." }
+}

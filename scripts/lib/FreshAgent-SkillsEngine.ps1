@@ -89,25 +89,100 @@ function Invoke-FreshAgentSkill {
         [string]$SkillId,
         [hashtable]$Parameters = @{},
         [string]$RepoRef,
-        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
+        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot),
+        [switch]$SkipConfirm,
+        [string]$Source = 'agent'
     )
     $skills = Get-FreshAgentActiveSkills -RepoRef $RepoRef -FreshAppData $FreshAppData
     $skill = $skills | Where-Object { $_.id -eq $SkillId } | Select-Object -First 1
     if (-not $skill) {
         return @{ ok = $false; message = "Skill inconnu: $SkillId" }
     }
+
+    $needsConfirm = $false
+    if (-not $SkipConfirm -and (Get-Command Test-FreshAgentSkillRequiresConfirm -ErrorAction SilentlyContinue)) {
+        $needsConfirm = Test-FreshAgentSkillRequiresConfirm -Skill $skill
+    }
+    if ($needsConfirm) {
+        $prompt = if ($skill.title) { [string]$skill.title } else { $SkillId }
+        if (Get-Command Set-FreshAgentPendingConfirm -ErrorAction SilentlyContinue) {
+            Set-FreshAgentPendingConfirm -SkillId $SkillId -Parameters $Parameters -Prompt $prompt `
+                -FreshAppData $FreshAppData -RepoRef $RepoRef -Source $Source | Out-Null
+        }
+        $msg = "Confirmation requise: $prompt - dis 'oui' ou 'annule'."
+        if (Get-Command Add-FreshAgentActionLogEntry -ErrorAction SilentlyContinue) {
+            Add-FreshAgentActionLogEntry -Action 'confirm_pending' -SkillId $SkillId -Parameters $Parameters `
+                -Ok $true -Message $msg -Source $Source -FreshAppData $FreshAppData
+        }
+        return @{ ok = $true; pendingConfirm = $true; message = $msg; skillId = $SkillId }
+    }
+
     $handler = $skill.handler
     if ([string]::IsNullOrWhiteSpace($handler) -or -not (Get-Command $handler -ErrorAction SilentlyContinue)) {
         return @{ ok = $false; message = "Handler absent: $handler" }
     }
     try {
-        $result = & $handler @Parameters
+        # Inject common params if handler accepts them
+        $callParams = @{} + $Parameters
+        $meta = (Get-Command $handler).Parameters
+        if ($meta.ContainsKey('RepoRef') -and -not $callParams.ContainsKey('RepoRef')) {
+            $callParams['RepoRef'] = $RepoRef
+        }
+        if ($meta.ContainsKey('FreshAppData') -and -not $callParams.ContainsKey('FreshAppData')) {
+            $callParams['FreshAppData'] = $FreshAppData
+        }
+        $result = & $handler @callParams
         if ($null -eq $result) {
-            return @{ ok = $true; message = 'OK' }
+            $result = @{ ok = $true; message = 'OK' }
+        }
+        if (Get-Command Add-FreshAgentActionLogEntry -ErrorAction SilentlyContinue) {
+            Add-FreshAgentActionLogEntry -Action 'skill' -SkillId $SkillId -Parameters $Parameters `
+                -Ok ([bool]$result.ok) -Message ([string]$result.message) -Source $Source -FreshAppData $FreshAppData
         }
         return $result
     }
     catch {
+        if (Get-Command Add-FreshAgentActionLogEntry -ErrorAction SilentlyContinue) {
+            Add-FreshAgentActionLogEntry -Action 'skill' -SkillId $SkillId -Parameters $Parameters `
+                -Ok $false -Message $_.Exception.Message -Source $Source -FreshAppData $FreshAppData
+        }
         return @{ ok = $false; message = $_.Exception.Message }
     }
+}
+
+function Complete-FreshAgentPendingConfirm {
+    param(
+        [ValidateSet('confirm', 'cancel')]
+        [string]$Decision,
+        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
+    )
+    $pending = $null
+    if (Get-Command Get-FreshAgentPendingConfirm -ErrorAction SilentlyContinue) {
+        $pending = Get-FreshAgentPendingConfirm -FreshAppData $FreshAppData
+    }
+    if (-not $pending) {
+        return @{ ok = $false; message = 'Aucune action en attente.' }
+    }
+    if ($Decision -eq 'cancel') {
+        if (Get-Command Clear-FreshAgentPendingConfirm -ErrorAction SilentlyContinue) {
+            Clear-FreshAgentPendingConfirm -FreshAppData $FreshAppData
+        }
+        if (Get-Command Add-FreshAgentActionLogEntry -ErrorAction SilentlyContinue) {
+            Add-FreshAgentActionLogEntry -Action 'confirm_cancel' -SkillId ([string]$pending.skillId) `
+                -Ok $true -Message 'Annule.' -Source 'confirm' -FreshAppData $FreshAppData
+        }
+        return @{ ok = $true; message = 'Annule.'; cancelled = $true }
+    }
+    $skillId = [string]$pending.skillId
+    $params = @{}
+    if ($pending.parameters -is [hashtable]) { $params = $pending.parameters }
+    elseif ($pending.parameters) {
+        foreach ($p in $pending.parameters.PSObject.Properties) { $params[$p.Name] = $p.Value }
+    }
+    $repo = if ($pending.repoRef) { [string]$pending.repoRef } else { 'main' }
+    if (Get-Command Clear-FreshAgentPendingConfirm -ErrorAction SilentlyContinue) {
+        Clear-FreshAgentPendingConfirm -FreshAppData $FreshAppData
+    }
+    return Invoke-FreshAgentSkill -SkillId $skillId -Parameters $params -RepoRef $repo `
+        -FreshAppData $FreshAppData -SkipConfirm -Source 'confirm'
 }

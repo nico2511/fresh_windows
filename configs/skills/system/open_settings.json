@@ -1,0 +1,11 @@
+{
+  "id": "open_settings",
+  "title": "Ouvrir reglages Windows",
+  "handler": "Invoke-SkillOpenSettings",
+  "menuVisible": false,
+  "requiresAdmin": false,
+  "parameters": {
+    "Page": { "type": "string", "required": false, "description": "sound|display|network|update|power|..." }
+  },
+  "ai": { "expose": true, "description": "Ouvre une page ms-settings." }
+}

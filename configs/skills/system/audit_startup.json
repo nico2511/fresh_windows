@@ -1,0 +1,10 @@
+{
+  "id": "audit_startup",
+  "title": "Audit demarrage",
+  "handler": "Invoke-SkillAuditStartup",
+  "menuVisible": true,
+  "requiresAdmin": false,
+  "requiresConfirm": false,
+  "parameters": {},
+  "ai": { "expose": true, "description": "Liste les apps au demarrage avec suggestions (jamais d action auto)." }
+}

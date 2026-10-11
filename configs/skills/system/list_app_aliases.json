@@ -1,0 +1,12 @@
+{
+  "id": "list_app_aliases",
+  "title": "Lister les aliases apps",
+  "handler": "Invoke-SkillListAppAliases",
+  "menuVisible": false,
+  "requiresAdmin": false,
+  "parameters": {},
+  "ai": {
+    "expose": true,
+    "description": "Liste les aliases d applications (skills-apps)."
+  }
+}

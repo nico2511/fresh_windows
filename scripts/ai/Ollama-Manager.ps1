@@ -17,6 +17,22 @@ function Get-OllamaExecutable {
     return $null
 }
 
+function Get-OllamaAppExecutable {
+    # App tray Windows (icone) — distinct de ollama.exe CLI/serve.
+    $list = [System.Collections.Generic.List[string]]::new()
+    $cli = Get-OllamaExecutable
+    if ($cli) {
+        $dir = Split-Path $cli -Parent
+        [void]$list.Add((Join-Path $dir 'ollama app.exe'))
+    }
+    [void]$list.Add((Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama app.exe'))
+    [void]$list.Add((Join-Path $env:ProgramFiles 'Ollama\ollama app.exe'))
+    foreach ($p in $list) {
+        if ($p -and (Test-Path -LiteralPath $p)) { return $p }
+    }
+    return $null
+}
+
 function Get-OllamaBaseUrl {
     param($AiConfig)
     if ($AiConfig -and $AiConfig.ollama -and $AiConfig.ollama.baseUrl) {
@@ -56,19 +72,54 @@ function Test-OllamaApi {
 
 function Start-OllamaServer {
     param(
-        [string]$OllamaExe = $(Get-OllamaExecutable)
+        [string]$OllamaExe = $(Get-OllamaExecutable),
+        [switch]$PreferTrayApp
     )
+    if (-not $PSBoundParameters.ContainsKey('PreferTrayApp')) {
+        $PreferTrayApp = $true
+    }
     if (-not $OllamaExe) {
         throw 'Ollama introuvable. Installe-le (winget install Ollama.Ollama) ou ajoute ollama au PATH.'
     }
-    if (Test-OllamaApi) { return @{ alreadyRunning = $true; exe = $OllamaExe } }
+
+    $appExe = Get-OllamaAppExecutable
+    $apiOk = Test-OllamaApi
+    $appRunning = $false
+    try {
+        $appRunning = [bool](Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '(?i)^ollama' -and $_.CommandLine -and $_.CommandLine -match '(?i)ollama app\.exe' } |
+                Select-Object -First 1)
+    }
+    catch { }
+
+    # Preferer l'app tray (icone) plutot que "ollama serve" cache.
+    if ($PreferTrayApp -and $appExe) {
+        if (-not $appRunning) {
+            Start-Process -FilePath $appExe | Out-Null
+        }
+        $deadline = (Get-Date).AddSeconds(60)
+        while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 800
+            if (Test-OllamaApi) {
+                return @{
+                    alreadyRunning = $apiOk
+                    exe            = $appExe
+                    mode           = 'tray'
+                }
+            }
+        }
+        # API pas encore up: tenter serve en secours (API seule, sans promettre l'icone)
+    }
+
+    if (Test-OllamaApi) {
+        return @{ alreadyRunning = $true; exe = $OllamaExe; mode = 'api' }
+    }
 
     $existing = Get-Process -Name ollama -ErrorAction SilentlyContinue
     if (-not $existing) {
         Start-Process -FilePath $OllamaExe -ArgumentList 'serve' -WindowStyle Hidden | Out-Null
     }
     else {
-        # Processus present mais API parfois injoignable (tray sans serve) — retenter serve.
         Start-Process -FilePath $OllamaExe -ArgumentList 'serve' -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
     }
 
@@ -76,7 +127,7 @@ function Start-OllamaServer {
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 800
         if (Test-OllamaApi) {
-            return @{ alreadyRunning = $false; exe = $OllamaExe }
+            return @{ alreadyRunning = $false; exe = $OllamaExe; mode = 'serve' }
         }
     }
     throw 'Ollama ne repond pas sur http://127.0.0.1:11434 apres demarrage.'
@@ -161,8 +212,8 @@ function Ensure-OllamaReady {
         Start-OllamaServer | Out-Null
     }
 
-    $model = [string]$ollama.defaultModel
-    if ([string]::IsNullOrWhiteSpace($model)) { $model = 'qwen2.5:3b' }
+    $model = Resolve-OllamaChatModel -AiConfig $AiConfig -BaseUrl $base
+    if ([string]::IsNullOrWhiteSpace($model)) { $model = 'qwen2.5:7b' }
 
     $pull = $true
     if ($null -ne $ollama.pullOnEnable) { $pull = [bool]$ollama.pullOnEnable }
@@ -175,17 +226,12 @@ function Ensure-OllamaReady {
                 param($line)
                 if ($OnProgress) { & $OnProgress $line }
             }
+            if (-not (Test-OllamaModelPresent -ModelName $model -BaseUrl $base)) {
+                throw ("Modele Ollama toujours absent apres pull: {0}" -f $model)
+            }
         }
         else {
-            $locals = @(Get-OllamaLocalModels -BaseUrl $base)
-            $fallback = $locals | Where-Object { $_ -and $_ -notmatch '(?i)embed' } | Select-Object -First 1
-            if ($fallback) {
-                if ($OnProgress) { & $OnProgress ("Modele defaut absent, fallback: {0}" -f $fallback) }
-                $model = [string]$fallback
-            }
-            else {
-                throw ("Modele Ollama absent: {0}. Clique 'Telecharger modele' dans le panneau IA." -f $model)
-            }
+            throw ("Modele Ollama absent: {0}. Active l'IA (pullOnEnable) ou Telecharge le modele." -f $model)
         }
     }
 
@@ -212,6 +258,40 @@ function Invoke-OllamaChat {
     return ($resp.raw | ConvertTo-Json -Compress)
 }
 
+function Resolve-OllamaChatModel {
+    param($AiConfig, [string]$BaseUrl)
+    $wanted = @()
+    if ($AiConfig -and $AiConfig.ollama -and $AiConfig.ollama.defaultModel) {
+        $wanted += [string]$AiConfig.ollama.defaultModel
+    }
+    if ($AiConfig -and $AiConfig.ollama -and $AiConfig.ollama.models) {
+        foreach ($m in @($AiConfig.ollama.models)) {
+            if ($m -and ($wanted -notcontains [string]$m)) { $wanted += [string]$m }
+        }
+    }
+    $installed = @()
+    try {
+        $resp = Invoke-RestMethod -Uri "$BaseUrl/api/tags" -Method Get -TimeoutSec 5
+        foreach ($m in @($resp.models)) {
+            if ($m.name) { $installed += [string]$m.name }
+        }
+    }
+    catch { }
+    foreach ($w in $wanted) {
+        if ($installed -contains $w) { return $w }
+    }
+    # Prefixe family (qwen2.5:3b -> qwen2.5:7b)
+    foreach ($w in $wanted) {
+        $family = ($w -split ':')[0]
+        $pat = "${family}:*"
+        $hit = $installed | Where-Object { $_ -like $pat } | Select-Object -First 1
+        if ($hit) { return $hit }
+    }
+    if ($installed.Count -gt 0) { return $installed[0] }
+    if ($wanted.Count -gt 0) { return $wanted[0] }
+    return 'qwen2.5:7b'
+}
+
 function Invoke-OllamaChatCompletion {
     param(
         $AiConfig,
@@ -220,7 +300,7 @@ function Invoke-OllamaChatCompletion {
         [int]$TimeoutSec = 120
     )
     $base = Get-OllamaBaseUrl -AiConfig $AiConfig
-    $model = $AiConfig.ollama.defaultModel
+    $model = Resolve-OllamaChatModel -AiConfig $AiConfig -BaseUrl $base
     $bodyObj = @{
         model    = $model
         messages = @($Messages)
@@ -236,12 +316,18 @@ function Invoke-OllamaChatCompletion {
             ok      = $true
             message = $raw.message
             raw     = $raw
+            model   = $model
         }
     }
     catch {
+        $msg = $_.Exception.Message
+        if ($msg -match '404') {
+            $msg = "Modele Ollama introuvable ($model). Installe-le (ollama pull $model) ou change defaultModel."
+        }
         return @{
             ok      = $false
-            message = $_.Exception.Message
+            message = $msg
+            model   = $model
         }
     }
 }

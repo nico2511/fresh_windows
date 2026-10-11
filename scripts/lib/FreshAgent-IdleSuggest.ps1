@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
-  Temps creux : suggestions d'enrichissement kill-list / apps (jamais de kill auto).
-  Fallback Ollama optionnel si enabled.
+  Temps creux : suggestions inventaire / demarrage (jamais de kill auto).
+  Ollama idle seulement si IA ON et API deja prete (pas de demarrage "en douce").
 #>
 
 function Get-FreshAgentIdleSuggestStatePath {
@@ -36,6 +36,70 @@ public static class FaIdle {
     }
 }
 
+function Get-FreshAgentIdleSuggestionMessage {
+    param(
+        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot),
+        [string]$RepoRef = 'main'
+    )
+    # Prefer concrete inventory / startup hints over a generic placeholder.
+    $invPath = $null
+    if (Get-Command Get-FreshAgentInventoryPath -ErrorAction SilentlyContinue) {
+        try { $invPath = Get-FreshAgentInventoryPath -FreshAppData $FreshAppData } catch { }
+    }
+    if (-not $invPath) { $invPath = Join-Path $FreshAppData 'inventory.json' }
+
+    if (-not (Test-Path -LiteralPath $invPath)) {
+        return @{
+            suggestion = 'refresh_inventory'
+            message    = 'Temps creux : inventaire machine absent — rafraichis (Skills / voix).'
+        }
+    }
+
+    $invAgeHours = 999
+    try {
+        $invAgeHours = ((Get-Date) - (Get-Item -LiteralPath $invPath).LastWriteTime).TotalHours
+    }
+    catch { }
+    if ($invAgeHours -ge 24) {
+        return @{
+            suggestion = 'refresh_inventory'
+            message    = ('Temps creux : inventaire vieux de {0:N0} h — rafraichis pour des suggestions utiles.' -f $invAgeHours)
+        }
+    }
+
+    if (Get-Command Get-FreshAgentStartupAudit -ErrorAction SilentlyContinue) {
+        try {
+            $startup = @(Get-FreshAgentStartupAudit)
+            if ($startup.Count -gt 8) {
+                return @{
+                    suggestion = 'audit_startup'
+                    message    = ('Temps creux : {0} entrees au demarrage — audit suggere (aucune action auto).' -f $startup.Count)
+                }
+            }
+        }
+        catch { }
+    }
+
+    try {
+        $inv = Get-Content -LiteralPath $invPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $procCount = 0
+        if ($inv.processes) { $procCount = @($inv.processes).Count }
+        elseif ($inv.topProcesses) { $procCount = @($inv.topProcesses).Count }
+        if ($procCount -gt 0) {
+            return @{
+                suggestion = 'check_system_health'
+                message    = ('Temps creux : inventaire OK ({0} procs) — dis « etat du systeme » pour un check.' -f $procCount)
+            }
+        }
+    }
+    catch { }
+
+    return @{
+        suggestion = 'check_system_health'
+        message    = 'Temps creux : dis « etat du systeme » ou rafraichis l inventaire.'
+    }
+}
+
 function Invoke-FreshAgentIdleSuggestTick {
     param(
         [string]$FreshAppData = $(Get-FreshAgentAppDataRoot),
@@ -58,20 +122,37 @@ function Invoke-FreshAgentIdleSuggestTick {
         catch { }
     }
 
-    # Suggestion non destructive : proposer refresh inventaire
-    $msg = 'Temps creux : inventaire machine a rafraichir ? (menu Skills)'
+    $hint = Get-FreshAgentIdleSuggestionMessage -FreshAppData $FreshAppData -RepoRef $RepoRef
+    $msg = [string]$hint.message
     if (Get-Command Show-FreshAgentUserNotice -ErrorAction SilentlyContinue) {
         Show-FreshAgentUserNotice -Title 'Idle' -Text $msg -Level Info
     }
-    @{ at = (Get-Date).ToString('o'); suggestion = 'refresh_inventory' } |
-        ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
+    @{
+        at         = (Get-Date).ToString('o')
+        suggestion = [string]$hint.suggestion
+        message    = $msg
+    } | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
 
-    # Fallback Ollama uniquement si bridge pret et enabled
-    if (Get-Command Invoke-FreshAgentAiTurn -ErrorAction SilentlyContinue) {
-        try {
-            $prompt = 'Liste 3 processus Windows souvent inutiles en jeu (noms courts). Reponds tres court.'
-            $null = Invoke-FreshAgentAiTurn -Prompt $prompt -RepoRef $RepoRef -FreshAppData $FreshAppData -AiConfig $AiConfig
-        }
-        catch { }
+    if (Get-Command Add-FreshAgentActionLogEntry -ErrorAction SilentlyContinue) {
+        Add-FreshAgentActionLogEntry -Action 'idle_suggest' -SkillId ([string]$hint.suggestion) `
+            -Ok $true -Message $msg -Source 'idle' -FreshAppData $FreshAppData
     }
+
+    # Pas de demarrage Ollama ici : uniquement si API deja joignable + suggestion courte.
+    $base = 'http://127.0.0.1:11434'
+    try {
+        if ($AiConfig.ollama -and $AiConfig.ollama.baseUrl) { $base = [string]$AiConfig.ollama.baseUrl }
+    }
+    catch { }
+    $ollamaReady = $false
+    if (Get-Command Test-OllamaApi -ErrorAction SilentlyContinue) {
+        try { $ollamaReady = [bool](Test-OllamaApi -BaseUrl $base -TimeoutSec 1) } catch { }
+    }
+    if (-not $ollamaReady) { return }
+    if (-not (Get-Command Invoke-FreshAgentAiTurn -ErrorAction SilentlyContinue)) { return }
+    try {
+        $prompt = "Suggestion idle Fresh Agent: $msg. En une phrase, propose une action concrete (sans tuer de process)."
+        $null = Invoke-FreshAgentAiTurn -Prompt $prompt -RepoRef $RepoRef -FreshAppData $FreshAppData -AiConfig $AiConfig
+    }
+    catch { }
 }

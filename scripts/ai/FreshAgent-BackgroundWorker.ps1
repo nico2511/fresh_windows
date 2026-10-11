@@ -4,7 +4,7 @@
 #>
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('StartOllama', 'EnsureModel')]
+    [ValidateSet('StartOllama', 'EnsureModel', 'BuildRagIndex')]
     [string]$Action,
     [string]$FreshAppData = $(Join-Path $env:LOCALAPPDATA 'FreshWindows'),
     [string]$RepoRef = 'main'
@@ -108,34 +108,56 @@ function Invoke-FreshAgentBackgroundWorkerMain {
 
     try {
         $configPath = Resolve-FreshAgentBgScriptPath -FreshAppData $FreshAppData -RelativePath 'lib/FreshAgent-Config.ps1' -RepoRef $ref
-        $ollamaPath = Resolve-FreshAgentBgScriptPath -FreshAppData $FreshAppData -RelativePath 'ai/Ollama-Manager.ps1' -RepoRef $ref
         if (-not $configPath) {
-            throw "FreshAgent-Config introuvable sous $FreshAppData\lib — sync scripts locaux (menu Fresh Windows)."
-        }
-        if (-not $ollamaPath) {
-            throw "Ollama-Manager introuvable sous $FreshAppData\ai — sync scripts locaux."
+            throw "FreshAgent-Config introuvable sous $FreshAppData\lib - sync scripts locaux (menu Fresh Windows)."
         }
         . $configPath
-        . $ollamaPath
 
-        if ($Action -eq 'StartOllama') {
-            Write-BgLog 'Start-OllamaServer...'
-            $started = Start-OllamaServer
+        if ($Action -eq 'BuildRagIndex') {
+            $ragPath = Resolve-FreshAgentBgScriptPath -FreshAppData $FreshAppData -RelativePath 'lib/FreshAgent-Rag.ps1' -RepoRef $ref
+            if (-not $ragPath) {
+                throw "FreshAgent-Rag introuvable sous $FreshAppData\lib - sync scripts locaux."
+            }
+            . $ragPath
+            Write-BgLog 'Build-FreshAgentRagIndex...'
+            $idx = Build-FreshAgentRagIndex -RepoRef $ref -FreshAppData $FreshAppData
+            $n = 0
+            try { $n = @($idx.chunks).Count } catch { }
             $ok = $true
-            if ($started.alreadyRunning) {
-                $message = 'Ollama deja actif (API OK).'
-            }
-            else {
-                $message = 'Ollama demarre — API disponible.'
-            }
+            $message = "Index RAG pret ($n chunks)."
         }
         else {
-            Write-BgLog 'Ensure-OllamaReady...'
-            $cfg = Get-FreshAgentAiConfig -RepoRef $ref -FreshAppData $FreshAppData
-            Ensure-OllamaReady -AiConfig $cfg -OnProgress { param($m) Write-BgLog $m } | Out-Null
-            $model = if ($cfg.ollama.defaultModel) { $cfg.ollama.defaultModel } else { 'qwen2.5:3b' }
-            $ok = $true
-            $message = "Ollama pret — modele $model disponible."
+            $ollamaPath = Resolve-FreshAgentBgScriptPath -FreshAppData $FreshAppData -RelativePath 'ai/Ollama-Manager.ps1' -RepoRef $ref
+            if (-not $ollamaPath) {
+                throw "Ollama-Manager introuvable sous $FreshAppData\ai - sync scripts locaux."
+            }
+            . $ollamaPath
+
+            if ($Action -eq 'StartOllama') {
+                Write-BgLog 'Start-OllamaServer (tray preferre)...'
+                $started = Start-OllamaServer -PreferTrayApp
+                $ok = $true
+                $mode = if ($started.mode) { [string]$started.mode } else { 'api' }
+                if ($started.alreadyRunning -and $mode -eq 'api') {
+                    $message = 'Ollama API deja active.'
+                }
+                elseif ($mode -eq 'tray') {
+                    $message = 'Ollama (icone tray) demarre - API disponible.'
+                }
+                else {
+                    $message = 'Ollama demarre (serve) - API disponible.'
+                }
+            }
+            else {
+                Write-BgLog 'Ensure-OllamaReady (tray preferre)...'
+                $cfg = Get-FreshAgentAiConfig -RepoRef $ref -FreshAppData $FreshAppData
+                # Assure l'app tray avant Ensure (icone visible pour l'utilisateur).
+                $null = Start-OllamaServer -PreferTrayApp
+                Ensure-OllamaReady -AiConfig $cfg -OnProgress { param($m) Write-BgLog $m } | Out-Null
+                $model = if ($cfg.ollama.defaultModel) { $cfg.ollama.defaultModel } else { 'qwen2.5:3b' }
+                $ok = $true
+                $message = "Ollama pret (tray) - modele $model disponible."
+            }
         }
     }
     catch {

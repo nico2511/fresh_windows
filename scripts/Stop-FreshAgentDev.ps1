@@ -13,8 +13,9 @@ if (Test-Path -LiteralPath $stop) {
     & $stop -FreshAppData $FreshAppData
 }
 else {
-    Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -match [regex]::Escape($FreshAppData) -and $_.CommandLine -match 'GameMode-WatchAgent' } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    $repoStop = Join-Path $PSScriptRoot 'Stop-FreshWatchAgent.ps1'
+    if (Test-Path -LiteralPath $repoStop) {
+        & $repoStop -FreshAppData $FreshAppData
+    }
 }
 Write-Host "Stop Dev demande: $FreshAppData"

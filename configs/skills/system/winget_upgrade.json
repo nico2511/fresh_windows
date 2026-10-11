@@ -1,0 +1,10 @@
+{
+  "id": "winget_upgrade",
+  "title": "winget upgrade",
+  "handler": "Invoke-SkillWingetUpgrade",
+  "menuVisible": true,
+  "requiresAdmin": false,
+  "requiresConfirm": true,
+  "parameters": {},
+  "ai": { "expose": true, "description": "Lance winget upgrade --all." }
+}

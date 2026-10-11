@@ -1,60 +1,32 @@
 {
   "schemaVersion": 1,
   "skills": [
-    {
-      "id": "check_system_health",
-      "file": "system/check_system_health.json",
-      "enabled": true
-    },
-    {
-      "id": "launch_app",
-      "file": "system/launch_app.json",
-      "enabled": true
-    },
-    {
-      "id": "open_url",
-      "file": "browser/open_url.json",
-      "enabled": true
-    },
-    {
-      "id": "browser_search",
-      "file": "browser/browser_search.json",
-      "enabled": true
-    },
-    {
-      "id": "youtube_search",
-      "file": "browser/youtube_search.json",
-      "enabled": true
-    },
-    {
-      "id": "game_session",
-      "file": "system/game_session.json",
-      "enabled": true
-    },
-    {
-      "id": "end_game_session",
-      "file": "system/end_game_session.json",
-      "enabled": true
-    },
-    {
-      "id": "refresh_inventory",
-      "file": "system/refresh_inventory.json",
-      "enabled": true
-    },
-    {
-      "id": "list_machine_inventory",
-      "file": "system/list_machine_inventory.json",
-      "enabled": true
-    },
-    {
-      "id": "refresh_rag_index",
-      "file": "system/refresh_rag_index.json",
-      "enabled": true
-    },
-    {
-      "id": "list_services",
-      "file": "system/list_services.json",
-      "enabled": true
-    }
+    { "id": "check_system_health", "file": "system/check_system_health.json", "enabled": true },
+    { "id": "launch_app", "file": "system/launch_app.json", "enabled": true },
+    { "id": "close_app", "file": "system/close_app.json", "enabled": true },
+    { "id": "set_app_alias", "file": "system/set_app_alias.json", "enabled": true },
+    { "id": "list_app_aliases", "file": "system/list_app_aliases.json", "enabled": true },
+    { "id": "open_url", "file": "browser/open_url.json", "enabled": true },
+    { "id": "browser_search", "file": "browser/browser_search.json", "enabled": true },
+    { "id": "youtube_search", "file": "browser/youtube_search.json", "enabled": true },
+    { "id": "game_session", "file": "system/game_session.json", "enabled": true },
+    { "id": "end_game_session", "file": "system/end_game_session.json", "enabled": true },
+    { "id": "refresh_inventory", "file": "system/refresh_inventory.json", "enabled": true },
+    { "id": "list_machine_inventory", "file": "system/list_machine_inventory.json", "enabled": true },
+    { "id": "refresh_rag_index", "file": "system/refresh_rag_index.json", "enabled": true },
+    { "id": "list_services", "file": "system/list_services.json", "enabled": true },
+    { "id": "set_volume", "file": "system/set_volume.json", "enabled": true },
+    { "id": "open_settings", "file": "system/open_settings.json", "enabled": true },
+    { "id": "set_theme", "file": "system/set_theme.json", "enabled": true },
+    { "id": "set_power_plan", "file": "system/set_power_plan.json", "enabled": true },
+    { "id": "system_power", "file": "system/system_power.json", "enabled": true },
+    { "id": "winget_upgrade", "file": "system/winget_upgrade.json", "enabled": true },
+    { "id": "winutil_maintenance", "file": "system/winutil_maintenance.json", "enabled": true },
+    { "id": "kill_process", "file": "system/kill_process.json", "enabled": true },
+    { "id": "cleanup", "file": "system/cleanup.json", "enabled": true },
+    { "id": "audit_startup", "file": "system/audit_startup.json", "enabled": true },
+    { "id": "audit_services", "file": "system/audit_services.json", "enabled": true },
+    { "id": "weekly_health_report", "file": "system/weekly_health_report.json", "enabled": true },
+    { "id": "create_restore_point", "file": "system/create_restore_point.json", "enabled": true }
   ]
 }

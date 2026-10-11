@@ -1,0 +1,9 @@
+{
+  "id": "weekly_health_report",
+  "title": "Rapport sante hebdomadaire",
+  "handler": "Invoke-SkillWeeklyHealthReport",
+  "menuVisible": false,
+  "requiresAdmin": false,
+  "parameters": {},
+  "ai": { "expose": false, "description": "Genere un rapport sante hebdomadaire." }
+}

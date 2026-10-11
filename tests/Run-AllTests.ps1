@@ -19,6 +19,10 @@ Write-Host "`n=== Parse-Scripts ===" -ForegroundColor Cyan
 & (Join-Path $root 'Parse-Scripts.ps1')
 if ($LASTEXITCODE -ne 0) { $failed++ }
 
+Write-Host "`n=== Smoke-VoiceHealth ===" -ForegroundColor Cyan
+& (Join-Path $root 'Smoke-VoiceHealth.ps1')
+if ($LASTEXITCODE -ne 0) { $failed++ }
+
 if (Get-Module -ListAvailable -Name Pester) {
     Write-Host "`n=== Pester Launcher-Core ===" -ForegroundColor Cyan
     Import-Module Pester -MinimumVersion 5.0 -ErrorAction Stop
@@ -33,6 +37,8 @@ if (Get-Module -ListAvailable -Name Pester) {
             'FreshAgent-Inventory.Tests.ps1',
             'FreshAgent-Rag.Tests.ps1',
             'FreshAgent-Config.Tests.ps1',
+            'FreshAgent-VoiceRouter.Tests.ps1',
+            'FreshAgent-Health.Tests.ps1',
             'Windows-Stt.Tests.ps1'
         )) {
         $path = Join-Path $root $pesterFile

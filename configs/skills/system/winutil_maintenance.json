@@ -1,0 +1,10 @@
+{
+  "id": "winutil_maintenance",
+  "title": "Maintenance WinUtil / Fresh Windows",
+  "handler": "Invoke-SkillWinUtilMaintenance",
+  "menuVisible": true,
+  "requiresAdmin": false,
+  "requiresConfirm": true,
+  "parameters": {},
+  "ai": { "expose": true, "description": "Lance la maintenance Fresh Windows / WinUtil." }
+}

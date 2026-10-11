@@ -57,6 +57,20 @@ try {
     $ref = (Get-Content -LiteralPath (Join-Path $fresh 'scripts.ref') -Raw).Trim()
     if ($ref -ne 'local-dev') { throw "scripts.ref attendu local-dev, got: $ref" }
 
+    $voiceMust = @(
+        'lib\FreshAgent-VoiceRouter.ps1',
+        'ai\FreshAgent-VoiceWorker.ps1',
+        'lib\FreshAgent-Overlay.ps1',
+        'lib\FreshAgent-AiLifecycle.ps1',
+        'configs\skills\router\fr-pc.json'
+    )
+    foreach ($rel in $voiceMust) {
+        $p = Join-Path $fresh $rel
+        if (-not (Test-Path -LiteralPath $p)) {
+            throw "Asset voix manquant apres sync: $rel"
+        }
+    }
+
     Write-Host "OK isolated AppData sync ($fresh)" -ForegroundColor Green
     Write-Host $fresh
 }

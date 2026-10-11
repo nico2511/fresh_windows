@@ -53,12 +53,19 @@ foreach ($must in @(
         'ai\Windows-Stt.ps1',
         'ai\FreshAgent-Tts.ps1',
         'ai\FreshAgent-VoiceWorker.ps1',
+        'ai\FreshAgent-VoiceHost.ps1',
         'ai\Ollama-Manager.ps1',
         'ai\FreshAgent-OllamaBridge.ps1',
         'lib\FreshAgent-Dashboard.ps1',
         'lib\FreshAgent-Overlay.ps1',
         'lib\FreshAgent-VoiceRouter.ps1',
-        'lib\FreshAgent-Profiles.ps1'
+        'lib\FreshAgent-AiLifecycle.ps1',
+        'lib\FreshAgent-Profiles.ps1',
+        'lib\FreshAgent-ActionLog.ps1',
+        'lib\FreshAgent-Confirm.ps1',
+        'lib\FreshAgent-WindowsActions.ps1',
+        'lib\FreshAgent-Health.ps1',
+        'lib\FreshAgent-Optimize.ps1'
     )) {
     $srcMust = Join-Path $scriptsSrc $must
     $dstMust = Join-Path $FreshAppData $must
@@ -115,6 +122,29 @@ $coreLib = Join-Path $scriptsSrc 'lib\Launcher-Core.ps1'
 Publish-FreshGameModeWatchStubs -FreshAppData $FreshAppData | Out-Null
 
 Set-Content -LiteralPath (Join-Path $FreshAppData 'scripts.ref') -Value 'local-dev' -Encoding UTF8 -NoNewline
+Set-Content -LiteralPath (Join-Path $FreshAppData 'repo.root') -Value $RepoRoot -Encoding UTF8 -NoNewline
+
+# Asset STT (voice_worker) — telecharge si absent (independant de CyberScribeNote installe)
+$vw = Join-Path $FreshAppData 'ai\FreshAgent-VoiceWorker.ps1'
+if (Test-Path -LiteralPath $vw) {
+    . $vw
+    $exe = Ensure-FreshAgentVoiceWorker -FreshAppData $FreshAppData
+    if ($exe) {
+        Write-Host "-> voice_worker.exe pret" -ForegroundColor DarkGray
+    }
+    else {
+        Write-Host '!! voice_worker.exe absent (Ecoute ON reessaiera)' -ForegroundColor Yellow
+    }
+}
+
+# Quarantine WhisperLoop legacy en AppData (evite reprise accidentelle)
+$legacyWhisper = Join-Path $FreshAppData 'ai\FreshAgent-WhisperLoop.ps1'
+if (Test-Path -LiteralPath $legacyWhisper) {
+    $q = Join-Path $FreshAppData 'ai\_legacy'
+    New-Item -ItemType Directory -Path $q -Force | Out-Null
+    Move-Item -LiteralPath $legacyWhisper -Destination (Join-Path $q 'FreshAgent-WhisperLoop.ps1') -Force
+    Write-Host '-> WhisperLoop quarantine (_legacy)' -ForegroundColor DarkGray
+}
 
 Write-Host ""
 Write-Host "Dev sync OK : $FreshAppData" -ForegroundColor Green

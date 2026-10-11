@@ -1,0 +1,16 @@
+{
+  "id": "set_app_alias",
+  "title": "Creer un alias d application",
+  "handler": "Invoke-SkillSetAppAlias",
+  "menuVisible": false,
+  "requiresAdmin": false,
+  "requiresConfirm": false,
+  "parameters": {
+    "Spoken": { "type": "string", "required": true, "description": "Nom dit a la voix (ex: discord)" },
+    "Target": { "type": "string", "required": true, "description": "App reelle (ex: Legcord)" }
+  },
+  "ai": {
+    "expose": true,
+    "description": "Associe un nom vocal (discord) a une app installee (Legcord)."
+  }
+}
