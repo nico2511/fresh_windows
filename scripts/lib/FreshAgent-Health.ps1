@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
   Surveillance sante v2 : CPU/RAM/disque + historique + kill process verifie.
 #>

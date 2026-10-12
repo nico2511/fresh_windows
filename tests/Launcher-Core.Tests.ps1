@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 BeforeAll {
     $root = Split-Path (Split-Path $PSCommandPath -Parent) -Parent
     . (Join-Path $root 'scripts/lib/Launcher-Core.ps1')

@@ -1,16 +1,30 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
   Optimisation : nettoyage, audit demarrage/services, restore point, rapport hebdo.
 #>
 
 function New-FreshAgentRestorePoint {
     param([string]$Description = 'Fresh Agent')
+    $elevated = $false
+    try {
+        if (Get-Command Test-FreshAgentIsElevated -ErrorAction SilentlyContinue) {
+            $elevated = [bool](Test-FreshAgentIsElevated)
+        }
+        else {
+            $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+            $principal = New-Object Security.Principal.WindowsPrincipal($id)
+            $elevated = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        }
+    }
+    catch { $elevated = $false }
+    if (-not $elevated) {
+        return @{ ok = $false; message = "Point de restauration ignore: session non administrateur." }
+    }
     try {
         Checkpoint-Computer -Description $Description -RestorePointType MODIFY_SETTINGS -ErrorAction Stop
         return @{ ok = $true; message = "Point de restauration: $Description" }
     }
     catch {
-        # Checkpoint-Computer often needs admin; soft-fail
         return @{ ok = $false; message = "Restore point: $($_.Exception.Message)" }
     }
 }
@@ -210,13 +224,32 @@ function Invoke-FreshAgentWeeklyHealthReportIfDue {
 
 function Invoke-SkillCleanup {
     param(
-        [bool]$Temp = $true,
-        [bool]$RecycleBin = $true,
-        [bool]$WuCache = $false,
-        [bool]$Dism = $false,
-        [bool]$CreateRestorePoint = $true
+        $Temp = $true,
+        $RecycleBin = $false,
+        $WuCache = $false,
+        $Dism = $false,
+        $CreateRestorePoint = $true
     )
-    return Invoke-FreshAgentCleanup -Temp:$Temp -RecycleBin:$RecycleBin -WuCache:$WuCache -Dism:$Dism -CreateRestorePoint:$CreateRestorePoint
+    # [bool]'false' vaut $true en PowerShell: parser les chaines explicitement.
+    $asBool = {
+        param($Value, [bool]$Default)
+        if (Get-Command ConvertTo-FreshAgentBool -ErrorAction SilentlyContinue) {
+            if ($null -eq $Value) { return $Default }
+            return (ConvertTo-FreshAgentBool -Value $Value -Default $Default)
+        }
+        if ($null -eq $Value) { return $Default }
+        if ($Value -is [bool]) { return [bool]$Value }
+        $s = ([string]$Value).Trim().ToLowerInvariant()
+        if ($s -match '^(1|true|yes|oui|on|vrai)$') { return $true }
+        if ($s -match '^(0|false|no|non|off|faux)$') { return $false }
+        return $Default
+    }
+    $doTemp = [bool](& $asBool $Temp $true)
+    $doRecycle = [bool](& $asBool $RecycleBin $false)
+    $doWu = [bool](& $asBool $WuCache $false)
+    $doDism = [bool](& $asBool $Dism $false)
+    $doRp = [bool](& $asBool $CreateRestorePoint $true)
+    return Invoke-FreshAgentCleanup -Temp:$doTemp -RecycleBin:$doRecycle -WuCache:$doWu -Dism:$doDism -CreateRestorePoint:$doRp
 }
 
 function Invoke-SkillAuditStartup {

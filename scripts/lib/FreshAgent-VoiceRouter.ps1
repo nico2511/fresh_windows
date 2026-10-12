@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
   Router vocal FR : transcript -> skills (sans Ollama).
   Pas de dictionnaire de coquilles Whisper: normalisation + segmentation +
@@ -116,6 +116,29 @@ function ConvertTo-FreshAgentVoiceNormalized {
     return $t.Trim()
 }
 
+function ConvertTo-FreshAgentVoiceUrlCandidate {
+    <# Comme la normalisation, mais conserve : / . ? & = pour open_url. #>
+    param([string]$Text)
+    if ([string]::IsNullOrWhiteSpace($Text)) { return '' }
+    $t = $Text.Trim().ToLowerInvariant()
+    $t = $t -replace "[`'`’]", "'"
+    try {
+        $formD = $t.Normalize([Text.NormalizationForm]::FormD)
+        $sb = New-Object System.Text.StringBuilder
+        foreach ($ch in $formD.ToCharArray()) {
+            if ([Globalization.CharUnicodeInfo]::GetUnicodeCategory($ch) -ne [Globalization.UnicodeCategory]::NonSpacingMark) {
+                [void]$sb.Append($ch)
+            }
+        }
+        $t = $sb.ToString().Normalize([Text.NormalizationForm]::FormC)
+    }
+    catch { }
+    $t = [regex]::Replace($t, "[^\p{L}\p{Nd}\s':/._?&=%#~\-@]+", ' ')
+    $t = $t -replace '\s+', ' '
+    $t = $t.Trim() -replace '[.!?]+$', ''
+    return $t.Trim()
+}
+
 function Repair-FreshAgentVoiceTranscript {
     <#
       Structure seulement: apostrophes / verbe colle + cible resolue via catalogue apps.
@@ -199,8 +222,8 @@ function Get-FreshAgentVoiceTranscriptCandidates {
         [string]$Transcript,
         [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
     )
+    $url = ConvertTo-FreshAgentVoiceUrlCandidate -Text $Transcript
     $raw = ConvertTo-FreshAgentVoiceNormalized -Text $Transcript
-    $fixed = Repair-FreshAgentVoiceTranscript -Text $Transcript -FreshAppData $FreshAppData
     $list = New-Object System.Collections.Generic.List[string]
     $add = {
         param([string]$s)
@@ -210,17 +233,30 @@ function Get-FreshAgentVoiceTranscriptCandidates {
         if (-not $list.Contains($s)) { [void]$list.Add($s) }
     }
 
-    # 1) Segments court d'abord
-    foreach ($base in @($fixed, $raw)) {
-        if ([string]::IsNullOrWhiteSpace($base)) { continue }
-        foreach ($seg in @([regex]::Split($base, '\s*(?:[.!?;]+|\bet\b|\bpuis\b)\s+'))) {
+    # 1) URL (casse/accents normalises, :/. conserves) avant toute autre regle.
+    if ($url -match 'https?://|\bwww\.') {
+        & $add $url
+    }
+
+    # 2) Texte normalise seulement. Le texte accentue ("paramètres") matcherait
+    #    launch_app (ouvre .+) avant la regle open_settings.
+    if (-not [string]::IsNullOrWhiteSpace($raw)) {
+        foreach ($seg in @([regex]::Split($raw, '\s*(?:[.!?;]+|\bet\b|\bpuis\b)\s+'))) {
+            if ([string]::IsNullOrWhiteSpace($seg)) { continue }
+            & $add (ConvertTo-FreshAgentVoiceNormalized -Text $seg)
+        }
+        & $add $raw
+    }
+
+    # 3) Dernier recours: verbe colle / fuzzy app ("lancetime" -> "lance steam")
+    $fixed = Repair-FreshAgentVoiceTranscript -Text $Transcript -FreshAppData $FreshAppData
+    if (-not [string]::IsNullOrWhiteSpace($fixed)) {
+        foreach ($seg in @([regex]::Split($fixed, '\s*(?:[.!?;]+|\bet\b|\bpuis\b)\s+'))) {
+            if ([string]::IsNullOrWhiteSpace($seg)) { continue }
             & $add (Repair-FreshAgentVoiceTranscript -Text $seg -FreshAppData $FreshAppData)
         }
-    }
-    # 2) Sous-match "lance X"
-    foreach ($base in @($fixed, $raw)) {
-        if ([string]::IsNullOrWhiteSpace($base)) { continue }
-        $mm = [regex]::Match($base, '(?:lance|lancer|lancez|ouvre|ouvrir|ouvrez|demarre|demarrer|demarrez)\s+(.+)$', 'IgnoreCase')
+        & $add $fixed
+        $mm = [regex]::Match($fixed, '(?:lance|lancer|lancez|ouvre|ouvrir|ouvrez|demarre|demarrer|demarrez)\s+(.+)$', 'IgnoreCase')
         if ($mm.Success) {
             $appPart = $mm.Groups[1].Value.Trim()
             if (Get-Command Resolve-FreshAgentSpokenAppName -ErrorAction SilentlyContinue) {
@@ -229,9 +265,6 @@ function Get-FreshAgentVoiceTranscriptCandidates {
             & $add ('lance {0}' -f $appPart.ToLowerInvariant())
         }
     }
-    # 3) Phrase complete
-    & $add $fixed
-    & $add $raw
     return @($list)
 }
 

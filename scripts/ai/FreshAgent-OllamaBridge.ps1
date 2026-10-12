@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
   Phase 2 — Tool calling Ollama + registry skills dynamique.
 #>
@@ -144,11 +144,30 @@ function Invoke-FreshAgentAiTurn {
         [string]$UserPrompt,
         $AiConfig,
         [string]$RepoRef = $(if ($env:FRESH_WIN_REF) { $env:FRESH_WIN_REF.Trim() } else { 'main' }),
-        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
+        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot),
+        [switch]$NoTools
     )
 
     if (-not $AiConfig -or -not $AiConfig.enabled) {
         return @{ ok = $false; message = 'IA desactivee. Active-la dans le menu Intelligence artificielle.' }
+    }
+
+    # Suggestion seule: pas de schema d'outils, pas d'execution de skill.
+    if ($NoTools) {
+        $hintMessages = @(
+            @{
+                role    = 'system'
+                content = 'Tu es Fresh Agent. Reponds en une seule phrase en francais. Suggestion uniquement: ne lance aucune action et n appelle aucun outil.'
+            },
+            @{ role = 'user'; content = $UserPrompt }
+        )
+        $hint = Invoke-OllamaChatCompletion -AiConfig $AiConfig -Messages $hintMessages -Tools @() -TimeoutSec 30
+        if (-not $hint.ok) {
+            return @{ ok = $false; message = $hint.message; skills = @() }
+        }
+        $hintText = ''
+        if ($hint.message -and $hint.message.content) { $hintText = [string]$hint.message.content.Trim() }
+        return @{ ok = $true; message = $hintText; skills = @() }
     }
 
     $ready = Ensure-OllamaReady -AiConfig $AiConfig -SkipPull -OnProgress { param($m) }

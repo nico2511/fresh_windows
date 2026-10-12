@@ -12,5 +12,5 @@
     "Dism": { "type": "boolean", "required": false },
     "CreateRestorePoint": { "type": "boolean", "required": false }
   },
-  "ai": { "expose": true, "description": "Nettoyage temp/corbeille/cache WU/DISM avec confirmation." }
+  "ai": { "expose": true, "description": "Nettoyage temp (corbeille seulement si RecycleBin=true) avec confirmation. RecycleBin est desactive par defaut." }
 }

@@ -1,10 +1,18 @@
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
-$root = Split-Path (Split-Path $PSCommandPath -Parent) -Parent
-. (Join-Path $root 'scripts\lib\FreshAgent-Config.ps1')
-. (Join-Path $root 'scripts\lib\FreshAgent-Rag.ps1')
 
 Describe 'FreshAgent RAG' {
+    BeforeAll {
+        $root = Split-Path (Split-Path $PSCommandPath -Parent) -Parent
+        if ([string]::IsNullOrWhiteSpace($root) -or -not (Test-Path -LiteralPath (Join-Path $root 'scripts'))) {
+            $here = $PSScriptRoot
+            if ([string]::IsNullOrWhiteSpace($here)) { $here = Split-Path -Parent $PSCommandPath }
+            $root = Split-Path -Parent $here
+        }
+        . (Join-Path $root 'scripts\lib\FreshAgent-Config.ps1')
+        . (Join-Path $root 'scripts\lib\FreshAgent-Rag.ps1')
+    }
+
     It 'Index and search guides' {
         $tmp = Join-Path $env:TEMP ('FreshAgent-Rag-{0}' -f [guid]::NewGuid().ToString('N'))
         $guides = Join-Path $tmp 'guides'

@@ -1,4 +1,4 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
 # ============================================================
 #  Fresh Windows - toolbox reinstall / maintenance
 #  Configs lues depuis GitHub (édition à distance)
@@ -50,7 +50,7 @@ $FreshAppData = Join-Path $env:LOCALAPPDATA "FreshWindows"
 $CustomAppsLocalDir = Join-Path $FreshAppData "apps-custom"
 $script:FreshBrand = "Fresh Windows"
 # Incrémenter quand les libs changent alors que FRESH_WIN_REF reste "main" (sinon cache périmé)
-$script:FreshWindowsLibEpoch = 46
+$script:FreshWindowsLibEpoch = 47
 
 function Ensure-FreshWindowsExecutionPolicy {
     <#
@@ -222,6 +222,28 @@ catch {
     Write-Host "Bibliotheques Fresh Windows indisponibles : $($_.Exception.Message)" -ForegroundColor Red
     Write-Host "Impossible de charger scripts/lib (reseau ou repo). Arret." -ForegroundColor Red
     exit 1
+}
+
+# Install existante: scripts.ref = "main" ne voit pas les nouveaux fichiers agent.
+# L'epoch du launcher (frais via irm) force un sync tant que scripts.stamp ne suit pas.
+try {
+    $agentRefFile = Join-Path $FreshAppData 'scripts.ref'
+    if (Test-Path -LiteralPath $agentRefFile) {
+        $agentRef = (Get-Content -LiteralPath $agentRefFile -Raw -Encoding UTF8).Trim()
+        $agentStampFile = Join-Path $FreshAppData 'scripts.stamp'
+        $agentStamp = ''
+        if (Test-Path -LiteralPath $agentStampFile) {
+            $agentStamp = (Get-Content -LiteralPath $agentStampFile -Raw -Encoding UTF8).Trim()
+        }
+        $agentDev = ($agentRef -eq 'local-dev') -or (Test-Path -LiteralPath (Join-Path $FreshAppData 'repo.root'))
+        if (-not $agentDev -and $agentStamp -ne [string]$script:FreshWindowsLibEpoch) {
+            Write-Host "Scripts agent perimes (stamp '$agentStamp', epoch $($script:FreshWindowsLibEpoch)) -> sync." -ForegroundColor Yellow
+            Sync-GameModeLocalScripts -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl | Out-Null
+        }
+    }
+}
+catch {
+    Write-Host "Sync agent (epoch) ignore : $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
 # Toujours definir ici (irm | iex) : independant du cache Core CDN

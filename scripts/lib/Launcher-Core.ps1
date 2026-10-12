@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
   Fonctions partagées Fresh Windows (launcher irm, clone local, tâches planifiées).
   Dot-sourcé depuis launcher.ps1 - utilise $RepoRef, $RepoRawRoot, $LauncherUrl, $FreshAppData du parent.
@@ -229,6 +229,21 @@ function Sync-GameModeLocalScripts {
     }
 
     Set-Content -LiteralPath (Join-Path $FreshAppData 'scripts.ref') -Value $Ref -Encoding UTF8 -NoNewline
+    if (Get-Command Write-FreshAgentScriptsStamp -ErrorAction SilentlyContinue) {
+        Write-FreshAgentScriptsStamp -FreshAppData $FreshAppData | Out-Null
+    }
+    else {
+        $epoch = '47'
+        $contentFile = Join-Path $FreshAppData 'configs\agent-content.json'
+        if (Test-Path -LiteralPath $contentFile) {
+            try {
+                $meta = Get-Content -LiteralPath $contentFile -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ($null -ne $meta.epoch) { $epoch = [string]$meta.epoch }
+            }
+            catch { }
+        }
+        Set-Content -LiteralPath (Join-Path $FreshAppData 'scripts.stamp') -Value $epoch -Encoding UTF8 -NoNewline
+    }
 
     Publish-FreshGameModeWatchStubs -FreshAppData $FreshAppData | Out-Null
     return $true
@@ -275,11 +290,23 @@ try {
 `$refFile = Join-Path `$dir 'scripts.ref'
 `$ref = if (`$env:FRESH_WIN_REF) { `$env:FRESH_WIN_REF.Trim() } elseif (Test-Path -LiteralPath `$refFile) { (Get-Content -LiteralPath `$refFile -Raw).Trim() } else { 'main' }
 `$env:FRESH_WIN_REF = `$ref
+`$stampFile = Join-Path `$dir 'scripts.stamp'
+`$localEpoch = ''
+if (Test-Path -LiteralPath `$stampFile) { `$localEpoch = (Get-Content -LiteralPath `$stampFile -Raw -Encoding UTF8).Trim() }
+`$remoteEpoch = `$localEpoch
+`$devMode = (`$ref -eq 'local-dev') -or (Test-Path -LiteralPath (Join-Path `$dir 'repo.root'))
+if (-not `$devMode) {
+    try {
+        `$meta = Invoke-RestMethod -Uri ("https://raw.githubusercontent.com/nico2511/fresh_windows/`$ref/configs/agent-content.json") -UseBasicParsing -TimeoutSec 5
+        if (`$meta -and `$null -ne `$meta.epoch) { `$remoteEpoch = [string]`$meta.epoch }
+    } catch { }
+}
+`$stale = (-not `$devMode) -and (`$remoteEpoch -ne `$localEpoch)
 `$need = @('GameMode-Common.ps1', 'GameMode-WatchAgent.ps1')
 foreach (`$n in `$need) {
     `$p = Join-Path `$dir `$n
-    if (-not (Test-Path -LiteralPath `$p) -or ((Get-Item -LiteralPath `$p).Length -lt 80)) {
-        Write-WatchBootLog ("re-download `$n (ref `$ref)")
+    if (`$stale -or -not (Test-Path -LiteralPath `$p) -or ((Get-Item -LiteralPath `$p).Length -lt 80)) {
+        Write-WatchBootLog ("re-download `$n (ref `$ref epoch `$localEpoch -> `$remoteEpoch)")
         Invoke-WebRequest -Uri ("https://raw.githubusercontent.com/nico2511/fresh_windows/`$ref/scripts/`$n") -OutFile `$p -UseBasicParsing
     }
 }

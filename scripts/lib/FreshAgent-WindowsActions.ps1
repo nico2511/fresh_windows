@@ -416,30 +416,121 @@ function Show-FreshAgentAppInventoryHelp {
     catch { return $text }
 }
 
+function Test-FreshAgentCloseProcessNameMatch {
+    param(
+        [string]$ProcessName,
+        [string[]]$Candidates
+    )
+    if ([string]::IsNullOrWhiteSpace($ProcessName)) { return $false }
+    foreach ($c in @($Candidates)) {
+        if ([string]::IsNullOrWhiteSpace([string]$c)) { continue }
+        $cand = [string]$c
+        if ($ProcessName.Equals($cand, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+        $pk = ConvertTo-FreshAgentAppCompactKey -Text $ProcessName
+        $ck = ConvertTo-FreshAgentAppCompactKey -Text $cand
+        if ([string]::IsNullOrWhiteSpace($ck) -or $ck.Length -lt 4) { continue }
+        if ($pk -eq $ck) { return $true }
+        # Prefix court (discord -> discordptb). Pas de Contains dans les deux sens.
+        if ($ck.Length -ge 5 -and $pk.Length -gt $ck.Length -and $pk.StartsWith($ck) -and (($pk.Length - $ck.Length) -le 4)) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Get-FreshAgentCloseAppNameCandidates {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
+    )
+    $list = New-Object System.Collections.Generic.List[string]
+    $add = {
+        param([string]$n)
+        if ([string]::IsNullOrWhiteSpace($n)) { return }
+        $t = $n.Trim()
+        if (-not $list.Contains($t)) { [void]$list.Add($t) }
+    }
+    $resolved = $Name
+    if (Get-Command Resolve-FreshAgentSpokenAppName -ErrorAction SilentlyContinue) {
+        try {
+            $r = Resolve-FreshAgentSpokenAppName -Name $Name -FreshAppData $FreshAppData
+            if ($r) { $resolved = [string]$r }
+        }
+        catch { }
+    }
+    & $add $resolved
+    & $add $Name
+    if (Get-Command Get-FreshAgentSkillsAppsConfig -ErrorAction SilentlyContinue) {
+        try {
+            $apps = Get-FreshAgentSkillsAppsConfig -FreshAppData $FreshAppData
+            $want = @(
+                (ConvertTo-FreshAgentAppCompactKey -Text $Name),
+                (ConvertTo-FreshAgentAppCompactKey -Text $resolved)
+            ) | Where-Object { $_ }
+            if ($apps -and $apps.apps) {
+                foreach ($p in $apps.apps.PSObject.Properties) {
+                    $cands = @($p.Name) + @($p.Value.aliases) + @($p.Value.process)
+                    $hit = $false
+                    foreach ($c in $cands) {
+                        if (-not $c) { continue }
+                        $ck = ConvertTo-FreshAgentAppCompactKey -Text ([string]$c)
+                        if ($ck -and ($want -contains $ck)) { $hit = $true; break }
+                    }
+                    if (-not $hit) { continue }
+                    & $add ([string]$p.Name)
+                    if ($p.Value.process) { & $add ([string]$p.Value.process) }
+                }
+            }
+        }
+        catch { }
+    }
+    return @{
+        resolvedName = $resolved
+        candidates   = @($list)
+    }
+}
+
+function Get-FreshAgentCloseAppTargets {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
+    )
+    $info = Get-FreshAgentCloseAppNameCandidates -Name $Name -FreshAppData $FreshAppData
+    $procs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.Id -ne $PID -and (Test-FreshAgentCloseProcessNameMatch -ProcessName $_.ProcessName -Candidates $info.candidates)
+        })
+    $msg = ''
+    if ($procs.Count -eq 0) { $msg = "Aucun process pour: $Name" }
+    return @{
+        resolvedName = [string]$info.resolvedName
+        candidates   = @($info.candidates)
+        processes    = @($procs | Select-Object Id, ProcessName)
+        message      = $msg
+    }
+}
+
 function Invoke-SkillCloseApp {
     param(
         [Parameter(Mandatory)][string]$Name,
         [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
     )
-    $resolved = Resolve-FreshAgentSpokenAppName -Name $Name -FreshAppData $FreshAppData
-    $key = ConvertTo-FreshAgentAppCompactKey -Text $resolved
-    if (-not $key) { $key = ConvertTo-FreshAgentAppCompactKey -Text $Name }
-    $procs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
-            $n = ConvertTo-FreshAgentAppCompactKey -Text $_.ProcessName
-            $n -and ($n -eq $key -or ($key.Length -ge 4 -and ($n.Contains($key) -or $key.Contains($n))))
-        })
+    $preview = Get-FreshAgentCloseAppTargets -Name $Name -FreshAppData $FreshAppData
+    $procs = @($preview.processes)
     if ($procs.Count -eq 0) {
-        # Essai nom brut
-        $procs = @(Get-Process -Name $Name -ErrorAction SilentlyContinue)
-    }
-    if ($procs.Count -eq 0) {
-        return @{ ok = $false; message = "Aucun process pour: $Name" }
+        return @{
+            ok      = $false
+            message = [string]$preview.message
+            spoken  = ("{0} n'est pas ouvert." -f $Name)
+        }
     }
     $killed = @()
     foreach ($p in $procs) {
+        $live = Get-Process -Id $p.Id -ErrorAction SilentlyContinue
+        if (-not $live) { continue }
+        if (-not (Test-FreshAgentCloseProcessNameMatch -ProcessName $live.ProcessName -Candidates $preview.candidates)) { continue }
         try {
-            Stop-Process -Id $p.Id -Force -ErrorAction Stop
-            $killed += $p.ProcessName
+            Stop-Process -Id $live.Id -Force -ErrorAction Stop
+            $killed += ('{0} ({1})' -f $live.ProcessName, $live.Id)
         }
         catch { }
     }
@@ -447,10 +538,11 @@ function Invoke-SkillCloseApp {
         return @{ ok = $false; message = "Echec fermeture: $Name" }
     }
     $closed = (($killed | Select-Object -Unique) -join ', ')
+    $who = if ($preview.resolvedName) { [string]$preview.resolvedName } else { $Name }
     return @{
         ok      = $true
         message = ("Ferme: {0}" -f $closed)
-        spoken  = ("{0} est ferme." -f $closed)
+        spoken  = ("{0} est ferme ({1})." -f $who, $closed)
     }
 }
 
@@ -497,10 +589,18 @@ function Set-FreshAgentVolume {
             'unmute' { [FreshAgentMediaKeys]::VK_VOLUME_MUTE }
             default { [FreshAgentMediaKeys]::VK_VOLUME_UP }
         }
-        $times = if ($Action -eq 'up' -or $Action -eq 'down') { 5 } else { 1 }
-        for ($i = 0; $i -lt $times; $i++) {
-            [FreshAgentMediaKeys]::Tap([byte]$vk)
-            Start-Sleep -Milliseconds 40
+        if ($Action -eq 'unmute') {
+            # Volume+ demute Windows, Volume- annule le cran sans re-muter.
+            [FreshAgentMediaKeys]::Tap([byte][FreshAgentMediaKeys]::VK_VOLUME_UP)
+            Start-Sleep -Milliseconds 60
+            [FreshAgentMediaKeys]::Tap([byte][FreshAgentMediaKeys]::VK_VOLUME_DOWN)
+        }
+        else {
+            $times = if ($Action -eq 'up' -or $Action -eq 'down') { 5 } else { 1 }
+            for ($i = 0; $i -lt $times; $i++) {
+                [FreshAgentMediaKeys]::Tap([byte]$vk)
+                Start-Sleep -Milliseconds 40
+            }
         }
         $spoken = switch ($Action) {
             'mute' { 'Son coupe.' }
@@ -516,9 +616,43 @@ function Set-FreshAgentVolume {
     }
 }
 
+function ConvertTo-FreshAgentSettingsPageKey {
+    param([string]$Page = '')
+    if ([string]::IsNullOrWhiteSpace($Page)) { return 'home' }
+    $p = $Page.Trim().ToLowerInvariant()
+    try {
+        $formD = $p.Normalize([Text.NormalizationForm]::FormD)
+        $sb = New-Object System.Text.StringBuilder
+        foreach ($ch in $formD.ToCharArray()) {
+            if ([Globalization.CharUnicodeInfo]::GetUnicodeCategory($ch) -ne [Globalization.UnicodeCategory]::NonSpacingMark) {
+                [void]$sb.Append($ch)
+            }
+        }
+        $p = $sb.ToString()
+    }
+    catch { }
+    $p = $p -replace '\s+', ' '
+    $p = $p -replace "^(de |du |des |d'|d )", ''
+    $p = $p.Trim()
+    switch -Regex ($p) {
+        '^(home|accueil)?$' { return 'home' }
+        '^(son|audio|volume|micros?|sound)$' { return 'sound' }
+        '^(affichage|ecran|moniteur|display)$' { return 'display' }
+        '^(wifi|wi-fi|wi fi|reseau|internet|ethernet|network)$' { return 'network' }
+        '^bluetooth$' { return 'bluetooth' }
+        '^(confidentialite|vie privee|privacy)$' { return 'privacy' }
+        '^(mises? a jour|windows update|windowsupdate|update|maj)$' { return 'update' }
+        '^(alimentation|veille|batterie|power)$' { return 'power' }
+        '^(personnalisation|theme|personalization)$' { return 'personalization' }
+        '^(applications?|apps?)$' { return 'apps' }
+        default { return 'home' }
+    }
+}
+
 function Open-FreshAgentWindowsSettings {
     param([string]$Page = 'home')
-    $uri = switch ($Page.ToLowerInvariant()) {
+    $key = ConvertTo-FreshAgentSettingsPageKey -Page $Page
+    $uri = switch ($key) {
         'sound' { 'ms-settings:sound' }
         'display' { 'ms-settings:display' }
         'network' { 'ms-settings:network' }
@@ -531,7 +665,7 @@ function Open-FreshAgentWindowsSettings {
         default { 'ms-settings:' }
     }
     Start-Process $uri
-    return @{ ok = $true; message = "Reglages: $Page" }
+    return @{ ok = $true; message = "Reglages: $key" }
 }
 
 function Set-FreshAgentWindowsTheme {
@@ -539,9 +673,6 @@ function Set-FreshAgentWindowsTheme {
     $apps = if ($Theme -eq 'light') { 1 } else { 0 }
     $path = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
     try {
-        if (Get-Command New-FreshAgentRestorePoint -ErrorAction SilentlyContinue) {
-            $null = New-FreshAgentRestorePoint -Description 'Fresh Agent theme'
-        }
         if (-not (Test-Path -LiteralPath $path)) {
             New-Item -Path $path -Force | Out-Null
         }
@@ -556,9 +687,6 @@ function Set-FreshAgentWindowsTheme {
 
 function Set-FreshAgentPowerPlan {
     param([ValidateSet('balanced', 'high', 'power_saver', 'ultimate')][string]$Plan = 'balanced')
-    if (Get-Command New-FreshAgentRestorePoint -ErrorAction SilentlyContinue) {
-        $null = New-FreshAgentRestorePoint -Description 'Fresh Agent power plan'
-    }
     $guid = switch ($Plan) {
         'balanced' { '381b4222-f694-41f0-9685-ff5bb260df2e' }
         'high' { '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c' }

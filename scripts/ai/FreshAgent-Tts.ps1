@@ -295,6 +295,7 @@ function ConvertTo-FreshAgentSpokenSkillLine {
     if ($msg -match '^(?i)Volume:\s*(.+)$') {
         $a = $Matches[1].Trim().ToLowerInvariant()
         if ($a -eq 'mute') { return 'Son coupe.' }
+        if ($a -eq 'unmute') { return 'Son reactive.' }
         if ($a -eq 'up') { return 'Volume augmente.' }
         if ($a -eq 'down') { return 'Volume baisse.' }
         return ("Volume : {0}." -f $a)

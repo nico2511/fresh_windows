@@ -97,6 +97,18 @@
       "parameters": { "Action": "mute" }
     },
     {
+      "id": "volume_unmute",
+      "enabled": true,
+      "skillId": "set_volume",
+      "say": "Son reactive.",
+      "patterns": [
+        "^(?:remets?|reactive[rz]?)\\s+(?:le\\s+)?son$",
+        "^(?:enleve|retire)\\s+(?:le\\s+)?muet$",
+        "^unmute$"
+      ],
+      "parameters": { "Action": "unmute" }
+    },
+    {
       "id": "volume_up",
       "enabled": true,
       "skillId": "set_volume",
@@ -176,6 +188,50 @@
       "say": "Extinction.",
       "patterns": ["^(?:eteins?|eteindre)(?:\\s+(?:le\\s+)?pc)?$", "^shutdown$"],
       "parameters": { "Action": "shutdown" }
+    },
+    {
+      "id": "power_plan_ultimate",
+      "enabled": true,
+      "skillId": "set_power_plan",
+      "say": "Plan performances ultimes.",
+      "patterns": [
+        "^(?:passe|mets|met|active|bascule)(?:\\s+en)?(?:\\s+le)?\\s+(?:mode\\s+)?performances?\\s+ultimes?$",
+        "^(?:plan|mode)\\s+(?:d[' ]?alimentation\\s+)?(?:ultimate|performances?\\s+ultimes?)$"
+      ],
+      "parameters": { "Plan": "ultimate" }
+    },
+    {
+      "id": "power_plan_high",
+      "enabled": true,
+      "skillId": "set_power_plan",
+      "say": "Plan performances.",
+      "patterns": [
+        "^(?:passe|mets|met|active|bascule)(?:\\s+en)?(?:\\s+le)?\\s+(?:mode\\s+)?(?:performances?(?:\\s+elevees)?|haute\\s+performance)$",
+        "^(?:plan|mode)\\s+(?:d[' ]?alimentation\\s+)?(?:performances?(?:\\s+elevees)?|haute\\s+performance)$"
+      ],
+      "parameters": { "Plan": "high" }
+    },
+    {
+      "id": "power_plan_balanced",
+      "enabled": true,
+      "skillId": "set_power_plan",
+      "say": "Plan equilibre.",
+      "patterns": [
+        "^(?:passe|mets|met|active|bascule)(?:\\s+en)?(?:\\s+le)?\\s+(?:mode\\s+)?equilibre$",
+        "^(?:plan|mode)\\s+(?:d[' ]?alimentation\\s+)?equilibre$"
+      ],
+      "parameters": { "Plan": "balanced" }
+    },
+    {
+      "id": "power_plan_saver",
+      "enabled": true,
+      "skillId": "set_power_plan",
+      "say": "Plan economie.",
+      "patterns": [
+        "^(?:passe|mets|met|active|bascule)(?:\\s+en)?(?:\\s+le)?\\s+(?:mode\\s+)?economie(?:\\s+d[' ]?energie)?$",
+        "^(?:plan|mode)\\s+(?:d[' ]?alimentation\\s+)?economie(?:\\s+d[' ]?energie)?$"
+      ],
+      "parameters": { "Plan": "power_saver" }
     },
     {
       "id": "winget_upgrade",

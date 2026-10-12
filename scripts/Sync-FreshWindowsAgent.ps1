@@ -38,13 +38,16 @@ function Set-FreshScriptUtf8Bom {
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) { return }
     $bytes = [System.IO.File]::ReadAllBytes($Path)
-    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
     if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
-        $text = $utf8NoBom.GetString($bytes, 3, $bytes.Length - 3)
+        return
     }
-    else {
-        $text = $utf8NoBom.GetString($bytes)
+    $needsBom = $false
+    foreach ($b in $bytes) {
+        if ($b -gt 127) { $needsBom = $true; break }
     }
+    if (-not $needsBom) { return }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    $text = $utf8NoBom.GetString($bytes)
     $utf8Bom = New-Object System.Text.UTF8Encoding $true
     [System.IO.File]::WriteAllText($Path, $text, $utf8Bom)
 }

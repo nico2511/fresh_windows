@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
   Temps creux : suggestions inventaire / demarrage (jamais de kill auto).
   Ollama idle seulement si IA ON et API deja prete (pas de demarrage "en douce").
@@ -100,12 +100,86 @@ function Get-FreshAgentIdleSuggestionMessage {
     }
 }
 
+function Receive-FreshAgentIdleAiSuggestion {
+    param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
+    $out = Join-Path $FreshAppData 'idle-suggest-ai.txt'
+    if (-not (Test-Path -LiteralPath $out)) { return }
+    try {
+        $text = (Get-Content -LiteralPath $out -Raw -Encoding UTF8).Trim()
+        Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue
+        if ([string]::IsNullOrWhiteSpace($text)) { return }
+        if (Get-Command Show-FreshAgentUserNotice -ErrorAction SilentlyContinue) {
+            Show-FreshAgentUserNotice -Title 'Suggestion' -Text $text -Level Info
+        }
+        if (Get-Command Add-FreshAgentActionLogEntry -ErrorAction SilentlyContinue) {
+            Add-FreshAgentActionLogEntry -Action 'idle_suggest_ai' -SkillId 'idle' -Ok $true `
+                -Message $text -Source 'idle' -FreshAppData $FreshAppData
+        }
+    }
+    catch { }
+}
+
+function Start-FreshAgentIdleAiSuggestion {
+    <#
+      Phrase Ollama hors thread UI, sans tool calling.
+    #>
+    param(
+        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot),
+        [string]$RepoRef = 'main',
+        [Parameter(Mandatory)][string]$Prompt
+    )
+    $dir = Join-Path $FreshAppData 'temp'
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    $lock = Join-Path $FreshAppData 'idle-suggest-ai.lock'
+    if (Test-Path -LiteralPath $lock) {
+        try {
+            if (((Get-Date) - (Get-Item -LiteralPath $lock).LastWriteTime).TotalMinutes -lt 10) { return }
+        }
+        catch { return }
+    }
+    Set-Content -LiteralPath $lock -Value (Get-Date).ToString('o') -Encoding UTF8
+    $promptFile = Join-Path $dir 'idle-ai-prompt.txt'
+    Set-Content -LiteralPath $promptFile -Value $Prompt -Encoding UTF8
+    $runner = Join-Path $dir 'idle-ai-run.ps1'
+    $freshEsc = $FreshAppData.Replace("'", "''")
+    $repoEsc = $RepoRef.Replace("'", "''")
+    $content = @"
+`$ErrorActionPreference = 'Stop'
+`$fresh = '$freshEsc'
+`$repo = '$repoEsc'
+`$lock = Join-Path `$fresh 'idle-suggest-ai.lock'
+`$out = Join-Path `$fresh 'idle-suggest-ai.txt'
+try {
+  . (Join-Path `$fresh 'lib\FreshAgent-Config.ps1')
+  . (Join-Path `$fresh 'lib\FreshAgent-SkillsEngine.ps1')
+  . (Join-Path `$fresh 'ai\Ollama-Manager.ps1')
+  . (Join-Path `$fresh 'ai\FreshAgent-OllamaBridge.ps1')
+  `$prompt = Get-Content -LiteralPath (Join-Path `$fresh 'temp\idle-ai-prompt.txt') -Raw -Encoding UTF8
+  `$cfg = Get-FreshAgentAiConfig -RepoRef `$repo -FreshAppData `$fresh -PreferLocal
+  if (-not `$cfg -or -not `$cfg.enabled) { return }
+  `$r = Invoke-FreshAgentAiTurn -UserPrompt ([string]`$prompt).Trim() -AiConfig `$cfg -RepoRef `$repo -FreshAppData `$fresh -NoTools
+  if (`$r -and `$r.message) {
+    Set-Content -LiteralPath `$out -Value ([string]`$r.message).Trim() -Encoding UTF8
+  }
+}
+catch { }
+finally {
+  Remove-Item -LiteralPath `$lock -Force -ErrorAction SilentlyContinue
+}
+"@
+    Set-Content -LiteralPath $runner -Value $content -Encoding UTF8
+    $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path -LiteralPath $ps)) { $ps = 'powershell.exe' }
+    Start-Process -FilePath $ps -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $runner) | Out-Null
+}
+
 function Invoke-FreshAgentIdleSuggestTick {
     param(
         [string]$FreshAppData = $(Get-FreshAgentAppDataRoot),
         [string]$RepoRef = 'main',
         $AiConfig = $null
     )
+    Receive-FreshAgentIdleAiSuggestion -FreshAppData $FreshAppData
     if (-not $AiConfig) { return }
     if (-not [bool]$AiConfig.enabled) { return }
     if (-not (Test-FreshAgentIdleWindow -IdleSeconds 600)) { return }
@@ -151,8 +225,8 @@ function Invoke-FreshAgentIdleSuggestTick {
     if (-not $ollamaReady) { return }
     if (-not (Get-Command Invoke-FreshAgentAiTurn -ErrorAction SilentlyContinue)) { return }
     try {
-        $prompt = "Suggestion idle Fresh Agent: $msg. En une phrase, propose une action concrete (sans tuer de process)."
-        $null = Invoke-FreshAgentAiTurn -Prompt $prompt -RepoRef $RepoRef -FreshAppData $FreshAppData -AiConfig $AiConfig
+        $prompt = "Suggestion idle Fresh Agent: $msg. En une phrase, propose une piste (texte seulement, aucune action, ne tue aucun process)."
+        Start-FreshAgentIdleAiSuggestion -FreshAppData $FreshAppData -RepoRef $RepoRef -Prompt $prompt
     }
     catch { }
 }

@@ -4,7 +4,7 @@
   "handler": "Invoke-SkillCloseApp",
   "menuVisible": false,
   "requiresAdmin": false,
-  "requiresConfirm": false,
+  "requiresConfirm": true,
   "parameters": {
     "name": { "type": "string", "required": true, "description": "Nom app / process a fermer" }
   },
