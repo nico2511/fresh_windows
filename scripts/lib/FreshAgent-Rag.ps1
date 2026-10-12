@@ -135,7 +135,7 @@ function Search-FreshAgentRagChunks {
         [string]$RepoRef = $(if ($env:FRESH_WIN_REF) { $env:FRESH_WIN_REF.Trim() } else { 'main' })
     )
     $index = Get-FreshAgentRagIndex -RebuildIfMissing -RepoRef $RepoRef -FreshAppData $FreshAppData
-    if (-not $index -or -not $index.chunks) { return @() }
+    if (-not $index -or -not $index.chunks) { return ,@() }
 
     $terms = @($Query.ToLowerInvariant() -split '\W+' | Where-Object { $_.Length -gt 2 })
     if ($terms.Count -eq 0) { $terms = @($Query.ToLowerInvariant()) }
@@ -151,7 +151,8 @@ function Search-FreshAgentRagChunks {
             $scored += [pscustomobject]@{ Score = $score; Chunk = $c }
         }
     }
-    return @($scored | Sort-Object -Property Score -Descending | Select-Object -First $TopK | ForEach-Object { $_.Chunk })
+    # La virgule empeche PowerShell de derouler un seul chunk (sinon .Count est $null).
+    return ,@($scored | Sort-Object -Property Score -Descending | Select-Object -First $TopK | ForEach-Object { $_.Chunk })
 }
 
 function Get-FreshAgentRagContextText {

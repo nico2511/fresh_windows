@@ -51,7 +51,7 @@ function Get-FreshAgentActionLogRecent {
         [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
     )
     $path = Get-FreshAgentActionLogPath -FreshAppData $FreshAppData
-    if (-not (Test-Path -LiteralPath $path)) { return @() }
+    if (-not (Test-Path -LiteralPath $path)) { return ,@() }
     try {
         $lines = @(Get-Content -LiteralPath $path -Encoding UTF8)
         $items = @()
@@ -59,7 +59,8 @@ function Get-FreshAgentActionLogRecent {
             if ([string]::IsNullOrWhiteSpace($line)) { continue }
             try { $items += ($line | ConvertFrom-Json) } catch { }
         }
-        return @($items | Select-Object -Last $Count)
+        # La virgule empeche PowerShell de derouler un seul element (sinon .Count est $null).
+        return ,@($items | Select-Object -Last $Count)
     }
-    catch { return @() }
+    catch { return ,@() }
 }

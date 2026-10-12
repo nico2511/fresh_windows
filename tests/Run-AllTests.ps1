@@ -23,10 +23,12 @@ Write-Host "`n=== Smoke-VoiceHealth ===" -ForegroundColor Cyan
 & (Join-Path $root 'Smoke-VoiceHealth.ps1')
 if ($LASTEXITCODE -ne 0) { $failed++ }
 
-$pesterMod = Get-Module -ListAvailable -Name Pester |
-    Where-Object { $_.Version -ge [version]'5.0' -and $_.Version -lt [version]'6.0' } |
-    Sort-Object Version -Descending |
-    Select-Object -First 1
+$pesterMods = @(Get-Module -ListAvailable -Name Pester |
+    Where-Object { $_.Version -ge [version]'5.0' -and $_.Version -lt [version]'6.0' })
+$pesterMod = $pesterMods | Where-Object { $_.Version -eq [version]'5.6.1' } | Select-Object -First 1
+if (-not $pesterMod) {
+    $pesterMod = $pesterMods | Sort-Object Version -Descending | Select-Object -First 1
+}
 if ($pesterMod) {
     Write-Host "`n=== Pester $($pesterMod.Version) ===" -ForegroundColor Cyan
     Import-Module Pester -RequiredVersion $pesterMod.Version -Force -ErrorAction Stop
