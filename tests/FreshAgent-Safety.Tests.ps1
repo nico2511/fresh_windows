@@ -52,14 +52,11 @@ Describe 'FreshAgent safety' {
     }
 
     It 'cleanup recycle bin defaults to opt-in' {
+        # Sous PS 5.1, Get-Command.ScriptBlock.Ast.ParamBlock est vide pour ce param().
         $src = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'scripts\lib\FreshAgent-Optimize.ps1') -Raw
+        $src | Should -Match '(?m)function\s+Invoke-SkillCleanup\b'
         $src | Should -Match '(?m)\$RecycleBin\s*=\s*\$false'
-        $fn = (Get-Command Invoke-SkillCleanup).ScriptBlock.Ast
-        $param = @($fn.ParamBlock.Parameters) | Where-Object {
-            $_.Name.Extent.Text -match 'RecycleBin'
-        } | Select-Object -First 1
-        $param | Should -Not -BeNullOrEmpty
-        $param.DefaultValue.Extent.Text.Trim() | Should -Be '$false'
+        $src | Should -Not -Match '(?m)\[bool\]\s*\$RecycleBin'
     }
 
     It 'pending confirm expires and a later ok does nothing' {
