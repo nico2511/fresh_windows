@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Ferme les processus " mode jeu " (liste générique GitHub). Pas besoin d'admin pour tes propres apps.

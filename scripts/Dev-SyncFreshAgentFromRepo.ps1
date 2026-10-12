@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Copie le clone Git local vers %LOCALAPPDATA%\FreshWindows (dev / test sans GitHub).
@@ -122,6 +122,7 @@ $coreLib = Join-Path $scriptsSrc 'lib\Launcher-Core.ps1'
 Publish-FreshGameModeWatchStubs -FreshAppData $FreshAppData | Out-Null
 
 Set-Content -LiteralPath (Join-Path $FreshAppData 'scripts.ref') -Value 'local-dev' -Encoding UTF8 -NoNewline
+Set-Content -LiteralPath (Join-Path $FreshAppData 'scripts.stamp') -Value 'local-dev' -Encoding UTF8 -NoNewline
 Set-Content -LiteralPath (Join-Path $FreshAppData 'repo.root') -Value $RepoRoot -Encoding UTF8 -NoNewline
 
 # Asset STT (voice_worker) — telecharge si absent (independant de CyberScribeNote installe)

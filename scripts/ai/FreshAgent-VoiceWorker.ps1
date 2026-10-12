@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
   STT via voice_worker.exe (asset FreshWindows, protocole CyberScribeNote).
   Telecharge depuis les releases CyberScribeNote si absent — sans installer CyberScribeNote.

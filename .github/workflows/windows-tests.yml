@@ -14,14 +14,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Pester
-        shell: pwsh
+      - name: Install Pester 5.6.1
+        shell: powershell
         run: |
+          $ErrorActionPreference = 'Stop'
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
           Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-          Install-Module Pester -MinimumVersion 5.0 -Force -Scope CurrentUser -SkipPublisherCheck
+          Install-Module -Name Pester -RequiredVersion 5.6.1 -Force -Scope CurrentUser -SkipPublisherCheck -AllowClobber
+          Import-Module Pester -RequiredVersion 5.6.1 -Force
+          Write-Host ("Pester " + (Get-Module Pester).Version + " / PS " + $PSVersionTable.PSVersion)
 
       - name: Run all tests
-        shell: pwsh
+        shell: powershell
         run: |
           & "${{ github.workspace }}/tests/Run-AllTests.ps1"
         env:

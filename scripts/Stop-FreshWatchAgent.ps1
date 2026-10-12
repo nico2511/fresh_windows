@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Arrete toutes les instances Fresh Agent (systray / Launch-GameModeWatch).

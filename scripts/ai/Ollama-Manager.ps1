@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
   Demarrage Ollama + verification / telechargement des modeles (API locale).
 #>

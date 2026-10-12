@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
   Cycle de vie IA : un seul chemin Enable/Disable.
   IA ON => Ollama autoStart + EnsureModel (pas de fallback modele).

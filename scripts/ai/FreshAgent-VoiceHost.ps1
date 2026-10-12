@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
   Host detache pour voice_worker.exe.
   Isole le pipe stdout du process tray WinForms (sinon plantage STA).

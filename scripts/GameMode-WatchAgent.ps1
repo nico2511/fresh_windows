@@ -44,13 +44,15 @@ function Set-WatchScriptUtf8Bom {
     if (-not (Test-Path -LiteralPath $Path)) { return }
     try {
         $bytes = [System.IO.File]::ReadAllBytes($Path)
-        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
         if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
-            $text = $utf8NoBom.GetString($bytes, 3, $bytes.Length - 3)
+            return
         }
-        else {
-            $text = $utf8NoBom.GetString($bytes)
+        $needsBom = $false
+        foreach ($b in $bytes) {
+            if ($b -gt 127) { $needsBom = $true; break }
         }
+        if (-not $needsBom) { return }
+        $text = (New-Object System.Text.UTF8Encoding $false).GetString($bytes)
         [System.IO.File]::WriteAllText($Path, $text, (New-Object System.Text.UTF8Encoding $true))
     }
     catch { }
@@ -843,6 +845,18 @@ function Start-WatchAgentModuleBootAsync {
     }
 
     $script:FreshAgentModuleBootPending = $false
+    if (-not $script:FreshAgentStampSyncAttempted) {
+        $script:FreshAgentStampSyncAttempted = $true
+        try {
+            if (Test-LocalScriptsStale) {
+                Write-WatchLog 'Scripts agent perimes — sync avant boot modules'
+                Invoke-SyncLocalScripts
+            }
+        }
+        catch {
+            Write-WatchLog ("Stamp sync: {0}" -f $_.Exception.Message)
+        }
+    }
     Write-WatchLog 'Boot modules Fresh Agent (async UI)...'
 
     $script:WatchModuleBootPlan = @(
@@ -1145,9 +1159,36 @@ function Invoke-IdleLaunchersOnly {
 
 function Test-LocalScriptsStale {
     $refFile = Join-Path $FreshAppData 'scripts.ref'
-    if (-not (Test-Path -LiteralPath $refFile)) { return $true }
+    $devMode = Test-Path -LiteralPath (Join-Path $FreshAppData 'repo.root')
+    if (-not (Test-Path -LiteralPath $refFile)) {
+        return -not $devMode
+    }
     try {
-        return ((Get-Content -LiteralPath $refFile -Raw -Encoding UTF8).Trim() -ne $RepoRef)
+        $storedRef = (Get-Content -LiteralPath $refFile -Raw -Encoding UTF8).Trim()
+        if ($storedRef -eq 'local-dev') { return $false }
+        $localEpoch = ''
+        $stampFile = Join-Path $FreshAppData 'scripts.stamp'
+        if (Test-Path -LiteralPath $stampFile) {
+            $localEpoch = (Get-Content -LiteralPath $stampFile -Raw -Encoding UTF8).Trim()
+        }
+        $remoteEpoch = ''
+        if ($storedRef -ne 'local-dev') {
+            try {
+                $url = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/configs/agent-content.json"
+                $meta = Invoke-RestMethod -Uri $url -UseBasicParsing -TimeoutSec 4
+                if ($meta -and $null -ne $meta.epoch) { $remoteEpoch = [string]$meta.epoch }
+            }
+            catch { }
+        }
+        if (Get-Command Test-FreshAgentContentStampStale -ErrorAction SilentlyContinue) {
+            return [bool](Test-FreshAgentContentStampStale -StoredRef $storedRef -LocalEpoch $localEpoch -RemoteEpoch $remoteEpoch -RepoRef $RepoRef -DevMode:$devMode)
+        }
+        if ($devMode -and [string]::IsNullOrWhiteSpace($storedRef)) { return $false }
+        $refOnly = ($storedRef -split '\|', 2)[0].Trim()
+        if ($refOnly -ne $RepoRef) { return $true }
+        if ([string]::IsNullOrWhiteSpace($localEpoch)) { return $true }
+        if ($remoteEpoch) { return ($remoteEpoch.Trim() -ne $localEpoch.Trim()) }
+        return $false
     }
     catch { return $true }
 }
@@ -1204,11 +1245,11 @@ function Start-FreshAgentUiProfileBackground {
 function Log([string]`$m) { try { Add-Content -LiteralPath `$log -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' PROFILE ' + `$m) -Encoding UTF8 } catch {} }
 try {
   . (Join-Path `$fresh 'lib\FreshAgent-Config.ps1')
-  . (Join-Path `$fresh 'lib\FreshAgent-SkillsEngine.ps1')
-  . (Join-Path `$fresh 'lib\FreshAgent-SkillHandlers.ps1')
-  . (Join-Path `$fresh 'lib\FreshAgent-GameSession.ps1')
-  . (Join-Path `$fresh 'lib\FreshAgent-Inventory.ps1')
-  . (Join-Path `$fresh 'lib\FreshAgent-Profiles.ps1')
+  `$common = Join-Path `$fresh 'GameMode-Common.ps1'
+  if (Test-Path -LiteralPath `$common) {
+    try { . `$common -RepoRef `$repo } catch { Log ("GameMode-Common: `$(`$_.Exception.Message)") }
+  }
+  Import-FreshAgentStandardModules -FreshAppData `$fresh | Out-Null
   Log ("invoke begin `$profileId")
   `$r = Invoke-FreshAgentProfile -ProfileId `$profileId -RepoRef `$repo -FreshAppData `$fresh
   `$payload = @{
@@ -1308,6 +1349,10 @@ function Start-FreshAgentUiSkillBackground {
 function Log([string]`$m) { try { Add-Content -LiteralPath `$log -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' SKILL ' + `$m) -Encoding UTF8 } catch {} }
 try {
   . (Join-Path `$fresh 'lib\FreshAgent-Config.ps1')
+  `$common = Join-Path `$fresh 'GameMode-Common.ps1'
+  if (Test-Path -LiteralPath `$common) {
+    try { . `$common -RepoRef `$repo } catch { Log ("GameMode-Common: `$(`$_.Exception.Message)") }
+  }
   Import-FreshAgentStandardModules -FreshAppData `$fresh | Out-Null
   `$params = @{}
   try {
@@ -1322,7 +1367,7 @@ try {
   } else {
     `$r = Invoke-FreshAgentSkill -SkillId `$skillId -Parameters `$params -RepoRef `$repo -FreshAppData `$fresh -Source 'ui'
   }
-  `$spoken = $null
+  `$spoken = `$null
   if (`$r.spoken) { `$spoken = [string]`$r.spoken }
   elseif (Get-Command ConvertTo-FreshAgentSpokenSkillLine -ErrorAction SilentlyContinue) {
     try { `$spoken = ConvertTo-FreshAgentSpokenSkillLine -Result `$r } catch {}
@@ -1653,15 +1698,11 @@ function Write-AiResult([bool]`$Ok, [string]`$Message, `$Skills) {
 try {
   Log 'worker begin'
   . (Join-Path `$fresh 'lib\FreshAgent-Config.ps1')
-  . (Join-Path `$fresh 'lib\FreshAgent-SkillsEngine.ps1')
-  . (Join-Path `$fresh 'lib\FreshAgent-SkillHandlers.ps1')
-  . (Join-Path `$fresh 'lib\FreshAgent-GameSession.ps1')
-  . (Join-Path `$fresh 'ai\Ollama-Manager.ps1')
-  . (Join-Path `$fresh 'ai\FreshAgent-OllamaBridge.ps1')
-  . (Join-Path `$fresh 'lib\FreshAgent-Inventory.ps1')
-  . (Join-Path `$fresh 'lib\FreshAgent-Rag.ps1')
-  . (Join-Path `$fresh 'ai\FreshAgent-Tts.ps1')
-  . (Join-Path `$fresh 'lib\FreshAgent-History.ps1')
+  `$common = Join-Path `$fresh 'GameMode-Common.ps1'
+  if (Test-Path -LiteralPath `$common) {
+    try { . `$common -RepoRef `$repo } catch { Log ("GameMode-Common: `$(`$_.Exception.Message)") }
+  }
+  Import-FreshAgentStandardModules -FreshAppData `$fresh | Out-Null
   `$prompt = Get-Content -LiteralPath (Join-Path `$fresh 'ai-prompt.pending.txt') -Raw -Encoding UTF8
   `$cfg = Get-FreshAgentAiConfig -RepoRef `$repo -FreshAppData `$fresh -PreferLocal
   if (-not `$cfg.enabled) { throw 'IA desactivee - active IA : ON dans le panneau.' }

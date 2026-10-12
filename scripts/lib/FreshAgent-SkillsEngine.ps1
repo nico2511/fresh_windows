@@ -83,6 +83,44 @@ function Get-FreshAgentAiToolSchema {
     return $tools
 }
 
+function ConvertTo-FreshAgentBool {
+    param(
+        $Value,
+        [bool]$Default = $false
+    )
+    if ($null -eq $Value) { return $Default }
+    if ($Value -is [bool]) { return [bool]$Value }
+    if ($Value -is [int] -or $Value -is [long] -or $Value -is [byte] -or $Value -is [decimal] -or $Value -is [double]) {
+        return ([int64]$Value) -ne 0
+    }
+    $s = ([string]$Value).Trim().ToLowerInvariant()
+    if ($s -match '^(1|true|yes|oui|on|vrai)$') { return $true }
+    if ($s -match '^(0|false|no|non|off|faux)$') { return $false }
+    if ($s -eq '') { return $false }
+    return $Default
+}
+
+function Test-FreshAgentIsElevated {
+    try {
+        $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($id)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    }
+    catch { return $false }
+}
+
+function Test-FreshAgentSkillRequiresAdmin {
+    param($Skill)
+    if (-not $Skill) { return $false }
+    try {
+        if ($null -ne $Skill.requiresAdmin) {
+            return (ConvertTo-FreshAgentBool -Value $Skill.requiresAdmin -Default $false)
+        }
+    }
+    catch { }
+    return $false
+}
+
 function Invoke-FreshAgentSkill {
     param(
         [Parameter(Mandatory)]
@@ -99,22 +137,69 @@ function Invoke-FreshAgentSkill {
         return @{ ok = $false; message = "Skill inconnu: $SkillId" }
     }
 
+    if (Test-FreshAgentSkillRequiresAdmin -Skill $skill) {
+        if (-not (Test-FreshAgentIsElevated)) {
+            $label = if ($skill.title) { [string]$skill.title } else { $SkillId }
+            $msg = "Action refusee: '$label' exige une session administrateur. Ouvre Fresh Windows en admin (Executer en tant qu'administrateur), puis reessaie."
+            if (Get-Command Add-FreshAgentActionLogEntry -ErrorAction SilentlyContinue) {
+                Add-FreshAgentActionLogEntry -Action 'skill' -SkillId $SkillId -Parameters $Parameters `
+                    -Ok $false -Message $msg -Source $Source -FreshAppData $FreshAppData
+            }
+            return @{
+                ok      = $false
+                message = $msg
+                spoken  = "Il faut les droits administrateur pour cette action."
+                skillId = $SkillId
+            }
+        }
+    }
+
     $needsConfirm = $false
     if (-not $SkipConfirm -and (Get-Command Test-FreshAgentSkillRequiresConfirm -ErrorAction SilentlyContinue)) {
         $needsConfirm = Test-FreshAgentSkillRequiresConfirm -Skill $skill
     }
     if ($needsConfirm) {
-        $prompt = if ($skill.title) { [string]$skill.title } else { $SkillId }
+        $prompt = if ($skill.confirmPrompt) { [string]$skill.confirmPrompt } elseif ($skill.title) { [string]$skill.title } else { $SkillId }
+        if ($SkillId -eq 'close_app' -and (Get-Command Get-FreshAgentCloseAppTargets -ErrorAction SilentlyContinue)) {
+            $targetName = ''
+            foreach ($key in @('name', 'Name')) {
+                if ($Parameters.ContainsKey($key) -and $Parameters[$key]) {
+                    $targetName = [string]$Parameters[$key]
+                    break
+                }
+            }
+            $preview = Get-FreshAgentCloseAppTargets -Name $targetName -FreshAppData $FreshAppData
+            $procList = @($preview.processes)
+            if ($procList.Count -eq 0) {
+                $miss = if ($preview.message) { [string]$preview.message } else { "Aucun process pour: $targetName" }
+                return @{
+                    ok      = $false
+                    message = $miss
+                    spoken  = ("{0} n'est pas ouvert." -f $targetName)
+                    skillId = $SkillId
+                }
+            }
+            $names = ($procList | ForEach-Object { '{0} ({1})' -f $_.ProcessName, $_.Id }) -join ', '
+            $who = if ($preview.resolvedName) { [string]$preview.resolvedName } else { $targetName }
+            $prompt = "Fermer $who : $names"
+        }
         if (Get-Command Set-FreshAgentPendingConfirm -ErrorAction SilentlyContinue) {
             Set-FreshAgentPendingConfirm -SkillId $SkillId -Parameters $Parameters -Prompt $prompt `
                 -FreshAppData $FreshAppData -RepoRef $RepoRef -Source $Source | Out-Null
         }
-        $msg = "Confirmation requise: $prompt - dis 'oui' ou 'annule'."
+        $msg = "Confirmation requise: $prompt. Dis oui ou annule."
+        $spokenConfirm = "Je peux $prompt. Dis oui pour confirmer, ou annule."
         if (Get-Command Add-FreshAgentActionLogEntry -ErrorAction SilentlyContinue) {
             Add-FreshAgentActionLogEntry -Action 'confirm_pending' -SkillId $SkillId -Parameters $Parameters `
                 -Ok $true -Message $msg -Source $Source -FreshAppData $FreshAppData
         }
-        return @{ ok = $true; pendingConfirm = $true; message = $msg; skillId = $SkillId }
+        return @{
+            ok               = $true
+            pendingConfirm   = $true
+            message          = $msg
+            spoken           = $spokenConfirm
+            skillId          = $SkillId
+        }
     }
 
     $handler = $skill.handler
@@ -125,6 +210,20 @@ function Invoke-FreshAgentSkill {
         # Inject common params if handler accepts them
         $callParams = @{} + $Parameters
         $meta = (Get-Command $handler).Parameters
+        foreach ($key in @($callParams.Keys)) {
+            $coerce = $false
+            if ($meta.ContainsKey($key)) {
+                $pType = $meta[$key].ParameterType
+                if ($pType -eq [bool] -or $pType -eq [switch]) { $coerce = $true }
+            }
+            if (-not $coerce -and $skill.parameters) {
+                $spec = $skill.parameters.$key
+                if ($spec -and [string]$spec.type -eq 'boolean') { $coerce = $true }
+            }
+            if ($coerce) {
+                $callParams[$key] = ConvertTo-FreshAgentBool -Value $callParams[$key]
+            }
+        }
         if ($meta.ContainsKey('RepoRef') -and -not $callParams.ContainsKey('RepoRef')) {
             $callParams['RepoRef'] = $RepoRef
         }

@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
   Panneau Fresh Agent (clic gauche systray) — toggles et actions sans menu imbrique.
   Les handlers WinForms ne resolvent PAS Function: — uniquement $script: ScriptBlock.

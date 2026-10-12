@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
   WinUtil (Chris Titus) + O&O ShutUp10 + maintenance hebdo.
   Utilise $BaseUrl, $RepoRef, $FreshAppData du launcher parent.

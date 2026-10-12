@@ -15,17 +15,74 @@ function Clear-FreshAgentPendingConfirm {
     $script:FaPendingConfirm = $null
 }
 
-function Get-FreshAgentPendingConfirm {
-    param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
-    if ($script:FaPendingConfirm) { return $script:FaPendingConfirm }
-    $path = Get-FreshAgentPendingConfirmPath -FreshAppData $FreshAppData
-    if (-not (Test-Path -LiteralPath $path)) { return $null }
-    try {
-        $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
-        $script:FaPendingConfirm = $raw
-        return $raw
+function ConvertTo-FreshAgentConfirmTimestamp {
+    <#
+      (Get-Date).ToString('o') n'est pas castable en [datetime] sous Windows PowerShell 5.1
+      (culture courante). DateTimeOffset garde le decalage, donc l'age reste juste.
+    #>
+    param($Value)
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [datetimeoffset]) { return [datetimeoffset]$Value }
+    $styles = [Globalization.DateTimeStyles]::RoundtripKind -bor [Globalization.DateTimeStyles]::AllowWhiteSpaces
+    $culture = [Globalization.CultureInfo]::InvariantCulture
+    if ($Value -is [datetime]) {
+        return [datetimeoffset]([datetime]$Value)
     }
-    catch { return $null }
+    $s = ([string]$Value).Trim()
+    if ([string]::IsNullOrWhiteSpace($s)) { return $null }
+    # Pas de TryParse+[ref] : le cast PSReference echoue souvent en Windows PowerShell 5.1.
+    try {
+        return [datetimeoffset]::Parse($s, $culture, $styles)
+    }
+    catch { }
+    foreach ($fmt in @('o', 'yyyy-MM-ddTHH:mm:ss.fffffffK', 'yyyy-MM-ddTHH:mm:ss.fffK', 'yyyy-MM-ddTHH:mm:ssK')) {
+        try {
+            return [datetimeoffset]::ParseExact($s, $fmt, $culture, $styles)
+        }
+        catch { }
+    }
+    return $null
+}
+
+function Test-FreshAgentPendingConfirmExpired {
+    param(
+        $Pending,
+        [int]$MaxAgeSeconds = 60
+    )
+    if (-not $Pending) { return $true }
+    $atRaw = $null
+    try { $atRaw = $Pending.at } catch { return $true }
+    $at = ConvertTo-FreshAgentConfirmTimestamp -Value $atRaw
+    if (-not $at) { return $true }
+    $age = ([datetimeoffset](Get-Date) - [datetimeoffset]$at).TotalSeconds
+    if ($age -lt 0) { return $false }
+    return ($age -gt $MaxAgeSeconds)
+}
+
+function Get-FreshAgentPendingConfirm {
+    param(
+        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot),
+        [int]$MaxAgeSeconds = 60
+    )
+    $path = Get-FreshAgentPendingConfirmPath -FreshAppData $FreshAppData
+    $raw = $null
+    if (Test-Path -LiteralPath $path) {
+        try { $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json }
+        catch { $raw = $null }
+    }
+    elseif ($script:FaPendingConfirm) {
+        $raw = $script:FaPendingConfirm
+    }
+    if (-not $raw) {
+        $script:FaPendingConfirm = $null
+        return $null
+    }
+    if (Test-FreshAgentPendingConfirmExpired -Pending $raw -MaxAgeSeconds $MaxAgeSeconds) {
+        Clear-FreshAgentPendingConfirm -FreshAppData $FreshAppData
+        return $null
+    }
+    $script:FaPendingConfirm = $raw
+    return $raw
 }
 
 function Set-FreshAgentPendingConfirm {
@@ -56,7 +113,12 @@ function Test-FreshAgentSkillRequiresConfirm {
     param($Skill)
     if (-not $Skill) { return $false }
     try {
-        if ($null -ne $Skill.requiresConfirm) { return [bool]$Skill.requiresConfirm }
+        if ($null -ne $Skill.requiresConfirm) {
+            if (Get-Command ConvertTo-FreshAgentBool -ErrorAction SilentlyContinue) {
+                return (ConvertTo-FreshAgentBool -Value $Skill.requiresConfirm -Default $false)
+            }
+            if ($Skill.requiresConfirm -is [bool]) { return [bool]$Skill.requiresConfirm }
+        }
     }
     catch { }
     $id = [string]$Skill.id

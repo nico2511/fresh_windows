@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
   STT via API Windows (System.Speech) — Phase 3 push-to-talk menu agent.
 #>

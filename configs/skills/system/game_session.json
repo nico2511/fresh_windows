@@ -4,6 +4,8 @@
   "handler": "Invoke-SkillGameSession",
   "menuVisible": true,
   "requiresAdmin": false,
+  "requiresConfirm": true,
+  "confirmPrompt": "Le mode jeu va fermer des processus de la liste et activer Ultimate Performance",
   "parameters": {
     "launch": { "type": "string", "required": false, "description": "Alias app a lancer apres prep" }
   },

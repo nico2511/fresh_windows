@@ -1,12 +1,20 @@
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
-$root = Split-Path (Split-Path $PSCommandPath -Parent) -Parent
-. (Join-Path $root 'scripts\lib\FreshAgent-Config.ps1')
-. (Join-Path $root 'scripts\lib\FreshAgent-Health.ps1')
-. (Join-Path $root 'scripts\lib\FreshAgent-Confirm.ps1')
-. (Join-Path $root 'scripts\lib\FreshAgent-ActionLog.ps1')
 
 Describe 'FreshAgent Health + Confirm' {
+    BeforeAll {
+        $root = Split-Path (Split-Path $PSCommandPath -Parent) -Parent
+        if ([string]::IsNullOrWhiteSpace($root) -or -not (Test-Path -LiteralPath (Join-Path $root 'scripts'))) {
+            $here = $PSScriptRoot
+            if ([string]::IsNullOrWhiteSpace($here)) { $here = Split-Path -Parent $PSCommandPath }
+            $root = Split-Path -Parent $here
+        }
+        . (Join-Path $root 'scripts\lib\FreshAgent-Config.ps1')
+        . (Join-Path $root 'scripts\lib\FreshAgent-Health.ps1')
+        . (Join-Path $root 'scripts\lib\FreshAgent-Confirm.ps1')
+        . (Join-Path $root 'scripts\lib\FreshAgent-ActionLog.ps1')
+    }
+
     It 'Rejects kill when process name mismatches (PID recycle guard)' {
         $current = Get-Process -Id $PID
         $r = Stop-FreshAgentProcessVerified -ProcessId $PID -ProcessName 'DefinitelyNotThisProcess'

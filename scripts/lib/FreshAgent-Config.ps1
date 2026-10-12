@@ -18,17 +18,76 @@ function Set-FreshScriptUtf8Bom {
     if (-not (Test-Path -LiteralPath $Path)) { return }
     try {
         $bytes = [System.IO.File]::ReadAllBytes($Path)
-        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
         if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
-            $text = $utf8NoBom.GetString($bytes, 3, $bytes.Length - 3)
+            return
         }
-        else {
-            $text = $utf8NoBom.GetString($bytes)
+        $needsBom = $false
+        foreach ($b in $bytes) {
+            if ($b -gt 127) { $needsBom = $true; break }
         }
+        # ASCII pur: PS 5.1 le lit deja correctement. Ne pas reecrire (course entre process, dirty en Dev).
+        if (-not $needsBom) { return }
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        $text = $utf8NoBom.GetString($bytes)
         $utf8Bom = New-Object System.Text.UTF8Encoding $true
         [System.IO.File]::WriteAllText($Path, $text, $utf8Bom)
     }
     catch { }
+}
+
+function Get-FreshAgentScriptsStampPath {
+    param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
+    return (Join-Path $FreshAppData 'scripts.stamp')
+}
+
+function Write-FreshAgentScriptsStamp {
+    <#
+      Marque le contenu agent deja synchronise.
+      La valeur vient de configs/agent-content.json (epoch) quand il est present.
+    #>
+    param(
+        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot),
+        [string]$Epoch = ''
+    )
+    if ([string]::IsNullOrWhiteSpace($Epoch)) {
+        $contentFile = Join-Path $FreshAppData 'configs\agent-content.json'
+        if (Test-Path -LiteralPath $contentFile) {
+            try {
+                $meta = Get-Content -LiteralPath $contentFile -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ($null -ne $meta.epoch) { $Epoch = [string]$meta.epoch }
+            }
+            catch { }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($Epoch)) { return $false }
+    New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null
+    Set-Content -LiteralPath (Get-FreshAgentScriptsStampPath -FreshAppData $FreshAppData) -Value $Epoch.Trim() -Encoding UTF8 -NoNewline
+    return $true
+}
+
+function Test-FreshAgentContentStampStale {
+    <#
+      Dev (scripts.ref = local-dev) n'est jamais perime : pas de resync GitHub.
+      Sinon un stamp absent, une branche differente, ou un epoch distant different = perime.
+      RemoteEpoch vide = hors ligne : ne pas forcer un sync si un stamp local existe.
+    #>
+    param(
+        [string]$StoredRef = '',
+        [string]$LocalEpoch = '',
+        [string]$RemoteEpoch = '',
+        [string]$RepoRef = 'main',
+        [switch]$DevMode
+    )
+    if ($StoredRef -eq 'local-dev') { return $false }
+    if ($DevMode -and [string]::IsNullOrWhiteSpace($StoredRef)) { return $false }
+    if ([string]::IsNullOrWhiteSpace($StoredRef)) { return $true }
+    $refOnly = ($StoredRef -split '\|', 2)[0].Trim()
+    if ($refOnly -ne $RepoRef) { return $true }
+    if ([string]::IsNullOrWhiteSpace($LocalEpoch)) { return $true }
+    if (-not [string]::IsNullOrWhiteSpace($RemoteEpoch)) {
+        return ($RemoteEpoch.Trim() -ne $LocalEpoch.Trim())
+    }
+    return $false
 }
 
 function Get-FreshAgentRepoRawRoot {
@@ -387,6 +446,7 @@ function Get-FreshAgentRepoConfigSyncList {
     $paths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($p in @(
             'configs/agent-ai.json',
+            'configs/agent-content.json',
             'configs/skills-apps.json',
             'configs/skills-web.json',
             'configs/skills/registry.json',
@@ -485,6 +545,7 @@ function Sync-FreshAgentLocalAssets {
     }
 
     Set-Content -LiteralPath (Join-Path $FreshAppData 'agent.ref') -Value $Ref -Encoding UTF8 -NoNewline
+    Write-FreshAgentScriptsStamp -FreshAppData $FreshAppData | Out-Null
 
     if (Get-Command Write-FreshAgentLog -ErrorAction SilentlyContinue) {
         Write-FreshAgentLog -Category 'Sync' -Message ("Assets OK ref={0} configs={1} scripts={2}" -f $Ref, $configPaths.Count, $scriptPaths.Count) -FreshAppData $FreshAppData
