@@ -356,7 +356,135 @@ function Write-FreshWindowsJsonFile {
 function Test-FreshWindowsIsHostTerminalProcess {
     param([string]$ProcessName)
     $n = ([string]$ProcessName).ToLowerInvariant()
-    return ($n -in @('windowsterminal.exe', 'wt.exe', 'openconsole.exe'))
+    return ($n -in @('windowsterminal.exe', 'wt.exe', 'openconsole.exe', 'conhost.exe'))
+}
+
+function Get-FreshWindowsNotableDotNetModuleNames {
+    return @(
+        'PresentationFramework',
+        'WindowsBase',
+        'System.Windows.Forms',
+        'CimCmdlets',
+        'Microsoft.PowerShell.ScheduledTasks',
+        'ScheduledTasks'
+    )
+}
+
+function Get-FreshWindowsProcessMemoryDetail {
+    param([int]$ProcessId)
+    $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if (-not $proc) { return $null }
+    $notable = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($n in (Get-FreshWindowsNotableDotNetModuleNames)) { [void]$notable.Add($n) }
+    $modules = [System.Collections.ArrayList]@()
+    try {
+        foreach ($m in $proc.Modules) {
+            $base = [string]$m.ModuleName
+            if (-not $base) { continue }
+            $simple = $base
+            if ($simple.EndsWith('.dll', [StringComparison]::OrdinalIgnoreCase)) {
+                $simple = $simple.Substring(0, $simple.Length - 4)
+            }
+            if ($notable.Contains($simple) -or $notable.Contains($base)) {
+                if ($modules -notcontains $simple) { [void]$modules.Add($simple) }
+            }
+        }
+    }
+    catch { }
+    return [ordered]@{
+        pid           = $ProcessId
+        name          = $proc.ProcessName
+        wsMb          = [math]::Round($proc.WorkingSet64 / 1MB, 1)
+        privateMb     = [math]::Round($proc.PrivateMemorySize64 / 1MB, 1)
+        threadCount   = $proc.Threads.Count
+        dotnetModules = @($modules | Sort-Object)
+    }
+}
+
+function Get-FreshWindowsAgentMemorySnapshot {
+    param([string]$FreshAppData = $(Join-Path $env:LOCALAPPDATA 'FreshWindows'))
+    $procs = @(Get-FreshWindowsFreshProcesses -FreshAppData $FreshAppData)
+    $agentPids = @($procs | Where-Object { $_.role -in @('agent systray', 'enfant agent') } | ForEach-Object { [int]$_.pid })
+    $details = [System.Collections.ArrayList]@()
+    foreach ($pidNum in ($agentPids | Select-Object -Unique)) {
+        $d = Get-FreshWindowsProcessMemoryDetail -ProcessId $pidNum
+        if ($d) { [void]$details.Add($d) }
+    }
+    $sumWs = 0.0
+    $sumPrivate = 0.0
+    foreach ($d in $details) {
+        $sumWs += [double]$d.wsMb
+        $sumPrivate += [double]$d.privateMb
+    }
+    return [ordered]@{
+        at              = (Get-Date).ToString('o')
+        agentProcessIds = @($agentPids)
+        processes       = @($details)
+        totalWsMb       = [math]::Round($sumWs, 1)
+        totalPrivateMb  = [math]::Round($sumPrivate, 1)
+    }
+}
+
+function Format-FreshWindowsAgentMemorySection {
+    param($MemorySnapshot)
+    $lines = [System.Collections.ArrayList]@()
+    [void]$lines.Add('--- Memoire agent (WS, privee, threads, modules .NET notables) ---')
+    if (-not $MemorySnapshot -or -not $MemorySnapshot.processes -or $MemorySnapshot.processes.Count -eq 0) {
+        [void]$lines.Add('  (agent systray non detecte)')
+        return ($lines -join [Environment]::NewLine)
+    }
+    foreach ($d in $MemorySnapshot.processes) {
+        $mods = if ($d.dotnetModules -and $d.dotnetModules.Count -gt 0) { ($d.dotnetModules -join ', ') } else { '(aucun notable)' }
+        [void]$lines.Add(('  PID {0} {1} WS={2} Mo prive={3} Mo threads={4} modules=[{5}]' -f `
+                $d.pid, $d.name, $d.wsMb, $d.privateMb, $d.threadCount, $mods))
+    }
+    [void]$lines.Add(('  Total agent+enfants : WS={0} Mo prive={1} Mo' -f $MemorySnapshot.totalWsMb, $MemorySnapshot.totalPrivateMb))
+    return ($lines -join [Environment]::NewLine)
+}
+
+function Invoke-FreshWindowsBackgroundMemorySample {
+    param(
+        [int]$Minutes = 5,
+        [int]$IntervalSeconds = 60,
+        [string]$FreshAppData = $(Join-Path $env:LOCALAPPDATA 'FreshWindows'),
+        [string]$ReportPath = ''
+    )
+    if ($Minutes -lt 1) { $Minutes = 1 }
+    if ($IntervalSeconds -lt 15) { $IntervalSeconds = 15 }
+    $endAt = (Get-Date).AddMinutes($Minutes)
+    $samples = [System.Collections.ArrayList]@()
+    while ((Get-Date) -lt $endAt) {
+        $snap = Get-FreshWindowsAgentMemorySnapshot -FreshAppData $FreshAppData
+        [void]$samples.Add($snap)
+        if ((Get-Date).AddSeconds($IntervalSeconds) -ge $endAt) { break }
+        Start-Sleep -Seconds $IntervalSeconds
+    }
+    $lines = [System.Collections.ArrayList]@()
+    [void]$lines.Add('=== Echantillonnage memoire agent Fresh ===')
+    [void]$lines.Add(('Duree ~{0} min, intervalle {1} s' -f $Minutes, $IntervalSeconds))
+    [void]$lines.Add('')
+    $firstWs = $null
+    $lastWs = $null
+    foreach ($s in $samples) {
+        [void]$lines.Add((Format-FreshWindowsAgentMemorySection -MemorySnapshot $s))
+        [void]$lines.Add('')
+        if ($null -eq $firstWs) { $firstWs = [double]$s.totalWsMb }
+        $lastWs = [double]$s.totalWsMb
+    }
+    if ($null -ne $firstWs -and $null -ne $lastWs) {
+        $delta = [math]::Round($lastWs - $firstWs, 1)
+        [void]$lines.Add(('Delta WS total (premier -> dernier) : {0} Mo' -f $delta))
+    }
+    $text = $lines -join [Environment]::NewLine
+    if (-not $ReportPath) {
+        $ReportPath = Join-Path $FreshAppData ('background-audit-memsample-{0}.txt' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    }
+    try {
+        New-Item -ItemType Directory -Path (Split-Path $ReportPath -Parent) -Force | Out-Null
+        Set-Content -LiteralPath $ReportPath -Value $text -Encoding UTF8
+    }
+    catch { }
+    return @{ ok = $true; samples = @($samples); reportPath = $ReportPath; text = $text }
 }
 
 function Get-FreshWindowsFreshChildProcessRole {
@@ -513,6 +641,11 @@ function Get-FreshWindowsBackgroundMachineState {
     $aiUserPath = Join-Path $FreshAppData 'agent-ai.user.json'
     $watchUser = Read-FreshWindowsJsonFile -Path $watchUserPath
     $aiUser = Read-FreshWindowsJsonFile -Path $aiUserPath
+    $memorySnapshot = $null
+    try {
+        $memorySnapshot = Get-FreshWindowsAgentMemorySnapshot -FreshAppData $FreshAppData
+    }
+    catch { }
 
     $monitorEnabled = $true
     if ($watchUser -and $null -ne $watchUser.monitorEnabled) { $monitorEnabled = [bool]$watchUser.monitorEnabled }
@@ -539,6 +672,7 @@ function Get-FreshWindowsBackgroundMachineState {
             aiUserPath     = $aiUserPath
         }
         freshProcesses  = @(Get-FreshWindowsFreshProcesses -FreshAppData $FreshAppData)
+        agentMemory     = $memorySnapshot
     }
 }
 
@@ -575,6 +709,8 @@ function Format-FreshWindowsBackgroundAuditText {
             [void]$lines.Add(('  [{0}] PID {1} {2} CPU={3} WS={4} Mo' -f $fp.role, $fp.pid, $fp.name, $fp.cpu, $fp.wsMb))
         }
     }
+    [void]$lines.Add('')
+    [void]$lines.Add((Format-FreshWindowsAgentMemorySection -MemorySnapshot $MachineState.agentMemory))
     [void]$lines.Add('')
     [void]$lines.Add('--- Catalogue (impact decroissant, extrait) ---')
     foreach ($c in ($Catalog | Sort-Object { switch ($_.Impact) { 'Eleve' { 0 } 'Moyen a eleve' { 1 } 'Moyen' { 2 } default { 3 } } })) {
@@ -798,6 +934,8 @@ function Invoke-FreshWindowsBackgroundAudit {
         [switch]$NoConfirm,
         [string]$FreshAppData = $(Join-Path $env:LOCALAPPDATA 'FreshWindows'),
         [string]$ReportPath = '',
+        [int]$SampleMinutes = 0,
+        [int]$SampleIntervalSeconds = 60,
         [scriptblock]$ScheduledTaskDisable = $null,
         [scriptblock]$ScheduledTaskEnable = $null
     )
@@ -817,6 +955,17 @@ function Invoke-FreshWindowsBackgroundAudit {
     $state = Get-FreshWindowsBackgroundMachineState -FreshAppData $FreshAppData
     $text = Format-FreshWindowsBackgroundAuditText -MachineState $state
     Write-Host $text
+
+    if ($SampleMinutes -gt 0 -and -not $Apply -and -not $Restore) {
+        Write-Host ''
+        Write-Host ("Echantillonnage memoire ({0} min)..." -f $SampleMinutes) -ForegroundColor Cyan
+        $sampleReport = Join-Path $FreshAppData ('background-audit-memsample-{0}.txt' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+        $sr = Invoke-FreshWindowsBackgroundMemorySample -Minutes $SampleMinutes -IntervalSeconds $SampleIntervalSeconds `
+            -FreshAppData $FreshAppData -ReportPath $sampleReport
+        Write-Host $sr.text
+        Write-Host ''
+        Write-Host ("Rapport echantillonnage : {0}" -f $sr.reportPath) -ForegroundColor Cyan
+    }
 
     if (-not $ReportPath) {
         $ReportPath = Join-Path $FreshAppData ('background-audit-{0}.txt' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
