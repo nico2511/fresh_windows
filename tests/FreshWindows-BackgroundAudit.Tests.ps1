@@ -26,8 +26,9 @@ Describe 'FreshWindows background audit' {
         $names.Count | Should -Be 4
         $names | Should -Contain 'FreshWindows-WatchAgent'
         Test-FreshWindowsScheduledTaskIsFresh -TaskName 'FreshWindows-WingetUpgrade' | Should -Be $true
-        { Test-FreshWindowsScheduledTaskIsFresh -TaskName 'MicrosoftEdgeUpdateTaskMachineCore' } |
-            Should -Throw 'hors perimetre'
+        Test-FreshWindowsScheduledTaskIsFresh -TaskName 'MicrosoftEdgeUpdateTaskMachineCore' | Should -Be $false
+        { Get-FreshWindowsBackgroundScheduledTaskState -TaskName 'MicrosoftEdgeUpdateTaskMachineCore' } |
+            Should -Throw '*hors perimetre*'
     }
 
     It 'read-only audit does not create journal entries' {
@@ -64,6 +65,6 @@ Describe 'FreshWindows background audit' {
 
     It 'rejects scheduled task names outside Fresh catalog' {
         { Get-FreshWindowsBackgroundScheduledTaskState -TaskName 'Microsoft\Windows\Defrag\ScheduledDefrag' } |
-            Should -Throw 'hors perimetre'
+            Should -Throw '*hors perimetre*'
     }
 }

@@ -295,11 +295,14 @@ function Read-FreshWindowsJsonFile {
 
 function Merge-FreshWindowsJsonPatch {
     param(
-        [Parameter(Mandatory)]$Existing,
+        $Existing,
         [Parameter(Mandatory)]$Patch
     )
-    if (-not $Existing) {
-        return ($Patch | ConvertTo-Json -Depth 12 | ConvertFrom-Json)
+    if ($null -eq $Existing) {
+        if ($Patch -is [hashtable]) {
+            return ($Patch | ConvertTo-Json -Depth 12 | ConvertFrom-Json)
+        }
+        return $Patch
     }
     foreach ($prop in $Patch.PSObject.Properties) {
         $name = $prop.Name
