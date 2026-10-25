@@ -16,6 +16,14 @@ param(
     [string]$TranscriptionProfile = 'accurate'
 )
 
+$sttSettingsLib = Join-Path $PSScriptRoot '..\lib\FreshAgent-SttSettings.ps1'
+if (-not (Test-Path -LiteralPath $sttSettingsLib)) {
+    $sttSettingsLib = Join-Path (Split-Path $PSScriptRoot -Parent) 'lib\FreshAgent-SttSettings.ps1'
+}
+if (Test-Path -LiteralPath $sttSettingsLib) {
+    . $sttSettingsLib
+}
+
 $ErrorActionPreference = 'Continue'
 $logPath = Join-Path $FreshAppData 'voice-worker-host.log'
 $cmdPath = Join-Path $FreshAppData 'fa-voice-cmd.jsonl'
@@ -32,6 +40,7 @@ $script:HostRecording = $false
 $script:HostMicError = $false
 $script:HostNeedRearm = $false
 $script:HostPushToTalk = $false
+$script:HostTranscribing = $false
 $script:HostLastTranscriptAt = $null
 $script:HostRearmAfter = $null
 $script:HostShutdown = $false
@@ -48,6 +57,7 @@ function Write-HostStatus {
         ready            = [bool]$script:HostReady
         modelLoaded      = [bool]$script:HostModelLoaded
         recording        = [bool]$script:HostRecording
+        transcribing     = [bool]$script:HostTranscribing
         micError         = [bool]$script:HostMicError
         needRearm        = [bool]$script:HostNeedRearm
         lastTranscriptAt = $script:HostLastTranscriptAt
@@ -81,9 +91,14 @@ function Process-HostEventLine {
             Write-HostLog "worker error: $msg"
             if ($msg -match '(?i)micro|microphone|portaudio|device') { $script:HostMicError = $true }
         }
+        'transcribing' {
+            $script:HostTranscribing = $true
+            Write-HostLog 'evt: transcribing'
+        }
         'transcript' {
             $text = [string]$evt.text
             $script:HostRecording = $false
+            $script:HostTranscribing = $false
             $paused = Test-Path -LiteralPath $pausePath
             $pendingConfirm = Test-Path -LiteralPath (Join-Path $FreshAppData 'pending-confirm.json')
             $isConfirmWord = $false
@@ -97,6 +112,14 @@ function Process-HostEventLine {
                 Write-HostLog "transcript ignored (paused): $text"
             }
             elseif (-not [string]::IsNullOrWhiteSpace($text)) {
+                $useful = $true
+                if (Get-Command Test-FreshAgentVoiceHostTranscriptUseful -ErrorAction SilentlyContinue) {
+                    $useful = Test-FreshAgentVoiceHostTranscriptUseful -Text $text
+                }
+                if (-not $useful) {
+                    Write-HostLog "transcript ignored (noise): $text"
+                }
+                else {
                 try {
                     Set-Content -LiteralPath $pendingPath -Value $text.Trim() -Encoding UTF8
                     $script:HostLastTranscriptAt = (Get-Date).ToString('o')
@@ -111,6 +134,7 @@ function Process-HostEventLine {
                 catch {
                     Write-HostLog ("transcript write fail: $($_.Exception.Message)")
                 }
+                }
             }
             # Always-on: re-armer apres utterance. PTT: attendre le prochain appui.
             if (-not $script:HostPushToTalk) {
@@ -124,6 +148,7 @@ function Process-HostEventLine {
         }
         'recording' {
             $script:HostRecording = [bool]$evt.active
+            if ($script:HostRecording) { $script:HostTranscribing = $false }
             Write-HostLog ("recording=$($script:HostRecording)")
         }
         default {
@@ -205,6 +230,24 @@ namespace FreshAgent {
         }
     }
 
+    function Invoke-HostRecordStart {
+        if ($script:HostTranscribing) {
+            Write-HostLog 'record_start ignored (transcribing)'
+            return
+        }
+        if ($script:HostRecording) { return }
+        Send-Worker @{ cmd = 'toggle' } | Out-Null
+    }
+
+    function Invoke-HostRecordStop {
+        if ($script:HostTranscribing) {
+            Write-HostLog 'record_stop ignored (transcribing)'
+            return
+        }
+        if (-not $script:HostRecording) { return }
+        Send-Worker @{ cmd = 'toggle' } | Out-Null
+    }
+
     Start-Sleep -Milliseconds 250
     # Enrichir depuis agent-ai.json local (prompt FR + timings) si present
     $initialPrompt = 'Commandes PC en francais: lance Steam, lance Discord, lance Grok Bot, lance Cursor, ouvre Chrome, nettoyage.'
@@ -257,11 +300,25 @@ namespace FreshAgent {
             elseif ($null -ne $stt.listenSeconds) { $maxRec = [int]$stt.listenSeconds }
             if ($null -ne $stt.silenceMs) { $silenceMs = [int]$stt.silenceMs }
             if ($null -ne $stt.minRecordMs) { $minRec = [int]$stt.minRecordMs }
-            if ($null -ne $stt.pushToTalk) {
+            if (Get-Command Test-FreshAgentSttPushToTalkFromConfig -ErrorAction SilentlyContinue) {
+                $fakeCfg = [pscustomobject]@{ stt = $stt }
+                $script:HostPushToTalk = Test-FreshAgentSttPushToTalkFromConfig -AiConfig $fakeCfg
+            }
+            elseif ($null -ne $stt.listenMode) {
+                $script:HostPushToTalk = ([string]$stt.listenMode -eq 'pushToTalk')
+            }
+            elseif ($null -ne $stt.pushToTalk) {
                 $script:HostPushToTalk = [bool]$stt.pushToTalk
             }
-            elseif ($stt.listenMode) {
-                $script:HostPushToTalk = ([string]$stt.listenMode -eq 'pushToTalk')
+            if (Get-Command Resolve-FreshAgentSttModelSize -ErrorAction SilentlyContinue) {
+                $ModelSize = Resolve-FreshAgentSttModelSize -Requested $ModelSize -ModelsDir $modelsDir
+            }
+            elseif ($ModelSize -eq 'base') { $ModelSize = 'small' }
+            if (Get-Command Get-FreshAgentSttHostTiming -ErrorAction SilentlyContinue) {
+                $timing = Get-FreshAgentSttHostTiming -Stt $stt -PushToTalk $script:HostPushToTalk
+                $maxRec = $timing.maxRecordSeconds
+                $silenceMs = $timing.silenceMs
+                $minRec = $timing.minRecordMs
             }
         }
     }
@@ -269,14 +326,11 @@ namespace FreshAgent {
         Write-HostLog ("stt config read: $($_.Exception.Message)")
     }
 
-    # PTT: enregistre jusqu'au relachement (pas de coupe silence precoce).
     if ($script:HostPushToTalk) {
-        if ($maxRec -lt 30) { $maxRec = 30 }
-        if ($silenceMs -lt 60000) { $silenceMs = 60000 }
-        Write-HostLog ("mode=pushToTalk max=${maxRec}s silenceMs=$silenceMs")
+        Write-HostLog ("mode=pushToTalk max=${maxRec}s silenceMs=$silenceMs minMs=$minRec")
     }
     else {
-        Write-HostLog 'mode=alwaysOn'
+        Write-HostLog ("mode=alwaysOn max=${maxRec}s silenceMs=$silenceMs minMs=$minRec")
     }
 
     # Completer le prompt avec apps Start Menu (vocabulaire reel, pas des alias inventes)
@@ -356,7 +410,30 @@ namespace FreshAgent {
                         break
                     }
                     if ($cmdName -eq 'toggle') {
-                        Send-Worker @{ cmd = 'toggle' } | Out-Null
+                        if ($script:HostTranscribing) {
+                            Write-HostLog 'toggle ignored (transcribing)'
+                            continue
+                        }
+                        if ($script:HostRecording) {
+                            Invoke-HostRecordStop
+                        }
+                        else {
+                            Invoke-HostRecordStart
+                        }
+                        $script:HostNeedRearm = $false
+                        $script:HostRearmAfter = $null
+                        Write-HostStatus
+                        continue
+                    }
+                    if ($cmdName -eq 'record_start') {
+                        Invoke-HostRecordStart
+                        $script:HostNeedRearm = $false
+                        $script:HostRearmAfter = $null
+                        Write-HostStatus
+                        continue
+                    }
+                    if ($cmdName -eq 'record_stop') {
+                        Invoke-HostRecordStop
                         $script:HostNeedRearm = $false
                         $script:HostRearmAfter = $null
                         Write-HostStatus
@@ -388,12 +465,12 @@ namespace FreshAgent {
         }
 
         # Auto-rearm apres transcript (always-on uniquement)
-        if ($script:HostNeedRearm -and -not $script:HostRecording -and -not $script:HostPushToTalk) {
+        if ($script:HostNeedRearm -and -not $script:HostRecording -and -not $script:HostTranscribing -and -not $script:HostPushToTalk) {
             $paused = Test-Path -LiteralPath $pausePath
             if (-not $paused) {
                 if ($script:HostRearmAfter -and ((Get-Date) -ge [datetime]$script:HostRearmAfter)) {
                     Write-HostLog 'auto-rearm toggle'
-                    Send-Worker @{ cmd = 'toggle' } | Out-Null
+                    Invoke-HostRecordStart
                     $script:HostNeedRearm = $false
                     $script:HostRearmAfter = $null
                     Write-HostStatus

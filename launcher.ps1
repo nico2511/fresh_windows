@@ -72,7 +72,7 @@ $FreshAppData = Join-Path $env:LOCALAPPDATA "FreshWindows"
 $CustomAppsLocalDir = Join-Path $FreshAppData "apps-custom"
 $script:FreshBrand = "Fresh Windows"
 # Incrementer quand les libs changent alors que FRESH_WIN_REF reste "main" (sinon cache perime)
-$script:FreshWindowsLibEpoch = 51
+$script:FreshWindowsLibEpoch = 52
 
 function Ensure-FreshWindowsExecutionPolicy {
     <#

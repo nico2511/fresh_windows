@@ -46,6 +46,8 @@ if ($pesterMod) {
         'FreshAgent-Rag.Tests.ps1',
         'FreshAgent-Config.Tests.ps1',
         'FreshAgent-VoiceRouter.Tests.ps1',
+        'FreshAgent-Ptt.Tests.ps1',
+        'FreshAgent-SttMode.Tests.ps1',
         'FreshAgent-Health.Tests.ps1',
         'FreshAgent-Safety.Tests.ps1',
         'Appx-Bloatware.Tests.ps1',
