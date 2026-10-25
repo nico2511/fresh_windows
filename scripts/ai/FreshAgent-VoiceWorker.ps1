@@ -754,7 +754,7 @@ function Invoke-FreshAgentPttTick {
 function Start-FreshAgentPttTimerIfNeeded {
     if ($script:FaPttTimer) { return }
     $script:FaPttTimer = New-Object System.Windows.Forms.Timer
-    $script:FaPttTimer.Interval = 50
+    $script:FaPttTimer.Interval = 100
     $script:FaPttTimer.Add_Tick({
             try { Invoke-FreshAgentPttTick } catch { }
         })

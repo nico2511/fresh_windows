@@ -879,6 +879,7 @@ function Start-WatchAgentModuleBootAsync {
         @{ Rel = 'lib/FreshAgent-Health.ps1' },
         @{ Rel = 'lib/FreshAgent-Optimize.ps1' },
         @{ Rel = 'lib/FreshWindows-AppxBloatware.ps1' },
+        @{ Rel = 'lib/FreshWindows-BackgroundAudit.ps1' },
         @{ Rel = 'ai/Ollama-Manager.ps1' },
         @{ Rel = 'ai/FreshAgent-OllamaBridge.ps1' },
         @{ Rel = 'ai/Windows-Stt.ps1' },
@@ -3256,6 +3257,26 @@ $miSync = New-Object System.Windows.Forms.ToolStripMenuItem
 $miSync.Text = 'Mettre à jour scripts locaux (ref GitHub)'
 Add-WatchMenuClick $miSync { Invoke-SyncLocalScripts }
 $miFw.DropDownItems.Add($miSync) | Out-Null
+
+$miBgAudit = New-Object System.Windows.Forms.ToolStripMenuItem
+$miBgAudit.Text = 'Audit arriere-plan (rapport CPU/agent)'
+Add-WatchMenuClick $miBgAudit {
+    try {
+        $auditPs1 = Join-Path $FreshAppData 'Invoke-FreshWindowsBackgroundAudit.ps1'
+        $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if (-not (Test-Path -LiteralPath $auditPs1)) {
+            $raw = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/scripts/Invoke-FreshWindowsBackgroundAudit.ps1"
+            Invoke-WebRequest -Uri $raw -OutFile $auditPs1 -UseBasicParsing
+        }
+        Start-Process -FilePath $psExe -ArgumentList @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-File', $auditPs1
+        ) | Out-Null
+    }
+    catch {
+        Show-Balloon -Title 'Audit' -Text $_.Exception.Message -Icon Error
+    }
+}
+$miFw.DropDownItems.Add($miBgAudit) | Out-Null
 
 $menu.Items.Add('-') | Out-Null
 $miExit = $menu.Items.Add('Quitter')

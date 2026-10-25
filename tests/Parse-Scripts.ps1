@@ -32,7 +32,9 @@ $files = @(
     'scripts\ai\FreshAgent-Tts.ps1',
     'scripts\ai\FreshAgent-VoiceWorker.ps1',
     'scripts\ai\FreshAgent-VoiceHost.ps1',
-    'scripts\ai\FreshAgent-BackgroundWorker.ps1'
+    'scripts\ai\FreshAgent-BackgroundWorker.ps1',
+    'scripts\lib\FreshWindows-BackgroundAudit.ps1',
+    'scripts\Invoke-FreshWindowsBackgroundAudit.ps1'
 )
 function Test-FreshPs1Utf8Bom {
     param([Parameter(Mandatory)][string]$Path)
