@@ -304,9 +304,21 @@ function Merge-FreshWindowsJsonPatch {
         }
         return $Patch
     }
-    foreach ($prop in $Patch.PSObject.Properties) {
-        $name = $prop.Name
-        $val = $prop.Value
+    $entries = if ($Patch -is [hashtable]) {
+        $Patch.GetEnumerator()
+    }
+    else {
+        $Patch.PSObject.Properties
+    }
+    foreach ($prop in $entries) {
+        if ($Patch -is [hashtable]) {
+            $name = [string]$prop.Key
+            $val = $prop.Value
+        }
+        else {
+            $name = $prop.Name
+            $val = $prop.Value
+        }
         if ($val -is [pscustomobject] -or $val -is [hashtable]) {
             $sub = $null
             if ($Existing.PSObject.Properties.Name -contains $name) {
