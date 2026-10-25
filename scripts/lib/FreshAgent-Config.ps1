@@ -508,7 +508,8 @@ function Sync-FreshAgentLocalAssets {
         'lib/FreshAgent-Confirm.ps1',
         'lib/FreshAgent-WindowsActions.ps1',
         'lib/FreshAgent-Health.ps1',
-        'lib/FreshAgent-Optimize.ps1'
+        'lib/FreshAgent-Optimize.ps1',
+        'lib/FreshWindows-BackgroundAudit.ps1'
     )
     foreach ($rel in $scriptPaths) {
         $dest = Join-Path $FreshAppData ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)

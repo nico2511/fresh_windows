@@ -233,7 +233,7 @@ function Sync-GameModeLocalScripts {
         Write-FreshAgentScriptsStamp -FreshAppData $FreshAppData | Out-Null
     }
     else {
-        $epoch = '47'
+        $epoch = '48'
         $contentFile = Join-Path $FreshAppData 'configs\agent-content.json'
         if (Test-Path -LiteralPath $contentFile) {
             try {

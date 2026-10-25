@@ -177,7 +177,8 @@ function Open-ScheduledTasksMenu {
         Write-Host "1. Activer toutes les tâches" -ForegroundColor Green
         Write-Host "2. Lancer la maintenance maintenant (WinUtil + ShutUp10)" -ForegroundColor Yellow
         Write-Host "3. Supprimer toutes les tâches" -ForegroundColor Red
-        Write-Host "4. Retour" -ForegroundColor Gray
+        Write-Host "4. Audit arrière-plan Fresh (CPU / agent / tâches)" -ForegroundColor Cyan
+        Write-Host "5. Retour" -ForegroundColor Gray
         Write-Host ""
         $c = Read-Host "Choix"
 
@@ -185,7 +186,16 @@ function Open-ScheduledTasksMenu {
             "1" { Register-AllScheduledTasks }
             "2" { Invoke-MaintenanceReapply }
             "3" { Unregister-AllScheduledTasks }
-            "4" { return }
+            "4" {
+                if (Get-Command Open-FreshWindowsBackgroundAuditMenu -ErrorAction SilentlyContinue) {
+                    Open-FreshWindowsBackgroundAuditMenu
+                }
+                else {
+                    Write-Host "Module audit non charge (relance le launcher)." -ForegroundColor Red
+                    Wait-ForUser
+                }
+            }
+            "5" { return }
             default {
                 Write-Host "Choix invalide" -ForegroundColor Red
                 Start-Sleep 1

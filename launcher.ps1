@@ -9,7 +9,7 @@
 #    WinUtil : winutil-oneclick | winutil-standard | winutil-minimal |
 #              winutil-advanced | winutil-appx | maintenance
 #    Autre : tasks | game-mode | game-mode-shortcuts | game-mode-watch |
-#            powertoys-profile | shutup10 | brave-optimize | brave-debloat | betterzen
+#            background-audit | powertoys-profile | shutup10 | brave-optimize | brave-debloat | betterzen
 #
 #  Pin de version (commit / tag / branche) :
 #    $env:FRESH_WIN_REF='abc1234'
@@ -50,7 +50,7 @@ $FreshAppData = Join-Path $env:LOCALAPPDATA "FreshWindows"
 $CustomAppsLocalDir = Join-Path $FreshAppData "apps-custom"
 $script:FreshBrand = "Fresh Windows"
 # Incrémenter quand les libs changent alors que FRESH_WIN_REF reste "main" (sinon cache périmé)
-$script:FreshWindowsLibEpoch = 47
+$script:FreshWindowsLibEpoch = 48
 
 function Ensure-FreshWindowsExecutionPolicy {
     <#
@@ -143,7 +143,8 @@ function Get-FreshWindowsLibraryPaths {
         'Launcher-Core.ps1',
         'Launcher-WinUtil.ps1',
         'Launcher-Tasks.ps1',
-        'Launcher-GpuMenus.ps1'
+        'Launcher-GpuMenus.ps1',
+        'FreshWindows-BackgroundAudit.ps1'
     )
 
     # irm | iex : $PSScriptRoot est vide - Join-Path echoue si on l'appelle quand meme
@@ -1571,6 +1572,13 @@ function Invoke-SilentMode {
             }
             "winget-upgrade" {
                 $ok = [bool](Invoke-WingetUpgradeAll -NoPause)
+            }
+            "background-audit" {
+                if (-not (Get-Command Invoke-FreshWindowsBackgroundAudit -ErrorAction SilentlyContinue)) {
+                    throw 'FreshWindows-BackgroundAudit.ps1 non charge.'
+                }
+                $null = Invoke-FreshWindowsBackgroundAudit -FreshAppData $FreshAppData
+                $ok = $true
             }
             default {
                 Write-Host "Mode inconnu : $InstallMode" -ForegroundColor Red
