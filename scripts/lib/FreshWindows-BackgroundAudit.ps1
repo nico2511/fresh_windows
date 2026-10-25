@@ -143,7 +143,7 @@ function Get-FreshWindowsBackgroundCatalog {
             Account         = 'Utilisateur courant'
             Impact          = 'Moyen a eleve (timers UI, scan processus si surveillance ON)'
             Source          = 'scripts/GameMode-WatchAgent.ps1'
-            VerifyPs        = 'Get-CimInstance Win32_Process -Filter "Name=''powershell.exe''" | Where-Object { $_.CommandLine -match ''GameMode-WatchAgent'' } | Select-Object ProcessId,CommandLine'
+            VerifyPs        = 'Get-CimInstance Win32_Process -Filter "Name=''powershell.exe''" | Where-Object { $_.CommandLine -match ''GameMode-WatchAgent|Launch-GameModeWatch'' } | Select-Object ProcessId,CommandLine'
             DisablePs       = 'Arreter via menu systray Quitter (pas de kill auto -Apply)'
             EnablePs        = 'Start-WatchAgent.cmd ou tache FreshWindows-WatchAgent'
             ApplySupported  = $false
@@ -359,15 +359,49 @@ function Test-FreshWindowsIsHostTerminalProcess {
     return ($n -in @('windowsterminal.exe', 'wt.exe', 'openconsole.exe'))
 }
 
+function Get-FreshWindowsFreshChildProcessRole {
+    param([string]$ParentRole)
+    switch ([string]$ParentRole) {
+        'agent systray' { return 'enfant agent' }
+        'enfant agent' { return 'enfant agent' }
+        'worker' { return 'enfant worker' }
+        'enfant worker' { return 'enfant worker' }
+        'voix' { return 'enfant voix' }
+        'enfant voix' { return 'enfant voix' }
+        'ollama' { return 'enfant ollama' }
+        'enfant ollama' { return 'enfant ollama' }
+        default { return $null }
+    }
+}
+
 function Resolve-FreshWindowsKnownProcessRole {
     param(
         [string]$CommandLine,
-        [string]$ProcessName
+        [string]$ProcessName,
+        [string]$FreshAppData = ''
     )
     $cl = [string]$CommandLine
-    if ($cl -match 'GameMode-WatchAgent') { return 'agent systray' }
+    if ([string]::IsNullOrWhiteSpace($cl)) { return $null }
+
+    if ($cl -match '(?i)GameMode-WatchAgent|Launch-GameModeWatch|Start-WatchAgent\.cmd') {
+        return 'agent systray'
+    }
     if ($cl -match 'FreshAgent-BackgroundWorker') { return 'worker' }
-    if ($cl -match 'FreshAgent-VoiceWorker|voice_worker') { return 'voix' }
+    if ($cl -match 'FreshAgent-VoiceWorker|FreshAgent-VoiceHost|voice_worker') { return 'voix' }
+    if ($cl -match '(?i)idle-ai-run\.ps1') { return 'worker' }
+
+    if (-not [string]::IsNullOrWhiteSpace($FreshAppData)) {
+        $freshNorm = $FreshAppData.TrimEnd('\')
+        if ($cl -like "*$freshNorm*") {
+            if ($cl -match '(?i)Invoke-FreshWindowsBackgroundAudit|Sync-FreshWindowsAgent\.ps1|Launch-FreshWindows\.ps1|Register-WatchAgentTask|Launch-GameModeKill') {
+                return $null
+            }
+            if ($cl -match '(?i)FreshAgent-BackgroundWorker') { return 'worker' }
+            if ($cl -match '(?i)FreshAgent-VoiceWorker|FreshAgent-VoiceHost') { return 'voix' }
+            if ($cl -match '(?i)GameMode-WatchAgent|Launch-GameModeWatch') { return 'agent systray' }
+        }
+    }
+
     $pn = ([string]$ProcessName).ToLowerInvariant()
     if ($pn -eq 'voice_worker.exe') { return 'voix' }
     if ($pn -eq 'ollama.exe' -or $pn -eq 'ollama app.exe') { return 'ollama' }
@@ -381,17 +415,19 @@ function Get-FreshWindowsFreshProcesses {
     if (-not (Test-FreshWindowsBackgroundAuditOnWindows)) { return $found }
 
     $seenPids = @{}
+    $pidRole = @{}
     try {
-        $cim = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue
+        $cim = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
         foreach ($p in $cim) {
             $pidNum = [int]$p.ProcessId
             if ($pidNum -eq $PID) { continue }
             if (Test-FreshWindowsIsHostTerminalProcess -ProcessName $p.Name) { continue }
             $cl = [string]$p.CommandLine
-            $role = Resolve-FreshWindowsKnownProcessRole -CommandLine $cl -ProcessName $p.Name
+            $role = Resolve-FreshWindowsKnownProcessRole -CommandLine $cl -ProcessName $p.Name -FreshAppData $FreshAppData
             if (-not $role) { continue }
             $proc = Get-Process -Id $pidNum -ErrorAction SilentlyContinue
             $seenPids[$pidNum] = $true
+            $pidRole[$pidNum] = $role
             $found += [ordered]@{
                 role    = $role
                 pid     = $pidNum
@@ -399,6 +435,30 @@ function Get-FreshWindowsFreshProcesses {
                 cpu     = if ($proc) { $proc.CPU } else { $null }
                 wsMb    = if ($proc) { [math]::Round($proc.WorkingSet64 / 1MB, 1) } else { $null }
                 cmdLine = $cl
+            }
+        }
+
+        foreach ($p in $cim) {
+            $pidNum = [int]$p.ProcessId
+            if ($pidNum -eq $PID) { continue }
+            if ($seenPids.ContainsKey($pidNum)) { continue }
+            if (Test-FreshWindowsIsHostTerminalProcess -ProcessName $p.Name) { continue }
+            $parentId = 0
+            try { $parentId = [int]$p.ParentProcessId } catch { }
+            if ($parentId -le 0 -or -not $pidRole.ContainsKey($parentId)) { continue }
+            $childRole = Get-FreshWindowsFreshChildProcessRole -ParentRole $pidRole[$parentId]
+            if (-not $childRole) { continue }
+            $cl = [string]$p.CommandLine
+            $proc = Get-Process -Id $pidNum -ErrorAction SilentlyContinue
+            $seenPids[$pidNum] = $true
+            $pidRole[$pidNum] = $childRole
+            $found += [ordered]@{
+                role    = $childRole
+                pid     = $pidNum
+                name    = [string]$p.Name
+                cpu     = if ($proc) { $proc.CPU } else { $null }
+                wsMb    = if ($proc) { [math]::Round($proc.WorkingSet64 / 1MB, 1) } else { $null }
+                cmdLine = if ([string]::IsNullOrWhiteSpace($cl)) { "(parent PID $parentId)" } else { $cl }
             }
         }
     }
