@@ -27,7 +27,8 @@ function Resolve-FreshWindowsAppxBloatwareConfigPath {
         [void]$candidates.Add((Join-Path $FreshAppData ("configs\" + $fileName)))
     }
     if ($PSScriptRoot) {
-        $repoGuess = Join-Path $PSScriptRoot '..\..\configs\' + $fileName
+        $configDir = Join-Path $PSScriptRoot '..\..\configs'
+        $repoGuess = Join-Path $configDir $fileName
         try {
             $resolved = Resolve-Path -LiteralPath $repoGuess -ErrorAction Stop
             if ($resolved) { [void]$candidates.Add($resolved.Path) }
