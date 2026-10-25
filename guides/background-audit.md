@@ -88,7 +88,7 @@ Config surveillance : `%LOCALAPPDATA%\FreshWindows\watch-agent-user.json` (`moni
 5. **Timers rapides** : STT 400 ms, PTT 100 ms (anciennement 50 ms — corrigé en PR pour limiter le polling clavier).
 6. **Tâches admin** : dimanche 12:00 maintenance + 12:30 sync peuvent chevaucher (charge disque/CPU ponctuelle). Les déclencheurs sont enregistrés avec une **heure locale** (`StartBoundary` sans offset `+02:00`) pour éviter un décalage d’1 h après le passage à l’heure d’hiver — ré-enregistrer via menu **9 → 1** si une ancienne tâche affiche encore 11:00.
 7. **Faux positifs processus** : l’audit ne liste plus tout processus lancé depuis `%LOCALAPPDATA%\FreshWindows` (ex. Windows Terminal ou la session PowerShell de l’audit). Seuls les rôles connus apparaissent : `agent systray`, `worker`, `voix`, `ollama`.
-7. **Legacy** : `scripts/ai/_legacy/FreshAgent-WhisperLoop.ps1` (boucle Python) — **non utilisé** par le chemin voice_worker actuel.
+8. **Legacy** : `scripts/ai/_legacy/FreshAgent-WhisperLoop.ps1` (boucle Python) — **non utilisé** par le chemin voice_worker actuel.
 
 ---
 

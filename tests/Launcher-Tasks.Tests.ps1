@@ -10,7 +10,7 @@ Describe 'Launcher-Tasks scheduled triggers' {
     It 'Get-FreshWindowsScheduledTaskLocalStartBoundary est sans offset fuseau' {
         $bound = Get-FreshWindowsScheduledTaskLocalStartBoundary -At '12:00'
         $bound | Should -Match '^\d{4}-\d{2}-\d{2}T12:00:00$'
-        $bound | Should -Not -Match '[Z+-]\d'
+        $bound | Should -Not -Match 'T\d{2}:\d{2}:\d{2}[Z+-]'
     }
 
     It 'Set-FreshWindowsScheduledTaskTriggerLocalTime reecrit StartBoundary' {
