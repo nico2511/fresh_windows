@@ -65,7 +65,8 @@ foreach ($must in @(
         'lib\FreshAgent-Confirm.ps1',
         'lib\FreshAgent-WindowsActions.ps1',
         'lib\FreshAgent-Health.ps1',
-        'lib\FreshAgent-Optimize.ps1'
+        'lib\FreshAgent-Optimize.ps1',
+        'lib\FreshWindows-AppxBloatware.ps1'
     )) {
     $srcMust = Join-Path $scriptsSrc $must
     $dstMust = Join-Path $FreshAppData $must

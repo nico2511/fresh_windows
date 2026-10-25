@@ -25,6 +25,7 @@ $files = @(
     'scripts\lib\FreshAgent-WindowsActions.ps1',
     'scripts\lib\FreshAgent-Health.ps1',
     'scripts\lib\FreshAgent-Optimize.ps1',
+    'scripts\lib\FreshWindows-AppxBloatware.ps1',
     'scripts\ai\Ollama-Manager.ps1',
     'scripts\ai\Windows-Stt.ps1',
     'scripts\ai\FreshAgent-OllamaBridge.ps1',
