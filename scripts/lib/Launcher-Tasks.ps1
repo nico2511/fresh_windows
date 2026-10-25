@@ -24,6 +24,40 @@ function Get-CommonTaskSettings {
         -MultipleInstances IgnoreNew)
 }
 
+function Get-FreshWindowsScheduledTaskLocalStartBoundary {
+    <#
+      Heure locale sans decalage fuseau dans StartBoundary.
+      New-ScheduledTaskTrigger -At ajoute souvent +02:00 ; apres passage heure hiver les taches partent 1 h trop tot.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$At,
+        $DayOfWeek = $null
+    )
+    $parts = $At.Split(':')
+    if ($parts.Count -lt 2) {
+        throw "Heure invalide : $At"
+    }
+    $hour = [int]$parts[0]
+    $minute = [int]$parts[1]
+    $candidate = (Get-Date).Date.AddHours($hour).AddMinutes($minute)
+    if ($null -ne $DayOfWeek) {
+        while ($candidate.DayOfWeek -ne $DayOfWeek) {
+            $candidate = $candidate.AddDays(1)
+        }
+    }
+    return $candidate.ToString('yyyy-MM-ddTHH:mm:ss')
+}
+
+function Set-FreshWindowsScheduledTaskTriggerLocalTime {
+    param(
+        [Parameter(Mandatory)]$Trigger,
+        [Parameter(Mandatory)][string]$At,
+        $DayOfWeek = $null
+    )
+    $Trigger.StartBoundary = Get-FreshWindowsScheduledTaskLocalStartBoundary -At $At -DayOfWeek $DayOfWeek
+    return $Trigger
+}
+
 function Get-SyncLocalScriptsPowerShellCommand {
     # Resync agent complet via scripts/Sync-FreshWindowsAgent.ps1 (ref figee a l'enregistrement)
     return @"
@@ -52,6 +86,7 @@ function Register-AllScheduledTasks {
         $wingetArg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$wingetCmd`""
         $wingetAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $wingetArg
         $wingetTrigger = New-ScheduledTaskTrigger -Daily -At "12:00"
+        $wingetTrigger = Set-FreshWindowsScheduledTaskTriggerLocalTime -Trigger $wingetTrigger -At '12:00'
 
         Register-ScheduledTask `
             -TaskName $script:WingetUpgradeTaskName `
@@ -74,6 +109,7 @@ function Register-AllScheduledTasks {
         $maintArg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Normal -Command `"$maintInner`""
         $maintAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $maintArg
         $maintTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At "12:00"
+        $maintTrigger = Set-FreshWindowsScheduledTaskTriggerLocalTime -Trigger $maintTrigger -At '12:00' -DayOfWeek Sunday
 
         Register-ScheduledTask `
             -TaskName $script:WinUtilReapplyTaskName `
@@ -97,6 +133,7 @@ function Register-AllScheduledTasks {
         $syncArg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$syncCmd`""
         $syncAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $syncArg
         $syncTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At "12:30"
+        $syncTrigger = Set-FreshWindowsScheduledTaskTriggerLocalTime -Trigger $syncTrigger -At '12:30' -DayOfWeek Sunday
         $syncSettings = Get-CommonTaskSettings -Hours 1
 
         Register-ScheduledTask `

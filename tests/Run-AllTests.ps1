@@ -38,6 +38,8 @@ if ($pesterMod) {
     $pesterConfig.Output.Verbosity = 'Detailed'
 
     $pesterFiles = @(
+        'Launcher-Iex.Tests.ps1',
+        'Launcher-Tasks.Tests.ps1',
         'Launcher-Core.Tests.ps1',
         'FreshAgent-OllamaBridge.Tests.ps1',
         'FreshAgent-Inventory.Tests.ps1',

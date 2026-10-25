@@ -67,4 +67,21 @@ Describe 'FreshWindows background audit' {
         { Get-FreshWindowsBackgroundScheduledTaskState -TaskName 'Microsoft\Windows\Defrag\ScheduledDefrag' } |
             Should -Throw '*hors perimetre*'
     }
+
+    It 'Resolve-FreshWindowsKnownProcessRole ignore chemins AppData generiques' {
+        $appdata = 'C:\Users\x\AppData\Local\FreshWindows'
+        Resolve-FreshWindowsKnownProcessRole -CommandLine "wt.exe -d $appdata" -ProcessName 'WindowsTerminal.exe' |
+            Should -Be $null
+        Resolve-FreshWindowsKnownProcessRole -CommandLine "powershell -File $appdata\Invoke-FreshWindowsBackgroundAudit.ps1" `
+            -ProcessName 'powershell.exe' | Should -Be $null
+        Resolve-FreshWindowsKnownProcessRole -CommandLine 'powershell -STA -File GameMode-WatchAgent.ps1' `
+            -ProcessName 'powershell.exe' | Should -Be 'agent systray'
+        Resolve-FreshWindowsKnownProcessRole -CommandLine 'FreshAgent-BackgroundWorker.ps1 -Action Rag' `
+            -ProcessName 'powershell.exe' | Should -Be 'worker'
+    }
+
+    It 'Test-FreshWindowsIsHostTerminalProcess detecte Windows Terminal' {
+        Test-FreshWindowsIsHostTerminalProcess -ProcessName 'WindowsTerminal.exe' | Should -Be $true
+        Test-FreshWindowsIsHostTerminalProcess -ProcessName 'powershell.exe' | Should -Be $false
+    }
 }

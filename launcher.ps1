@@ -1,7 +1,7 @@
-﻿#Requires -RunAsAdministrator
+#Requires -RunAsAdministrator
 # ============================================================
 #  Fresh Windows - toolbox reinstall / maintenance
-#  Configs lues depuis GitHub (édition à distance)
+#  Configs lues depuis GitHub (edition a distance)
 #
 #  Modes non interactifs :
 #    $env:FRESH_WIN_MODE='full'; irm ... | iex
@@ -28,8 +28,30 @@ $RepoRef = if ($env:FRESH_WIN_REF -and $env:FRESH_WIN_REF.Trim()) {
     'main'
 }
 
-# Stop = les échecs remontent (try/catch locaux pour les cas attendus)
+# Stop = les echecs remontent (try/catch locaux pour les cas attendus)
 $ErrorActionPreference = "Stop"
+
+function Assert-FreshWindowsElevatedSession {
+    <#
+      #Requires est ignore sous irm | iex ; verifier explicitement les droits admin.
+    #>
+    try {
+        $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $pr = New-Object Security.Principal.WindowsPrincipal $id
+        if ($pr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            return
+        }
+    }
+    catch { }
+
+    Write-Host 'Acces refuse : ce script doit etre execute en PowerShell Administrateur.' -ForegroundColor Red
+    Write-Host '  Clic droit sur PowerShell -> Executer en tant qu''administrateur' -ForegroundColor Yellow
+    Write-Host '  Puis relancez la commande irm (ou le raccourci Bureau Fresh Windows).' -ForegroundColor Yellow
+    exit 1
+}
+
+Assert-FreshWindowsElevatedSession
+
 $Host.UI.RawUI.WindowTitle = "Fresh Windows"
 
 # TLS 1.2 requis sur certaines machines / vieux PowerShell
@@ -49,8 +71,8 @@ $IconUrl = "$RepoRawRoot/assets/fresh-windows.ico"
 $FreshAppData = Join-Path $env:LOCALAPPDATA "FreshWindows"
 $CustomAppsLocalDir = Join-Path $FreshAppData "apps-custom"
 $script:FreshBrand = "Fresh Windows"
-# Incrémenter quand les libs changent alors que FRESH_WIN_REF reste "main" (sinon cache périmé)
-$script:FreshWindowsLibEpoch = 49
+# Incrementer quand les libs changent alors que FRESH_WIN_REF reste "main" (sinon cache perime)
+$script:FreshWindowsLibEpoch = 50
 
 function Ensure-FreshWindowsExecutionPolicy {
     <#
@@ -75,7 +97,7 @@ function Ensure-FreshWindowsExecutionPolicy {
         if ($needsUser) {
             Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction Stop
             $changed = $true
-            Write-Host "ExecutionPolicy CurrentUser → RemoteSigned (scripts locaux autorises)." -ForegroundColor DarkGray
+            Write-Host "ExecutionPolicy CurrentUser -> RemoteSigned (scripts locaux autorises)." -ForegroundColor DarkGray
         }
     } catch {
         Write-Host "ExecutionPolicy CurrentUser non modifiable : $($_.Exception.Message)" -ForegroundColor DarkYellow
@@ -334,10 +356,10 @@ function Install-FullSetup {
     $c = [bool](Install-FromJson -FileName "apps-dev.json" -Category "Dev" -NoPause)
     $ok = $a -and $b -and $c
     if ($ok) {
-        Write-Host "`nFull Setup terminé !" -ForegroundColor Green
+        Write-Host "`nFull Setup termine !" -ForegroundColor Green
     }
     else {
-        Write-Host "`nFull Setup terminé avec des échecs (détail ci-dessus)." -ForegroundColor Red
+        Write-Host "`nFull Setup termine avec des echecs (detail ci-dessus)." -ForegroundColor Red
     }
     if (-not $NoPause -and (Get-Command Offer-FreshWindowsAppxBloatwarePreviewStep -ErrorAction SilentlyContinue)) {
         Offer-FreshWindowsAppxBloatwarePreviewStep -ConfigsBaseUrl $BaseUrl -FreshAppData $FreshAppData
@@ -387,7 +409,7 @@ function Get-ConfigObject {
         return $json
     }
     catch {
-        Write-Host "Erreur lors du téléchargement de $FileName" -ForegroundColor Red
+        Write-Host "Erreur lors du telechargement de $FileName" -ForegroundColor Red
         Write-Host $_.Exception.Message -ForegroundColor DarkRed
         return $null
     }
@@ -438,17 +460,17 @@ function Install-GitHubDownload {
     }
 
     New-Item -ItemType Directory -Path $destDir -Force | Out-Null
-    Write-Host "    Téléchargement → $destPath" -ForegroundColor DarkGray
+    Write-Host "    Telechargement -> $destPath" -ForegroundColor DarkGray
     try {
         Invoke-WebRequest -Uri $url -OutFile $destPath -UseBasicParsing
     }
     catch {
-        Write-Host "    Échec téléchargement : $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "    Echec telechargement : $($_.Exception.Message)" -ForegroundColor Red
         return $false
     }
 
     if (-not (Test-Path -LiteralPath $destPath)) {
-        Write-Host "    Fichier introuvable après téléchargement." -ForegroundColor Red
+        Write-Host "    Fichier introuvable apres telechargement." -ForegroundColor Red
         return $false
     }
 
@@ -460,7 +482,7 @@ function Install-GitHubDownload {
             Remove-Item -LiteralPath $destPath -Force -ErrorAction SilentlyContinue
         }
         catch {
-            Write-Host "    Échec extraction : $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "    Echec extraction : $($_.Exception.Message)" -ForegroundColor Red
             return $false
         }
 
@@ -492,10 +514,10 @@ function Install-GitHubDownload {
             $lnk.WorkingDirectory = (Split-Path -Parent $shortcutTarget)
             $lnk.Description = $name
             $lnk.Save()
-            Write-Host "    Raccourci menu Démarrer créé." -ForegroundColor DarkGray
+            Write-Host "    Raccourci menu Demarrer cree." -ForegroundColor DarkGray
         }
         catch {
-            Write-Host "    Raccourci non créé : $($_.Exception.Message)" -ForegroundColor DarkYellow
+            Write-Host "    Raccourci non cree : $($_.Exception.Message)" -ForegroundColor DarkYellow
         }
     }
 
@@ -510,7 +532,7 @@ function Test-WingetPackageInstalled {
     try {
         $output = winget list -e --id $Id --disable-interactivity 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) { return $false }
-        # Ligne de résultat contient l'ID (évite faux positifs sur l'en-tête)
+        # Ligne de resultat contient l'ID (evite faux positifs sur l'en-tete)
         return ($output -match [regex]::Escape($Id))
     }
     catch {
@@ -526,12 +548,12 @@ function Install-AppEntry {
 
     if ($App -is [string]) {
         if (Test-WingetPackageInstalled -Id $App) {
-            Write-Host "    déjà présent (winget) - skip" -ForegroundColor Green
+            Write-Host "    deja present (winget) - skip" -ForegroundColor Green
             return $true
         }
 
         winget install -e --id $App --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
-        # 0 = OK, -1978335189 (0x8A15002B) = déjà installé
+        # 0 = OK, -1978335189 (0x8A15002B) = deja installe
         $ok = ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189)
         if ($ok -and $App -eq 'Microsoft.PowerToys') {
             Start-Sleep -Seconds 2
@@ -560,12 +582,12 @@ function Install-AppEntry {
         return (Install-GitHubDownload -App $App)
     }
 
-    Write-Host "    Entrée non reconnue (attendu: winget id ou objet url)." -ForegroundColor Red
+    Write-Host "    Entree non reconnue (attendu: winget id ou objet url)." -ForegroundColor Red
     return $false
 }
 
 function Apply-PowerToysProfile {
-    Write-Host "  → Application du profil PowerToys..." -ForegroundColor Gray
+    Write-Host "  -> Application du profil PowerToys..." -ForegroundColor Gray
     $profile = Get-ConfigObject -FileName "powertoys-profile.json"
     if (-not $profile) {
         Write-Host "    Profil PowerToys introuvable sur GitHub." -ForegroundColor Red
@@ -576,7 +598,7 @@ function Apply-PowerToysProfile {
     $dir = Split-Path $settingsPath -Parent
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
 
-    # Stopper PowerToys pour écrire settings.json proprement
+    # Stopper PowerToys pour ecrire settings.json proprement
     Get-Process -Name "PowerToys*","PowerToys.Settings" -ErrorAction SilentlyContinue |
         Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 800
@@ -612,7 +634,7 @@ function Apply-PowerToysProfile {
 
     $settings | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $settingsPath -Encoding UTF8
 
-    # Relancer PowerToys si installé
+    # Relancer PowerToys si installe
     $ptCandidates = @(
         "$env:LOCALAPPDATA\PowerToys\PowerToys.exe",
         "$env:ProgramFiles\PowerToys\PowerToys.exe"
@@ -624,7 +646,7 @@ function Apply-PowerToysProfile {
         }
     }
 
-    Write-Host "    Profil PowerToys écrit : $settingsPath" -ForegroundColor DarkGray
+    Write-Host "    Profil PowerToys ecrit : $settingsPath" -ForegroundColor DarkGray
     return $true
 }
 
@@ -655,14 +677,14 @@ function Install-FromJson {
     $index = 0
     $failed = @()
 
-    Write-Host "`n→ Installation de la catégorie : $Category ($total apps)" -ForegroundColor Yellow
+    Write-Host "`n-> Installation de la categorie : $Category ($total apps)" -ForegroundColor Yellow
 
     foreach ($app in $apps) {
         $index++
         $label = Get-AppLabel -App $app
         Show-InstallProgress -Current $index -Total $total -App $label -Category $Category
         if (-not (Install-AppEntry -App $app)) {
-            Write-Host "    Échec : $label" -ForegroundColor Red
+            Write-Host "    Echec : $label" -ForegroundColor Red
             $failed += $label
         }
     }
@@ -671,11 +693,11 @@ function Install-FromJson {
     try { $Host.UI.RawUI.WindowTitle = $script:FreshBrand } catch { }
 
     if ($failed.Count -gt 0) {
-        Write-Host "`nÉchecs ($Category) : $($failed -join ', ')" -ForegroundColor Red
-        Write-Host "  ($($failed.Count)/$total en échec - codes winget / réseau non ignorés)" -ForegroundColor DarkYellow
+        Write-Host "`nEchecs ($Category) : $($failed -join ', ')" -ForegroundColor Red
+        Write-Host "  ($($failed.Count)/$total en echec - codes winget / reseau non ignores)" -ForegroundColor DarkYellow
     }
     else {
-        Write-Host "`nCatégorie $Category terminée. [$total/$total]" -ForegroundColor Green
+        Write-Host "`nCategorie $Category terminee. [$total/$total]" -ForegroundColor Green
     }
 
     if (-not $NoPause) { Wait-ForUser }
@@ -700,7 +722,7 @@ function Add-CustomAppPackCandidate {
 
     $key = $Name.ToLowerInvariant()
     if ($PackMap.ContainsKey($key)) {
-        # Priorité : local AppData > clone repo > GitHub
+        # Priorite : local AppData > clone repo > GitHub
         $rank = @{ local = 3; repo = 2; github = 1 }
         $existing = $PackMap[$key]
         if ($rank[$Source] -le $rank[$existing.Source]) { return }
@@ -780,7 +802,7 @@ function Install-AllCustomAppPacks {
 
     $packs = @(Get-CustomAppPacks)
     if ($packs.Count -eq 0) {
-        Write-Host "Aucun paquet custom trouvé." -ForegroundColor Yellow
+        Write-Host "Aucun paquet custom trouve." -ForegroundColor Yellow
         Write-Host "  Repo  : configs/apps-custom/*.json" -ForegroundColor DarkGray
         Write-Host "  Local : $CustomAppsLocalDir" -ForegroundColor DarkGray
         Write-Host "  IDs   : https://winstall.app" -ForegroundColor DarkGray
@@ -831,7 +853,7 @@ function Open-CustomAppsMenu {
 
         $packs = @(Get-CustomAppPacks)
         if ($packs.Count -eq 0) {
-            Write-Host "Aucun fichier *.json détecté." -ForegroundColor Yellow
+            Write-Host "Aucun fichier *.json detecte." -ForegroundColor Yellow
             Write-Host "Ajoute un paquet dans configs/apps-custom/ (fork) ou dans le dossier local." -ForegroundColor DarkGray
             Write-Host ""
             Write-Host "1. Ouvrir le dossier local" -ForegroundColor Yellow
@@ -905,7 +927,7 @@ function Open-CustomAppsMenu {
 }
 
 function Disable-EverythingAutostart {
-    Write-Host "  → Everything : désactivation service + démarrage auto..." -ForegroundColor Gray
+    Write-Host "  -> Everything : desactivation service + demarrage auto..." -ForegroundColor Gray
     $ok = $true
     try {
         $svc = Get-Service -Name 'Everything' -ErrorAction SilentlyContinue
@@ -914,7 +936,7 @@ function Disable-EverythingAutostart {
                 Stop-Service -Name 'Everything' -Force -ErrorAction SilentlyContinue
             }
             Set-Service -Name 'Everything' -StartupType Disabled -ErrorAction SilentlyContinue
-            Write-Host "    Service Everything désactivé." -ForegroundColor DarkGray
+            Write-Host "    Service Everything desactive." -ForegroundColor DarkGray
         }
         else {
             Write-Host "    Service Everything absent (OK)." -ForegroundColor DarkGray
@@ -936,7 +958,7 @@ function Disable-EverythingAutostart {
                 foreach ($p in $props.PSObject.Properties) {
                     if ($p.Name -match '(?i)Everything' -or [string]$p.Value -match '(?i)Everything\.exe') {
                         Remove-ItemProperty -LiteralPath $runKey -Name $p.Name -ErrorAction SilentlyContinue
-                        Write-Host "    Run retiré : $($p.Name)" -ForegroundColor DarkGray
+                        Write-Host "    Run retire : $($p.Name)" -ForegroundColor DarkGray
                     }
                 }
             }
@@ -949,7 +971,7 @@ function Disable-EverythingAutostart {
         Get-ChildItem -LiteralPath $startup -Filter '*Everything*' -ErrorAction SilentlyContinue |
             ForEach-Object {
                 Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
-                Write-Host "    Startup retiré : $($_.Name)" -ForegroundColor DarkGray
+                Write-Host "    Startup retire : $($_.Name)" -ForegroundColor DarkGray
             }
     } catch { }
 
@@ -976,7 +998,7 @@ function Disable-EverythingAutostart {
             }
             if ($new -ne $raw) {
                 Set-Content -LiteralPath $ini -Value $new -Encoding UTF8
-                Write-Host "    INI mis à jour : $ini" -ForegroundColor DarkGray
+                Write-Host "    INI mis a jour : $ini" -ForegroundColor DarkGray
             }
         } catch { }
     }
@@ -998,27 +1020,27 @@ function Invoke-BraveOptimize {
     }
 
     if ($Remove) {
-        Write-Host "`n→ Retrait profil Brave (policies Fresh)..." -ForegroundColor Yellow
+        Write-Host "`n-> Retrait profil Brave (policies Fresh)..." -ForegroundColor Yellow
         try {
             if (Test-Path -LiteralPath $regPath) {
                 Remove-Item -LiteralPath $regPath -Recurse -Force -ErrorAction Stop
-                Write-Host "  Policies supprimées : $regPath" -ForegroundColor Green
+                Write-Host "  Policies supprimees : $regPath" -ForegroundColor Green
                 Write-Host "  Relance Brave pour prendre effet." -ForegroundColor DarkGray
             }
             else {
-                Write-Host "  Aucune policy Fresh présente." -ForegroundColor DarkGray
+                Write-Host "  Aucune policy Fresh presente." -ForegroundColor DarkGray
             }
             if (-not $NoPause) { Wait-ForUser }
             return $true
         }
         catch {
-            Write-Host "  Échec retrait : $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "  Echec retrait : $($_.Exception.Message)" -ForegroundColor Red
             if (-not $NoPause) { Wait-ForUser }
             return $false
         }
     }
 
-    Write-Host "`n→ Profil Brave Fresh (policies curatées)..." -ForegroundColor Cyan
+    Write-Host "`n-> Profil Brave Fresh (policies curatees)..." -ForegroundColor Cyan
     if (-not $cfg -or -not $cfg.disable) {
         Write-Host "  brave-optimize.json introuvable." -ForegroundColor Red
         if (-not $NoPause) { Wait-ForUser }
@@ -1033,13 +1055,13 @@ function Invoke-BraveOptimize {
             New-ItemProperty -Path $regPath -Name $name -PropertyType DWord -Value $val -Force | Out-Null
             Write-Host ("    {0} = {1}" -f $name, $val) -ForegroundColor DarkGray
         }
-        Write-Host "  Policies écrites (Rewards/Wallet/VPN/Leo/News/Talk/télémétrie off ; Sync/Tor gardés)." -ForegroundColor Green
-        Write-Host "  Relance Brave si déjà ouvert. Vérif : brave://policy" -ForegroundColor DarkGray
+        Write-Host "  Policies ecrites (Rewards/Wallet/VPN/Leo/News/Talk/telemetrie off ; Sync/Tor gardes)." -ForegroundColor Green
+        Write-Host "  Relance Brave si deja ouvert. Verif : brave://policy" -ForegroundColor DarkGray
         if (-not $NoPause) { Wait-ForUser }
         return $true
     }
     catch {
-        Write-Host "  Échec policies Brave : $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "  Echec policies Brave : $($_.Exception.Message)" -ForegroundColor Red
         if (-not $NoPause) { Wait-ForUser }
         return $false
     }
@@ -1065,7 +1087,7 @@ IsRelative=1
 Path=Profiles/fresh.default
 Default=1
 "@ | Set-Content -LiteralPath $iniPath -Encoding UTF8
-        Write-Host "  Profil Zen créé : $profileDir" -ForegroundColor DarkGray
+        Write-Host "  Profil Zen cree : $profileDir" -ForegroundColor DarkGray
     }
 
     return $profileDir
@@ -1115,7 +1137,7 @@ function Invoke-BetterZen {
         [switch]$NoPause
     )
 
-    Write-Host "`n→ BetterZen (Betterfox zen/user.js)" -ForegroundColor Cyan
+    Write-Host "`n-> BetterZen (Betterfox zen/user.js)" -ForegroundColor Cyan
     $profilePath = Get-ZenDefaultProfilePath
     if (-not $profilePath -or -not (Test-Path -LiteralPath $profilePath)) {
         if ($EnsureProfile) {
@@ -1123,7 +1145,7 @@ function Invoke-BetterZen {
         }
         else {
             Write-Host "  Profil Zen introuvable sous %APPDATA%\zen." -ForegroundColor Red
-            Write-Host "  Installe Zen et lance-le une fois pour créer un profil." -ForegroundColor DarkYellow
+            Write-Host "  Installe Zen et lance-le une fois pour creer un profil." -ForegroundColor DarkYellow
             if (-not $NoPause) { Wait-ForUser }
             return $false
         }
@@ -1141,7 +1163,7 @@ function Invoke-BetterZen {
     try {
         Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing -ErrorAction Stop
         if (-not (Test-Path -LiteralPath $tmp) -or ((Get-Item $tmp).Length -lt 100)) {
-            throw 'Téléchargement BetterZen vide ou trop court.'
+            throw 'Telechargement BetterZen vide ou trop court.'
         }
 
         if (Test-Path -LiteralPath $dest) {
@@ -1151,13 +1173,13 @@ function Invoke-BetterZen {
         }
 
         Copy-Item -LiteralPath $tmp -Destination $dest -Force
-        Write-Host "  BetterZen écrit : $dest" -ForegroundColor Green
+        Write-Host "  BetterZen ecrit : $dest" -ForegroundColor Green
         Write-Host "  Ferme / relance Zen pour appliquer les prefs." -ForegroundColor Yellow
         if (-not $NoPause) { Wait-ForUser }
         return $true
     }
     catch {
-        Write-Host "  Échec BetterZen : $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "  Echec BetterZen : $($_.Exception.Message)" -ForegroundColor Red
         if (-not $NoPause) { Wait-ForUser }
         return $false
     }
@@ -1167,10 +1189,10 @@ function Open-BraveProfileMenu {
     do {
         Clear-Host
         Write-Host "=== PROFIL BRAVE ===" -ForegroundColor Magenta
-        Write-Host "Policies Fresh : Rewards/Wallet/VPN/Leo/News/Talk/télémétrie OFF." -ForegroundColor DarkGray
-        Write-Host "Sync et Tor restent actifs. Vérif : brave://policy" -ForegroundColor DarkGray
+        Write-Host "Policies Fresh : Rewards/Wallet/VPN/Leo/News/Talk/telemetrie OFF." -ForegroundColor DarkGray
+        Write-Host "Sync et Tor restent actifs. Verif : brave://policy" -ForegroundColor DarkGray
         Write-Host ""
-        Write-Host "1. Appliquer / réappliquer le profil" -ForegroundColor Green
+        Write-Host "1. Appliquer / reappliquer le profil" -ForegroundColor Green
         Write-Host "2. Retirer le profil (undo policies)" -ForegroundColor Yellow
         Write-Host "3. Retour" -ForegroundColor DarkGray
         Write-Host ""
@@ -1191,11 +1213,11 @@ function Open-Extensions {
     do {
         Clear-Host
         Write-Host "=== NAVIGATEURS / EXTENSIONS ===" -ForegroundColor Cyan
-        Write-Host "Zen : Betterfox à l'install. Brave : profil Fresh à l'install." -ForegroundColor DarkGray
+        Write-Host "Zen : Betterfox a l'install. Brave : profil Fresh a l'install." -ForegroundColor DarkGray
         Write-Host ""
-        Write-Host "1. Extensions Firefox-based (Zen, Firefox...) - Recommandé" -ForegroundColor Green
+        Write-Host "1. Extensions Firefox-based (Zen, Firefox...) - Recommande" -ForegroundColor Green
         Write-Host "2. Extensions Chrome-based (Brave, Chrome, Edge...)" -ForegroundColor Yellow
-        Write-Host "3. Profil Brave - réappliquer / retirer" -ForegroundColor Magenta
+        Write-Host "3. Profil Brave - reappliquer / retirer" -ForegroundColor Magenta
         Write-Host "4. Retour" -ForegroundColor DarkGray
         $c = Read-Host "Choix"
 
@@ -1206,7 +1228,7 @@ function Open-Extensions {
                 Write-Host "`nOuverture des extensions Firefox-based..." -ForegroundColor Yellow
                 foreach ($url in $urls) {
                     if ($url -notmatch '^https?://') {
-                        Write-Host "  URL ignorée (schéma non http/https) : $url" -ForegroundColor DarkYellow
+                        Write-Host "  URL ignoree (schema non http/https) : $url" -ForegroundColor DarkYellow
                         continue
                     }
                     Start-Process $url
@@ -1220,7 +1242,7 @@ function Open-Extensions {
                 Write-Host "`nOuverture des extensions Chrome-based..." -ForegroundColor Yellow
                 foreach ($url in $urls) {
                     if ($url -notmatch '^https?://') {
-                        Write-Host "  URL ignorée (schéma non http/https) : $url" -ForegroundColor DarkYellow
+                        Write-Host "  URL ignoree (schema non http/https) : $url" -ForegroundColor DarkYellow
                         continue
                     }
                     Start-Process $url
@@ -1277,7 +1299,7 @@ function Show-Menu {
     Write-Host ("Windows : {0} ({1})" -f $info.Edition, $info.DisplayVersion) -ForegroundColor DarkGray
     Write-Host ("Profil  : {0}" -f $info.ProfilePath) -ForegroundColor DarkGray
     Write-Host ("Ref     : {0}" -f $RepoRef) -ForegroundColor DarkGray
-    Write-Host "Apres formatage : 5 → 8 → 9 → 11" -ForegroundColor DarkGray
+    Write-Host "Apres formatage : 5 -> 8 -> 9 -> 11" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "--- Installer ---" -ForegroundColor DarkCyan
     Write-Host " 1  Apps standard" -ForegroundColor Green
@@ -1348,7 +1370,7 @@ function Invoke-GameModeKill {
         $idle.Kept | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
     }
 
-    Write-Host "`nAstuce : menu 11 → raccourci Bureau / agent barre des taches." -ForegroundColor DarkCyan
+    Write-Host "`nAstuce : menu 11 -> raccourci Bureau / agent barre des taches." -ForegroundColor DarkCyan
     if (-not $NoPause) { Wait-ForUser }
     return ($result.Skipped.Count -eq 0)
 }
@@ -1386,7 +1408,7 @@ function Install-GameModeShortcuts {
         Sync-GameModeLocalScripts -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl | Out-Null
     }
     catch {
-        Write-Host "Échec sync scripts locaux : $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "Echec sync scripts locaux : $($_.Exception.Message)" -ForegroundColor Red
         if (-not $NoPause) { Wait-ForUser }
         return $false
     }
@@ -1402,10 +1424,10 @@ function Install-GameModeShortcuts {
     $k.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
     $k.Arguments = "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$killStub`""
     $k.WorkingDirectory = $FreshAppData
-    $k.Description = "Fresh Windows - mode jeu (liste générique)"
+    $k.Description = "Fresh Windows - mode jeu (liste generique)"
     if (Test-Path -LiteralPath $iconPath) { $k.IconLocation = "$iconPath,0" }
     $k.Save()
-    Write-Host "→ Raccourci Bureau : Mode Jeu.lnk (sans admin)" -ForegroundColor Green
+    Write-Host "-> Raccourci Bureau : Mode Jeu.lnk (sans admin)" -ForegroundColor Green
 
     if ($IncludeWatchAgent) {
         # Retirer l'ancien Startup .lnk (cause du double agent avec la tache)
@@ -1496,7 +1518,7 @@ function Invoke-SilentMode {
 
     $InstallMode = $InstallMode.Trim().ToLowerInvariant()
     if ($InstallMode -in @('winget-task', 'winutil-task')) {
-        Write-Host "Alias '$InstallMode' → mode 'tasks'." -ForegroundColor DarkGray
+        Write-Host "Alias '$InstallMode' -> mode 'tasks'." -ForegroundColor DarkGray
         $InstallMode = 'tasks'
     }
 
@@ -1620,7 +1642,7 @@ function Invoke-SilentMode {
     }
 
     if (-not $ok) {
-        Write-Host "`nÉchec - exit 1 (voir messages ci-dessus)." -ForegroundColor Red
+        Write-Host "`nEchec - exit 1 (voir messages ci-dessus)." -ForegroundColor Red
         exit 1
     }
     Write-Host "`nOK - exit 0" -ForegroundColor Green
@@ -1636,7 +1658,7 @@ function Install-FreshWindowsDesktopShortcut {
 
         $iconPath = Join-Path $FreshAppData "fresh-windows.ico"
         if (-not (Test-Path -LiteralPath $iconPath)) {
-            Write-Host "→ Icône Fresh Windows..." -ForegroundColor DarkCyan
+            Write-Host "-> Icone Fresh Windows..." -ForegroundColor DarkCyan
             Invoke-WebRequest -Uri $IconUrl -OutFile $iconPath -UseBasicParsing
         }
 
@@ -1657,7 +1679,7 @@ function Install-FreshWindowsDesktopShortcut {
         }
         $lnk.Save()
 
-        # Demander élévation via le raccourci (bit RunAs)
+        # Demander elevation via le raccourci (bit RunAs)
         try {
             $bytes = [IO.File]::ReadAllBytes($lnkPath)
             # Shortcut flags at offset 0x15: set RunAsAdmin bit (0x20)
@@ -1668,14 +1690,14 @@ function Install-FreshWindowsDesktopShortcut {
         } catch { }
 
         Set-Content -LiteralPath $marker -Value (Get-Date -Format o) -Encoding UTF8
-        Write-Host "→ Raccourci Bureau créé : Fresh Windows.lnk" -ForegroundColor Green
+        Write-Host "-> Raccourci Bureau cree : Fresh Windows.lnk" -ForegroundColor Green
     }
     catch {
-        Write-Host "Raccourci Bureau non créé : $($_.Exception.Message)" -ForegroundColor DarkYellow
+        Write-Host "Raccourci Bureau non cree : $($_.Exception.Message)" -ForegroundColor DarkYellow
     }
 }
 
-# ========== ENTRÉE ==========
+# ========== ENTREE ==========
 if ($Mode -ne 'menu') {
     Invoke-SilentMode -InstallMode $Mode
     exit

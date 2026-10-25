@@ -37,12 +37,20 @@ $files = @(
     'scripts\Invoke-FreshWindowsBackgroundAudit.ps1'
 )
 function Test-FreshPs1Utf8Bom {
-    param([Parameter(Mandatory)][string]$Path)
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$RelativePath = ''
+    )
     $bytes = [System.IO.File]::ReadAllBytes($Path)
     $hasBom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
     $nonAscii = $false
     foreach ($b in $bytes) {
         if ($b -gt 127) { $nonAscii = $true; break }
+    }
+    # launcher.ps1 : pas de BOM (irm | iex) ; contenu ASCII pour PS 5.1 en local.
+    if ($RelativePath -eq 'launcher.ps1') {
+        if ($hasBom) { return $false }
+        return $true
     }
     # Windows PowerShell 5.1 lit un .ps1 sans BOM dans la page ANSI, pas en UTF-8.
     if ($nonAscii -and -not $hasBom) { return $false }
@@ -56,11 +64,16 @@ Get-ChildItem -LiteralPath $repoRoot -Filter '*.ps1' -Recurse -File -ErrorAction
     Where-Object { $_.FullName -notmatch '[\\/]\.git[\\/]' } |
     ForEach-Object {
         $rel = $_.FullName.Substring($repoRoot.Length).TrimStart('\', '/')
-        if (Test-FreshPs1Utf8Bom -Path $_.FullName) {
+        if (Test-FreshPs1Utf8Bom -Path $_.FullName -RelativePath $rel) {
             Write-Host "OK BOM $rel"
         }
         else {
-            Write-Host "FAIL BOM $rel (non-ASCII sans UTF-8 BOM)"
+            if ($rel -eq 'launcher.ps1') {
+                Write-Host "FAIL BOM $rel (UTF-8 BOM interdit sur launcher.ps1)"
+            }
+            else {
+                Write-Host "FAIL BOM $rel (non-ASCII sans UTF-8 BOM)"
+            }
             $bad++
         }
     }
