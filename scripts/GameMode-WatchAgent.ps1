@@ -878,6 +878,8 @@ function Start-WatchAgentModuleBootAsync {
         @{ Rel = 'lib/FreshAgent-WindowsActions.ps1' },
         @{ Rel = 'lib/FreshAgent-Health.ps1' },
         @{ Rel = 'lib/FreshAgent-Optimize.ps1' },
+        @{ Rel = 'lib/FreshWindows-AppxBloatware.ps1' },
+        @{ Rel = 'lib/FreshWindows-BackgroundAudit.ps1' },
         @{ Rel = 'ai/Ollama-Manager.ps1' },
         @{ Rel = 'ai/FreshAgent-OllamaBridge.ps1' },
         @{ Rel = 'ai/Windows-Stt.ps1' },
@@ -2901,6 +2903,7 @@ function Open-FreshAgentDashboardPanel {
             AuditStartup      = { & $script:FreshAgentStartSkillBg 'audit_startup' @{} }
             AuditServices     = { & $script:FreshAgentStartSkillBg 'audit_services' @{} }
             CleanupConfirm    = { & $script:FreshAgentStartSkillBg 'cleanup' @{} }
+            BloatwarePreview  = { & $script:FreshAgentStartSkillBg 'remove_preinstalled_apps' @{ Apply = $false } }
             FwMenu            = { try { Start-FreshWindowsElevated -RepoRef $script:RepoRef } catch { Show-FreshAgentUserNotice -Title 'Fresh Windows' -Text $_.Exception.Message -Level Error } }
             FwMaintenance     = { try { Start-FreshWindowsElevated -SilentMode 'maintenance' -RepoRef $script:RepoRef } catch { Show-FreshAgentUserNotice -Title 'Fresh Windows' -Text $_.Exception.Message -Level Error } }
             FwGameMode        = { try { Start-FreshWindowsElevated -SilentMode 'game-mode' -RepoRef $script:RepoRef } catch { Show-FreshAgentUserNotice -Title 'Fresh Windows' -Text $_.Exception.Message -Level Error } }

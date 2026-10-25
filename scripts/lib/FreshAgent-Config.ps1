@@ -452,7 +452,8 @@ function Get-FreshAgentRepoConfigSyncList {
             'configs/skills/registry.json',
             'configs/skills/router/fr-pc.json',
             'configs/agent-profiles.json',
-            'configs/services-allowlist.json'
+            'configs/services-allowlist.json',
+            'configs/appx-bloatware.json'
         )) {
         [void]$paths.Add($p)
     }
@@ -509,6 +510,7 @@ function Sync-FreshAgentLocalAssets {
         'lib/FreshAgent-WindowsActions.ps1',
         'lib/FreshAgent-Health.ps1',
         'lib/FreshAgent-Optimize.ps1',
+        'lib/FreshWindows-AppxBloatware.ps1',
         'lib/FreshWindows-BackgroundAudit.ps1'
     )
     foreach ($rel in $scriptPaths) {
@@ -675,6 +677,8 @@ function Import-FreshAgentStandardModules {
             'lib/FreshAgent-WindowsActions.ps1',
             'lib/FreshAgent-Health.ps1',
             'lib/FreshAgent-Optimize.ps1',
+            'lib/FreshWindows-AppxBloatware.ps1',
+            'lib/FreshWindows-BackgroundAudit.ps1',
             'ai/Ollama-Manager.ps1',
             'ai/FreshAgent-OllamaBridge.ps1',
             'ai/Windows-Stt.ps1',

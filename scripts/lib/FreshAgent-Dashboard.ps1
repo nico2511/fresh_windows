@@ -423,7 +423,8 @@ function Show-FreshAgentDashboard {
     Add-FreshAgentDashboardButton -Parent $tabHealth -Text 'Rapport hebdo' -X 246 -Y 150 -W 226 -H 34 -ActionKey 'WeeklyReport' | Out-Null
     Add-FreshAgentDashboardButton -Parent $tabHealth -Text 'Audit demarrage' -X 12 -Y 196 -W 226 -H 34 -ActionKey 'AuditStartup' | Out-Null
     Add-FreshAgentDashboardButton -Parent $tabHealth -Text 'Audit services' -X 246 -Y 196 -W 226 -H 34 -ActionKey 'AuditServices' | Out-Null
-    Add-FreshAgentDashboardButton -Parent $tabHealth -Text 'Nettoyage (confirm)' -X 12 -Y 242 -W 460 -H 34 -ActionKey 'CleanupConfirm' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabHealth -Text 'Nettoyage (confirm)' -X 12 -Y 242 -W 226 -H 34 -ActionKey 'CleanupConfirm' | Out-Null
+    Add-FreshAgentDashboardButton -Parent $tabHealth -Text 'Apps preinstallees' -X 246 -Y 242 -W 226 -H 34 -ActionKey 'BloatwarePreview' | Out-Null
 
     # --- Fresh Windows ---
     $tabFw = New-FreshAgentDashboardTabPage -Title 'Fresh Windows' -TabControl $tabs

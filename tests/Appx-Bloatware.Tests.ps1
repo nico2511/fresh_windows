@@ -1,0 +1,86 @@
+#Requires -Version 5.1
+$ErrorActionPreference = 'Stop'
+
+Describe 'Appx bloatware classification' {
+    BeforeAll {
+        if (-not $env:LOCALAPPDATA) { $env:LOCALAPPDATA = if ($env:TEMP) { $env:TEMP } else { '/tmp' } }
+        $root = Split-Path (Split-Path $PSCommandPath -Parent) -Parent
+        if ([string]::IsNullOrWhiteSpace($root) -or -not (Test-Path -LiteralPath (Join-Path $root 'scripts'))) {
+            $here = $PSScriptRoot
+            if ([string]::IsNullOrWhiteSpace($here)) { $here = Split-Path -Parent $PSCommandPath }
+            $root = Split-Path -Parent $here
+        }
+        $script:RepoRoot = $root
+        . (Join-Path $root 'scripts\lib\FreshWindows-AppxBloatware.ps1')
+        $script:Config = Get-FreshWindowsAppxBloatwareConfig -RepoRoot $root
+    }
+
+    It 'classifies protected Paint classic and remove Paint 3D' {
+        (Get-FreshWindowsAppxBloatwareClassification -PackageIdentity 'Microsoft.Paint' -Config $script:Config) |
+            Should -Be 'Protected'
+        (Get-FreshWindowsAppxBloatwareClassification -PackageIdentity 'Microsoft.MSPaint' -Config $script:Config) |
+            Should -Be 'Remove'
+    }
+
+    It 'never classifies unknown packages as Remove' {
+        (Get-FreshWindowsAppxBloatwareClassification -PackageIdentity 'Contoso.UnknownApp' -Config $script:Config) |
+            Should -Be 'Unknown'
+    }
+
+    It 'protected wins over remove list' {
+        (Get-FreshWindowsAppxBloatwareClassification -PackageIdentity 'Microsoft.WindowsStore_8wekyb3d8bbwe' -Config $script:Config) |
+            Should -Be 'Protected'
+    }
+
+    It 'treats unlisted OEM packages as unknown (never removed)' {
+        (Get-FreshWindowsAppxBloatwareClassification -PackageIdentity 'Contoso.OemConfigurationManager' -Config $script:Config) |
+            Should -Be 'Unknown'
+    }
+
+    It 'classifies remove.oem entries as Remove' {
+        (Get-FreshWindowsAppxBloatwareClassification -PackageIdentity 'DolbyLaboratories.DolbyAccess' -Config $script:Config) |
+            Should -Be 'Remove'
+    }
+
+    It 'removes Xbox Game Bar overlay but protects Xbox app and Gaming Services' {
+        (Get-FreshWindowsAppxBloatwareClassification -PackageIdentity 'Microsoft.XboxGamingOverlay' -Config $script:Config) |
+            Should -Be 'Remove'
+        (Get-FreshWindowsAppxBloatwareClassification -PackageIdentity 'Microsoft.GamingApp' -Config $script:Config) |
+            Should -Be 'Protected'
+        (Get-FreshWindowsAppxBloatwareClassification -PackageIdentity 'Microsoft.GamingServices' -Config $script:Config) |
+            Should -Be 'Protected'
+    }
+
+    It 'dry-run lists unknown packages as add candidates' {
+        $plan = Invoke-FreshWindowsAppxBloatwareCleanup -RepoRoot $script:RepoRoot -PackageIdentities @(
+            'Microsoft.BingNews',
+            'Microsoft.Paint',
+            'Unknown.PersonalApp'
+        )
+        $plan.dryRun | Should -Be $true
+        $plan.toRemove | Should -Contain 'Microsoft.BingNews'
+        $plan.protected | Should -Contain 'Microsoft.Paint'
+        $plan.addCandidates | Should -Contain 'Unknown.PersonalApp'
+        $plan.message | Should -Match 'Candidats a ajouter'
+    }
+
+    It 'Apply never removes unknown packages' {
+        $result = Invoke-FreshWindowsAppxBloatwareCleanup -Apply -RepoRoot $script:RepoRoot -PackageIdentities @(
+            'Contoso.UnknownApp',
+            'Microsoft.BingNews'
+        )
+        $result.dryRun | Should -Be $false
+        $result.removed | Should -Not -Contain 'Contoso.UnknownApp'
+        @($result.addCandidates) | Should -Contain 'Contoso.UnknownApp'
+    }
+
+    It 'prefix rules match king.com family' {
+        (Get-FreshWindowsAppxBloatwareClassification -PackageIdentity 'king.com.CandyCrushSaga' -Config $script:Config) |
+            Should -Be 'Remove'
+    }
+
+    It 'suffix rule protects cw5n1h2txyewy packages' {
+        (Get-FreshWindowsAppxBloatwareClassification -PackageIdentity 'Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy' -Config $script:Config) |
+            Should -Be 'Protected'
+    }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "remove_preinstalled_apps",
+  "title": "Nettoyage apps preinstallees",
+  "handler": "Invoke-SkillRemovePreinstalledApps",
+  "menuVisible": true,
+  "requiresAdmin": true,
+  "requiresConfirm": true,
+  "confirmPrompt": "Supprimer les apps preinstallees listees (point de restauration avant)",
+  "parameters": {
+    "Apply": { "type": "boolean", "required": false },
+    "DisableSilentInstall": { "type": "boolean", "required": false }
+  },
+  "ai": {
+    "expose": true,
+    "description": "Simulation par defaut (Apply=false). Apply=true supprime les AppX listes dans configs/appx-bloatware.json avec confirmation."
+  }
+}

@@ -267,6 +267,27 @@
       "parameters": {}
     },
     {
+      "id": "remove_preinstalled_apps_preview",
+      "enabled": true,
+      "skillId": "remove_preinstalled_apps",
+      "say": "Simulation bloatware.",
+      "patterns": [
+        "^(?:liste|simule|affiche)\\s+(?:les\\s+)?(?:apps?\\s+)?(?:preinstallees|bloatware)",
+        "^(?:qu|quelles?)\\s+apps?\\s+preinstallees"
+      ],
+      "parameters": { "Apply": false }
+    },
+    {
+      "id": "remove_preinstalled_apps_apply",
+      "enabled": true,
+      "skillId": "remove_preinstalled_apps",
+      "say": "Suppression bloatware.",
+      "patterns": [
+        "^(?:supprime|retire|desinstalle)\\s+(?:les\\s+)?(?:apps?\\s+)?(?:preinstallees|bloatware)"
+      ],
+      "parameters": { "Apply": true, "DisableSilentInstall": true }
+    },
+    {
       "id": "youtube_search",
       "enabled": true,
       "skillId": "youtube_search",

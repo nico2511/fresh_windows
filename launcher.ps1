@@ -7,7 +7,7 @@
 #    $env:FRESH_WIN_MODE='full'; irm ... | iex
 #    Apps : standard | gaming | dev | custom | custom:<nom> | full
 #    WinUtil : winutil-oneclick | winutil-standard | winutil-minimal |
-#              winutil-advanced | winutil-appx | maintenance
+#              winutil-advanced | winutil-appx | appx-bloatware | appx-bloatware-apply | maintenance
 #    Autre : tasks | game-mode | game-mode-shortcuts | game-mode-watch |
 #            background-audit | powertoys-profile | shutup10 | brave-optimize | brave-debloat | betterzen
 #
@@ -50,7 +50,7 @@ $FreshAppData = Join-Path $env:LOCALAPPDATA "FreshWindows"
 $CustomAppsLocalDir = Join-Path $FreshAppData "apps-custom"
 $script:FreshBrand = "Fresh Windows"
 # Incrémenter quand les libs changent alors que FRESH_WIN_REF reste "main" (sinon cache périmé)
-$script:FreshWindowsLibEpoch = 48
+$script:FreshWindowsLibEpoch = 49
 
 function Ensure-FreshWindowsExecutionPolicy {
     <#
@@ -144,6 +144,7 @@ function Get-FreshWindowsLibraryPaths {
         'Launcher-WinUtil.ps1',
         'Launcher-Tasks.ps1',
         'Launcher-GpuMenus.ps1',
+        'FreshWindows-AppxBloatware.ps1',
         'FreshWindows-BackgroundAudit.ps1'
     )
 
@@ -337,6 +338,9 @@ function Install-FullSetup {
     }
     else {
         Write-Host "`nFull Setup terminé avec des échecs (détail ci-dessus)." -ForegroundColor Red
+    }
+    if (-not $NoPause -and (Get-Command Offer-FreshWindowsAppxBloatwarePreviewStep -ErrorAction SilentlyContinue)) {
+        Offer-FreshWindowsAppxBloatwarePreviewStep -ConfigsBaseUrl $BaseUrl -FreshAppData $FreshAppData
     }
     if (-not $NoPause) { Wait-ForUser }
     return $ok
@@ -1542,6 +1546,29 @@ function Invoke-SilentMode {
             }
             "winutil-appx" {
                 $ok = [bool](Invoke-WinUtilConfig -ConfigUrl "$BaseUrl/winutil-appx.json" -Label "AppX bloat" -NoPause)
+            }
+            "appx-bloatware" {
+                $r = Invoke-FreshWindowsAppxBloatwareCleanup -ConfigsBaseUrl $BaseUrl -FreshAppData $FreshAppData
+                Write-Host $r.message -ForegroundColor Cyan
+                $ok = [bool]$r.ok
+            }
+            "appx-bloatware-apply" {
+                $preview = Invoke-FreshWindowsAppxBloatwareCleanup -ConfigsBaseUrl $BaseUrl -FreshAppData $FreshAppData
+                Write-Host $preview.message -ForegroundColor Cyan
+                if ($preview.toRemove -and $preview.toRemove.Count -gt 0) {
+                    if (-not (Wait-FreshWindowsBloatwareApplyConfirm)) {
+                        Write-Host 'Annule.' -ForegroundColor Yellow
+                        $ok = $false
+                    }
+                    else {
+                        $r = Invoke-FreshWindowsAppxBloatwareCleanup -Apply -DisableSilentInstall -ConfigsBaseUrl $BaseUrl -FreshAppData $FreshAppData
+                        Write-Host $r.message -ForegroundColor $(if ($r.ok) { 'Green' } else { 'Yellow' })
+                        $ok = [bool]$r.ok
+                    }
+                }
+                else {
+                    $ok = [bool]$preview.ok
+                }
             }
             "brave-debloat" {
                 $ok = [bool](Invoke-BraveOptimize -NoPause)
