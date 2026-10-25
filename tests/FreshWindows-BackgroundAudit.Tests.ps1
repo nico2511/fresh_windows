@@ -73,11 +73,23 @@ Describe 'FreshWindows background audit' {
         Resolve-FreshWindowsKnownProcessRole -CommandLine "wt.exe -d $appdata" -ProcessName 'WindowsTerminal.exe' |
             Should -Be $null
         Resolve-FreshWindowsKnownProcessRole -CommandLine "powershell -File $appdata\Invoke-FreshWindowsBackgroundAudit.ps1" `
-            -ProcessName 'powershell.exe' | Should -Be $null
+            -ProcessName 'powershell.exe' -FreshAppData $appdata | Should -Be $null
         Resolve-FreshWindowsKnownProcessRole -CommandLine 'powershell -STA -File GameMode-WatchAgent.ps1' `
             -ProcessName 'powershell.exe' | Should -Be 'agent systray'
         Resolve-FreshWindowsKnownProcessRole -CommandLine 'FreshAgent-BackgroundWorker.ps1 -Action Rag' `
             -ProcessName 'powershell.exe' | Should -Be 'worker'
+    }
+
+    It 'reconnait Launch-GameModeWatch.ps1 (ligne de commande reelle systray)' {
+        $cmd = '"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe"  -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Users\Nico\AppData\Local\FreshWindows\Launch-GameModeWatch.ps1"'
+        Resolve-FreshWindowsKnownProcessRole -CommandLine $cmd -ProcessName 'powershell.exe' |
+            Should -Be 'agent systray'
+    }
+
+    It 'associe un enfant sans CommandLine au parent Fresh (enfant agent)' {
+        Get-FreshWindowsFreshChildProcessRole -ParentRole 'agent systray' | Should -Be 'enfant agent'
+        Get-FreshWindowsFreshChildProcessRole -ParentRole 'worker' | Should -Be 'enfant worker'
+        Resolve-FreshWindowsKnownProcessRole -CommandLine '' -ProcessName 'powershell.exe' | Should -Be $null
     }
 
     It 'Test-FreshWindowsIsHostTerminalProcess detecte Windows Terminal' {
