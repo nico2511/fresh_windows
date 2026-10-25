@@ -27,6 +27,7 @@
     { "id": "audit_startup", "file": "system/audit_startup.json", "enabled": true },
     { "id": "audit_services", "file": "system/audit_services.json", "enabled": true },
     { "id": "weekly_health_report", "file": "system/weekly_health_report.json", "enabled": true },
-    { "id": "create_restore_point", "file": "system/create_restore_point.json", "enabled": true }
+    { "id": "create_restore_point", "file": "system/create_restore_point.json", "enabled": true },
+    { "id": "remove_preinstalled_apps", "file": "system/remove_preinstalled_apps.json", "enabled": true }
   ]
 }

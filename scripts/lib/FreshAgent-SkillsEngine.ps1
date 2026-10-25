@@ -158,6 +158,16 @@ function Invoke-FreshAgentSkill {
     if (-not $SkipConfirm -and (Get-Command Test-FreshAgentSkillRequiresConfirm -ErrorAction SilentlyContinue)) {
         $needsConfirm = Test-FreshAgentSkillRequiresConfirm -Skill $skill
     }
+    if ($SkillId -eq 'remove_preinstalled_apps' -and $needsConfirm) {
+        $applyWanted = $false
+        if ($Parameters.ContainsKey('Apply')) {
+            if (Get-Command ConvertTo-FreshAgentBool -ErrorAction SilentlyContinue) {
+                $applyWanted = ConvertTo-FreshAgentBool -Value $Parameters.Apply -Default $false
+            }
+            elseif ($Parameters.Apply -is [bool]) { $applyWanted = [bool]$Parameters.Apply }
+        }
+        if (-not $applyWanted) { $needsConfirm = $false }
+    }
     if ($needsConfirm) {
         $prompt = if ($skill.confirmPrompt) { [string]$skill.confirmPrompt } elseif ($skill.title) { [string]$skill.title } else { $SkillId }
         if ($SkillId -eq 'close_app' -and (Get-Command Get-FreshAgentCloseAppTargets -ErrorAction SilentlyContinue)) {

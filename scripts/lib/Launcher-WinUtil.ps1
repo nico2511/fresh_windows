@@ -434,7 +434,8 @@ function Open-WinUtilMenu {
         Write-Host "2. OO ShutUp10 - profil recommande" -ForegroundColor White
         Write-Host "3. Ouvrir WinUtil (GUI)" -ForegroundColor Gray
         Write-Host "4. Presets WinUtil (Standard / Minimal / Advanced)" -ForegroundColor Magenta
-        Write-Host "5. Retour" -ForegroundColor DarkGray
+        Write-Host "5. Apps preinstallees (simulation / suppression separee WinUtil)" -ForegroundColor Cyan
+        Write-Host "6. Retour" -ForegroundColor DarkGray
         Write-Host ""
         $c = Read-Host "Choix"
 
@@ -446,7 +447,16 @@ function Open-WinUtilMenu {
                 irm "https://christitus.com/win" | iex
             }
             "4" { Open-WinUtilPresetsMenu }
-            "5" { return }
+            "5" {
+                if (Get-Command Invoke-FreshWindowsAppxBloatwareMenu -ErrorAction SilentlyContinue) {
+                    Invoke-FreshWindowsAppxBloatwareMenu -ConfigsBaseUrl $BaseUrl -FreshAppData $FreshAppData
+                }
+                else {
+                    Write-Host 'Module appx bloatware indisponible.' -ForegroundColor Red
+                    Start-Sleep 2
+                }
+            }
+            "6" { return }
             default {
                 Write-Host "Choix invalide" -ForegroundColor Red
                 Start-Sleep 1

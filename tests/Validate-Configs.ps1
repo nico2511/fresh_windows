@@ -37,7 +37,8 @@ $requiredJson = @(
     'winutil-appx.json',
     'winutil-oneclick.json',
     'winutil-brave-debloat.json',
-    'brave-optimize.json'
+    'brave-optimize.json',
+    'appx-bloatware.json'
 )
 
 foreach ($name in $requiredJson) {
@@ -221,6 +222,39 @@ if (Test-Path -LiteralPath $killPath) {
                 Ok ("game-mode-kill.json ({0} kill, {1} protect entries, {2} launcher names)" -f $names.Count, $prot, $launcherCount)
             }
         }
+    }
+}
+
+$bloatPath = Join-Path $configs 'appx-bloatware.json'
+if (Test-Path -LiteralPath $bloatPath) {
+    $bw = Get-Content -LiteralPath $bloatPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not $bw.protected -or -not $bw.remove) {
+        Fail 'appx-bloatware.json : protected ou remove manquant'
+    }
+    elseif (-not ($bw.protected.exact -contains 'Microsoft.Paint')) {
+        Fail 'appx-bloatware.json : Microsoft.Paint doit etre protege'
+    }
+    elseif (-not ($bw.remove.exact -contains 'Microsoft.MSPaint')) {
+        Fail 'appx-bloatware.json : Microsoft.MSPaint (Paint 3D) doit etre en remove'
+    }
+    elseif (-not ($bw.remove.exact -contains 'Microsoft.XboxGamingOverlay')) {
+        Fail 'appx-bloatware.json : Microsoft.XboxGamingOverlay doit rester en remove'
+    }
+    elseif (-not ($bw.protected.exact -contains 'Microsoft.GamingApp')) {
+        Fail 'appx-bloatware.json : Microsoft.GamingApp (Xbox PC) doit etre protege'
+    }
+    elseif (-not ($bw.protected.exact -contains 'Microsoft.GamingServices')) {
+        Fail 'appx-bloatware.json : Microsoft.GamingServices doit etre protege'
+    }
+    elseif (-not $bw.confirmLater -or $null -eq $bw.confirmLater.exact) {
+        Fail 'appx-bloatware.json : confirmLater ou confirmLater.exact manquant'
+    }
+    elseif (-not $bw.remove.oem -or $null -eq $bw.remove.oem.exact) {
+        Fail 'appx-bloatware.json : remove.oem (OEM / constructeur) manquant'
+    }
+    else {
+        $oemCount = @($bw.remove.oem.exact).Count
+        Ok ("appx-bloatware.json ({0} remove + {1} oem, {2} protected exact)" -f @($bw.remove.exact).Count, $oemCount, @($bw.protected.exact).Count)
     }
 }
 
