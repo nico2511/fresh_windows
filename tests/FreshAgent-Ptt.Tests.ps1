@@ -1,8 +1,17 @@
 #Requires -Version 5.1
-$root = Split-Path $PSScriptRoot -Parent
-. (Join-Path $root 'scripts\lib\FreshAgent-SttSettings.ps1')
+$ErrorActionPreference = 'Stop'
 
 Describe 'FreshAgent PTT state machine' {
+    BeforeAll {
+        $root = Split-Path (Split-Path $PSCommandPath -Parent) -Parent
+        if ([string]::IsNullOrWhiteSpace($root) -or -not (Test-Path -LiteralPath (Join-Path $root 'scripts'))) {
+            $here = $PSScriptRoot
+            if ([string]::IsNullOrWhiteSpace($here)) { $here = Split-Path -Parent $PSCommandPath }
+            $root = Split-Path -Parent $here
+        }
+        . (Join-Path $root 'scripts\lib\FreshAgent-SttSettings.ps1')
+    }
+
     It 'keydown repeats produce a single start' {
         $state = New-FreshAgentPttMachineState
         $r1 = Update-FreshAgentPttMachine -State $state -KeyDown $true -Recording $false -Transcribing $false

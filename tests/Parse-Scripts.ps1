@@ -11,6 +11,7 @@ $files = @(
     'scripts\lib\Launcher-Tasks.ps1',
     'scripts\lib\Launcher-Core.ps1',
     'scripts\lib\FreshAgent-Config.ps1',
+    'scripts\lib\FreshAgent-SttSettings.ps1',
     'scripts\lib\FreshAgent-Log.ps1',
     'scripts\lib\FreshAgent-SkillsEngine.ps1',
     'scripts\lib\FreshAgent-SkillHandlers.ps1',

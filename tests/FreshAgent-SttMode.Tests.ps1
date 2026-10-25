@@ -1,8 +1,17 @@
 #Requires -Version 5.1
-$root = Split-Path $PSScriptRoot -Parent
-. (Join-Path $root 'scripts\lib\FreshAgent-SttSettings.ps1')
+$ErrorActionPreference = 'Stop'
 
 Describe 'FreshAgent STT listen mode' {
+    BeforeAll {
+        $root = Split-Path (Split-Path $PSCommandPath -Parent) -Parent
+        if ([string]::IsNullOrWhiteSpace($root) -or -not (Test-Path -LiteralPath (Join-Path $root 'scripts'))) {
+            $here = $PSScriptRoot
+            if ([string]::IsNullOrWhiteSpace($here)) { $here = Split-Path -Parent $PSCommandPath }
+            $root = Split-Path -Parent $here
+        }
+        . (Join-Path $root 'scripts\lib\FreshAgent-SttSettings.ps1')
+    }
+
     It 'prefers listenMode alwaysOn over pushToTalk true' {
         $cfg = [pscustomobject]@{
             stt = [pscustomobject]@{
