@@ -772,6 +772,12 @@ function Stop-FreshAgentVoiceListenSession {
     $script:FaPttMachine = $null
     $script:FaVoiceAwaitFirstToggle = $false
     Stop-FreshAgentPttTimer
+    if (Get-Command Stop-FreshAgentSttPollTimerIfRunning -ErrorAction SilentlyContinue) {
+        Stop-FreshAgentSttPollTimerIfRunning
+    }
+    if (Get-Command Stop-FreshAgentVoiceWatchTimerIfRunning -ErrorAction SilentlyContinue) {
+        Stop-FreshAgentVoiceWatchTimerIfRunning
+    }
     if ($script:FaVoiceWorkerRecording) {
         if (Get-Command Send-FreshAgentVoiceRecordStop -ErrorAction SilentlyContinue) {
             Send-FreshAgentVoiceRecordStop | Out-Null
@@ -977,7 +983,15 @@ function Invoke-FreshAgentVoiceWatchTick {
     }
 }
 
+function Stop-FreshAgentVoiceWatchTimerIfRunning {
+    if (-not $script:FaVoiceWatchTimer) { return }
+    try { $script:FaVoiceWatchTimer.Stop() } catch { }
+    try { $script:FaVoiceWatchTimer.Dispose() } catch { }
+    $script:FaVoiceWatchTimer = $null
+}
+
 function Start-FreshAgentVoiceWatchTimerIfNeeded {
+    if (-not $script:VoiceListenActive) { return }
     if ($script:FaVoiceWatchTimer) { return }
     $script:FaVoiceWatchTimer = New-Object System.Windows.Forms.Timer
     $script:FaVoiceWatchTimer.Interval = 800

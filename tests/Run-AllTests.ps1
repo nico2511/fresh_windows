@@ -52,7 +52,8 @@ if ($pesterMod) {
         'FreshAgent-Safety.Tests.ps1',
         'Appx-Bloatware.Tests.ps1',
         'Windows-Stt.Tests.ps1',
-        'FreshWindows-BackgroundAudit.Tests.ps1'
+        'FreshWindows-BackgroundAudit.Tests.ps1',
+        'FreshAgent-RamLazyLoad.Tests.ps1'
     )
     foreach ($pesterFile in $pesterFiles) {
         $path = Join-Path $root $pesterFile

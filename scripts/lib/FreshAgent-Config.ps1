@@ -612,25 +612,103 @@ function Import-FreshAgentModule {
     return $false
 }
 
+function Get-FreshAgentLibLoadRegistry {
+    if (-not $script:FreshAgentLibsLoaded) {
+        $script:FreshAgentLibsLoaded = @{}
+    }
+    return $script:FreshAgentLibsLoaded
+}
+
+function Import-FreshAgentLibOnce {
+    param(
+        [Parameter(Mandatory)]
+        [string]$RelativePath,
+        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
+    )
+    $key = ($RelativePath -replace '\\', '/').Trim().ToLowerInvariant()
+    $reg = Get-FreshAgentLibLoadRegistry
+    if ($reg.ContainsKey($key)) {
+        return [bool]$reg[$key]
+    }
+    $ok = $false
+    if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
+        $ok = [bool](Import-FreshAgentModule -RelativePath $RelativePath -FreshAppData $FreshAppData)
+    }
+    $reg[$key] = $ok
+    return $ok
+}
+
+function Test-FreshAgentLibLoaded {
+    param([Parameter(Mandatory)][string]$RelativePath)
+    $key = ($RelativePath -replace '\\', '/').Trim().ToLowerInvariant()
+    $reg = Get-FreshAgentLibLoadRegistry
+    return ($reg.ContainsKey($key) -and [bool]$reg[$key])
+}
+
+function Get-FreshAgentMinimalBootModuleList {
+    return @(
+        'lib/FreshAgent-Log.ps1',
+        'lib/FreshAgent-SkillsEngine.ps1',
+        'lib/FreshAgent-SkillHandlers.ps1',
+        'lib/FreshAgent-GameSession.ps1',
+        'lib/FreshAgent-Confirm.ps1',
+        'lib/FreshAgent-ActionLog.ps1',
+        'lib/FreshAgent-VoiceRouter.ps1',
+        'lib/FreshAgent-AiLifecycle.ps1'
+    )
+}
+
+function Get-FreshAgentFullModuleList {
+    return @(
+        'lib/FreshAgent-SkillsEngine.ps1',
+        'lib/FreshAgent-SkillHandlers.ps1',
+        'lib/FreshAgent-GameSession.ps1',
+        'lib/FreshAgent-Inventory.ps1',
+        'lib/FreshAgent-Rag.ps1',
+        'lib/FreshAgent-History.ps1',
+        'lib/FreshAgent-Profiles.ps1',
+        'lib/FreshAgent-Log.ps1',
+        'lib/FreshAgent-Dashboard.ps1',
+        'lib/FreshAgent-Overlay.ps1',
+        'lib/FreshAgent-VoiceRouter.ps1',
+        'lib/FreshAgent-IdleSuggest.ps1',
+        'lib/FreshAgent-AiLifecycle.ps1',
+        'lib/FreshAgent-ActionLog.ps1',
+        'lib/FreshAgent-Confirm.ps1',
+        'lib/FreshAgent-WindowsActions.ps1',
+        'lib/FreshAgent-Health.ps1',
+        'lib/FreshAgent-Optimize.ps1',
+        'lib/FreshWindows-AppxBloatware.ps1',
+        'lib/FreshWindows-BackgroundAudit.ps1',
+        'ai/Ollama-Manager.ps1',
+        'ai/FreshAgent-OllamaBridge.ps1',
+        'ai/Windows-Stt.ps1',
+        'ai/FreshAgent-Tts.ps1',
+        'ai/FreshAgent-VoiceWorker.ps1'
+    )
+}
+
+function Import-FreshAgentMinimalBootModules {
+    param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
+    foreach ($mod in (Get-FreshAgentMinimalBootModuleList)) {
+        Import-FreshAgentLibOnce -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
+    }
+}
+
 function Ensure-FreshAgentSkillsLoaded {
     param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
     if (Get-Command Invoke-FreshAgentSkill -ErrorAction SilentlyContinue) {
         return $true
     }
-    if (Get-Command Import-FreshAgentStandardModules -ErrorAction SilentlyContinue) {
-        Import-FreshAgentStandardModules -FreshAppData $FreshAppData
-    }
-    else {
-        foreach ($mod in @(
-                'lib/FreshAgent-SkillsEngine.ps1',
-                'lib/FreshAgent-SkillHandlers.ps1',
-                'lib/FreshAgent-GameSession.ps1',
-                'lib/FreshAgent-Inventory.ps1'
-            )) {
-            if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
-                Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
-            }
-        }
+    foreach ($mod in @(
+            'lib/FreshAgent-SkillsEngine.ps1',
+            'lib/FreshAgent-SkillHandlers.ps1',
+            'lib/FreshAgent-GameSession.ps1',
+            'lib/FreshAgent-Confirm.ps1',
+            'lib/FreshAgent-ActionLog.ps1',
+            'lib/FreshAgent-Inventory.ps1'
+        )) {
+        Import-FreshAgentLibOnce -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
     }
     return [bool](Get-Command Invoke-FreshAgentSkill -ErrorAction SilentlyContinue)
 }
@@ -649,43 +727,76 @@ function Ensure-FreshAgentAiBridgeLoaded {
             'ai/Ollama-Manager.ps1',
             'ai/FreshAgent-OllamaBridge.ps1'
         )) {
-        if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
-            Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
-        }
+        Import-FreshAgentLibOnce -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
     }
     return [bool](Get-Command Invoke-FreshAgentAiTurn -ErrorAction SilentlyContinue)
 }
 
-function Import-FreshAgentStandardModules {
+function Ensure-FreshAgentVoiceLibsLoaded {
     param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
     foreach ($mod in @(
-            'lib/FreshAgent-SkillsEngine.ps1',
-            'lib/FreshAgent-SkillHandlers.ps1',
-            'lib/FreshAgent-GameSession.ps1',
-            'lib/FreshAgent-Inventory.ps1',
-            'lib/FreshAgent-Rag.ps1',
-            'lib/FreshAgent-History.ps1',
-            'lib/FreshAgent-Profiles.ps1',
-            'lib/FreshAgent-Log.ps1',
-            'lib/FreshAgent-Dashboard.ps1',
-            'lib/FreshAgent-Overlay.ps1',
-            'lib/FreshAgent-VoiceRouter.ps1',
-            'lib/FreshAgent-IdleSuggest.ps1',
-            'lib/FreshAgent-AiLifecycle.ps1',
-            'lib/FreshAgent-ActionLog.ps1',
-            'lib/FreshAgent-Confirm.ps1',
+            'lib/FreshAgent-SttSettings.ps1',
             'lib/FreshAgent-WindowsActions.ps1',
-            'lib/FreshAgent-Health.ps1',
-            'lib/FreshAgent-Optimize.ps1',
-            'lib/FreshWindows-AppxBloatware.ps1',
-            'lib/FreshWindows-BackgroundAudit.ps1',
-            'ai/Ollama-Manager.ps1',
-            'ai/FreshAgent-OllamaBridge.ps1',
-            'ai/Windows-Stt.ps1',
-            'ai/FreshAgent-Tts.ps1',
             'ai/FreshAgent-VoiceWorker.ps1'
         )) {
-        Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
+        Import-FreshAgentLibOnce -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
+    }
+    return [bool](Get-Command Start-FreshAgentVoiceListenSession -ErrorAction SilentlyContinue)
+}
+
+function Ensure-FreshAgentTtsLoaded {
+    param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
+    Import-FreshAgentLibOnce -RelativePath 'ai/FreshAgent-Tts.ps1' -FreshAppData $FreshAppData | Out-Null
+    return [bool](Get-Command Start-FreshAgentQuickSpeak -ErrorAction SilentlyContinue)
+}
+
+function Ensure-FreshAgentBackgroundAuditLoaded {
+    param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
+    Import-FreshAgentLibOnce -RelativePath 'lib/FreshWindows-BackgroundAudit.ps1' -FreshAppData $FreshAppData | Out-Null
+    return [bool](Get-Command Invoke-FreshWindowsBackgroundAudit -ErrorAction SilentlyContinue)
+}
+
+function Get-FreshAgentWatchMemoryTrimEnabled {
+    param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
+    $path = Join-Path $FreshAppData 'watch-agent-user.json'
+    if (-not (Test-Path -LiteralPath $path)) { return $true }
+    try {
+        $u = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($null -ne $u.memoryTrimAfterInit) { return [bool]$u.memoryTrimAfterInit }
+    }
+    catch { }
+    return $true
+}
+
+function Invoke-FreshAgentPostInitMemoryCleanup {
+    param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
+    if (-not (Get-FreshAgentWatchMemoryTrimEnabled -FreshAppData $FreshAppData)) {
+        return @{ ok = $true; skipped = $true; message = 'memoryTrimAfterInit=false' }
+    }
+    try {
+        [GC]::Collect()
+        [GC]::WaitForPendingFinalizers()
+        [GC]::Collect()
+    }
+    catch { }
+    Import-FreshAgentLibOnce -RelativePath 'lib/FreshAgent-Optimize.ps1' -FreshAppData $FreshAppData | Out-Null
+    if (Get-Command Invoke-FreshAgentWorkingSetTrim -ErrorAction SilentlyContinue) {
+        return Invoke-FreshAgentWorkingSetTrim
+    }
+    return @{ ok = $true; skipped = $true; message = 'Invoke-FreshAgentWorkingSetTrim absent' }
+}
+
+function Import-FreshAgentStandardModules {
+    param(
+        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot),
+        [switch]$Full
+    )
+    if (-not $Full) {
+        Import-FreshAgentMinimalBootModules -FreshAppData $FreshAppData
+        return
+    }
+    foreach ($mod in (Get-FreshAgentFullModuleList)) {
+        Import-FreshAgentLibOnce -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
     }
     Ensure-FreshAgentAiBridgeLoaded -FreshAppData $FreshAppData | Out-Null
 }

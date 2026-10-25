@@ -92,8 +92,9 @@ Describe 'FreshWindows background audit' {
         Resolve-FreshWindowsKnownProcessRole -CommandLine '' -ProcessName 'powershell.exe' | Should -Be $null
     }
 
-    It 'Test-FreshWindowsIsHostTerminalProcess detecte Windows Terminal' {
+    It 'Test-FreshWindowsIsHostTerminalProcess detecte Windows Terminal et conhost' {
         Test-FreshWindowsIsHostTerminalProcess -ProcessName 'WindowsTerminal.exe' | Should -Be $true
+        Test-FreshWindowsIsHostTerminalProcess -ProcessName 'conhost.exe' | Should -Be $true
         Test-FreshWindowsIsHostTerminalProcess -ProcessName 'powershell.exe' | Should -Be $false
     }
 }

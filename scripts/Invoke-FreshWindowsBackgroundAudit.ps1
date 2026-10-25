@@ -13,7 +13,9 @@ param(
     [string[]]$TargetIds = @(),
     [switch]$NoConfirm,
     [string]$FreshAppData = '',
-    [string]$ReportPath = ''
+    [string]$ReportPath = '',
+    [int]$SampleMinutes = 0,
+    [int]$SampleIntervalSeconds = 60
 )
 
 $ErrorActionPreference = 'Stop'
@@ -55,6 +57,10 @@ if ($Restore) { $splat.Restore = $true }
 if ($TargetIds -and $TargetIds.Count -gt 0) { $splat.TargetIds = $TargetIds }
 if ($NoConfirm) { $splat.NoConfirm = $true }
 if ($ReportPath) { $splat.ReportPath = $ReportPath }
+if ($SampleMinutes -gt 0) {
+    $splat.SampleMinutes = $SampleMinutes
+    $splat.SampleIntervalSeconds = $SampleIntervalSeconds
+}
 
 $result = Invoke-FreshWindowsBackgroundAudit @splat
 if ($result -and $result.ok -eq $false -and $result.mode -eq 'apply-cancelled') {

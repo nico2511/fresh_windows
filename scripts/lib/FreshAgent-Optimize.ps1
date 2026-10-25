@@ -3,6 +3,30 @@
   Optimisation : nettoyage, audit demarrage/services, restore point, rapport hebdo.
 #>
 
+function Invoke-FreshAgentWorkingSetTrim {
+    try {
+        if (-not ('FreshAgentMemNative' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class FreshAgentMemNative {
+    [DllImport("kernel32.dll", SetLastError=true)]
+    public static extern bool SetProcessWorkingSetSize(IntPtr hProcess, IntPtr min, IntPtr max);
+    [DllImport("psapi.dll", SetLastError=true)]
+    public static extern bool EmptyWorkingSet(IntPtr hProcess);
+}
+'@
+        }
+        $h = [System.Diagnostics.Process]::GetCurrentProcess().Handle
+        $ok1 = [FreshAgentMemNative]::SetProcessWorkingSetSize($h, [IntPtr]::Zero, [IntPtr]::Zero)
+        $ok2 = [FreshAgentMemNative]::EmptyWorkingSet($h)
+        return @{ ok = ($ok1 -or $ok2); trimmed = $true }
+    }
+    catch {
+        return @{ ok = $false; trimmed = $false; message = $_.Exception.Message }
+    }
+}
+
 function New-FreshAgentRestorePoint {
     param([string]$Description = 'Fresh Agent')
     $elevated = $false

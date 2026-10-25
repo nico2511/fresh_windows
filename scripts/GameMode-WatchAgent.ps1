@@ -662,7 +662,10 @@ function Invoke-FreshWatchAgentModuleBoot {
     $script:FreshAgentModuleBootPending = $false
     Write-WatchLog 'Boot modules Fresh Agent (differe)...'
     try {
-        if (Get-Command Import-FreshAgentStandardModules -ErrorAction SilentlyContinue) {
+        if (Get-Command Import-FreshAgentMinimalBootModules -ErrorAction SilentlyContinue) {
+            Import-FreshAgentMinimalBootModules -FreshAppData $script:FreshAppData
+        }
+        elseif (Get-Command Import-FreshAgentStandardModules -ErrorAction SilentlyContinue) {
             Import-FreshAgentStandardModules -FreshAppData $script:FreshAppData
         }
         elseif (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
@@ -674,10 +677,6 @@ function Invoke-FreshWatchAgentModuleBoot {
                     Write-WatchLog ("Module Fresh Agent absent: {0}" -f $mod)
                 }
             }
-        }
-        Import-FreshAgentDashboardAtScriptScope | Out-Null
-        if (Get-Command Ensure-FreshAgentAiBridgeLoaded -ErrorAction SilentlyContinue) {
-            Ensure-FreshAgentAiBridgeLoaded -FreshAppData $script:FreshAppData | Out-Null
         }
         if (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue) {
             $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData -PreferLocal
@@ -749,7 +748,16 @@ function Complete-WatchAgentModuleBoot {
             if ($script:FreshAgentReady) { $m.Root.Enabled = $true }
         }
         Update-FreshAgentTrayStatus
-        Start-WatchAgentPollTimerIfNeeded
+        Sync-WatchAgentPollTimer
+        if (Get-Command Invoke-FreshAgentPostInitMemoryCleanup -ErrorAction SilentlyContinue) {
+            try {
+                $trim = Invoke-FreshAgentPostInitMemoryCleanup -FreshAppData $script:FreshAppData
+                Write-WatchLog ("Module boot: memory trim ok={0} skipped={1}" -f $trim.ok, $trim.skipped)
+            }
+            catch {
+                Write-WatchLog ("Module boot: memory trim: {0}" -f $_.Exception.Message)
+            }
+        }
         # Vague 1: pas d'auto-start voix (WhisperLoop legacy quarantine). Ecoute = bouton explicite (vague 2).
         Write-WatchLog 'Module boot: voice auto-start disabled (quarantine)'
     }
@@ -859,34 +867,20 @@ function Start-WatchAgentModuleBootAsync {
     }
     Write-WatchLog 'Boot modules Fresh Agent (async UI)...'
 
-    $script:WatchModuleBootPlan = @(
-        @{ Rel = 'lib/FreshAgent-SkillsEngine.ps1' },
-        @{ Rel = 'lib/FreshAgent-SkillHandlers.ps1' },
-        @{ Rel = 'lib/FreshAgent-GameSession.ps1' },
-        @{ Rel = 'lib/FreshAgent-Inventory.ps1' },
-        @{ Rel = 'lib/FreshAgent-Rag.ps1' },
-        @{ Rel = 'lib/FreshAgent-History.ps1' },
-        @{ Rel = 'lib/FreshAgent-Profiles.ps1' },
-        @{ Rel = 'lib/FreshAgent-Log.ps1' },
-        @{ Rel = 'lib/FreshAgent-Dashboard.ps1' },
-        @{ Rel = 'lib/FreshAgent-Overlay.ps1' },
-        @{ Rel = 'lib/FreshAgent-VoiceRouter.ps1' },
-        @{ Rel = 'lib/FreshAgent-IdleSuggest.ps1' },
-        @{ Rel = 'lib/FreshAgent-AiLifecycle.ps1' },
-        @{ Rel = 'lib/FreshAgent-ActionLog.ps1' },
-        @{ Rel = 'lib/FreshAgent-Confirm.ps1' },
-        @{ Rel = 'lib/FreshAgent-WindowsActions.ps1' },
-        @{ Rel = 'lib/FreshAgent-Health.ps1' },
-        @{ Rel = 'lib/FreshAgent-Optimize.ps1' },
-        @{ Rel = 'lib/FreshWindows-AppxBloatware.ps1' },
-        @{ Rel = 'lib/FreshWindows-BackgroundAudit.ps1' },
-        @{ Rel = 'ai/Ollama-Manager.ps1' },
-        @{ Rel = 'ai/FreshAgent-OllamaBridge.ps1' },
-        @{ Rel = 'ai/Windows-Stt.ps1' },
-        @{ Rel = 'ai/FreshAgent-Tts.ps1' },
-        @{ Rel = 'ai/FreshAgent-VoiceWorker.ps1' },
-        @{ Rel = $null }
+    $bootRels = @(
+        'lib/FreshAgent-Log.ps1',
+        'lib/FreshAgent-SkillsEngine.ps1',
+        'lib/FreshAgent-SkillHandlers.ps1',
+        'lib/FreshAgent-GameSession.ps1',
+        'lib/FreshAgent-Confirm.ps1',
+        'lib/FreshAgent-ActionLog.ps1',
+        'lib/FreshAgent-VoiceRouter.ps1',
+        'lib/FreshAgent-AiLifecycle.ps1'
     )
+    if (Get-Command Get-FreshAgentMinimalBootModuleList -ErrorAction SilentlyContinue) {
+        $bootRels = @(Get-FreshAgentMinimalBootModuleList)
+    }
+    $script:WatchModuleBootPlan = @($bootRels | ForEach-Object { @{ Rel = $_ } }) + @(@{ Rel = $null })
     $script:WatchModuleBootIndex = 0
 
     $script:WatchModuleBootTimer = New-Object System.Windows.Forms.Timer
@@ -1251,7 +1245,7 @@ try {
   if (Test-Path -LiteralPath `$common) {
     try { . `$common -RepoRef `$repo } catch { Log ("GameMode-Common: `$(`$_.Exception.Message)") }
   }
-  Import-FreshAgentStandardModules -FreshAppData `$fresh | Out-Null
+  Import-FreshAgentStandardModules -FreshAppData `$fresh -Full | Out-Null
   Log ("invoke begin `$profileId")
   `$r = Invoke-FreshAgentProfile -ProfileId `$profileId -RepoRef `$repo -FreshAppData `$fresh
   `$payload = @{
@@ -1296,6 +1290,9 @@ function Invoke-FreshAgentSkillMenu {
         [string]$SkillId,
         [hashtable]$Parameters = @{}
     )
+    if (Get-Command Ensure-FreshAgentSkillsLoaded -ErrorAction SilentlyContinue) {
+        Ensure-FreshAgentSkillsLoaded -FreshAppData $script:FreshAppData | Out-Null
+    }
     $sb = $script:FreshAgentStartSkillBg
     if ($sb -is [scriptblock]) {
         & $sb $SkillId $Parameters
@@ -1355,7 +1352,7 @@ try {
   if (Test-Path -LiteralPath `$common) {
     try { . `$common -RepoRef `$repo } catch { Log ("GameMode-Common: `$(`$_.Exception.Message)") }
   }
-  Import-FreshAgentStandardModules -FreshAppData `$fresh | Out-Null
+  Import-FreshAgentStandardModules -FreshAppData `$fresh -Full | Out-Null
   `$params = @{}
   try {
     `$rawParams = '$paramsEsc' | ConvertFrom-Json
@@ -1704,7 +1701,7 @@ try {
   if (Test-Path -LiteralPath `$common) {
     try { . `$common -RepoRef `$repo } catch { Log ("GameMode-Common: `$(`$_.Exception.Message)") }
   }
-  Import-FreshAgentStandardModules -FreshAppData `$fresh | Out-Null
+  Import-FreshAgentStandardModules -FreshAppData `$fresh -Full | Out-Null
   `$prompt = Get-Content -LiteralPath (Join-Path `$fresh 'ai-prompt.pending.txt') -Raw -Encoding UTF8
   `$cfg = Get-FreshAgentAiConfig -RepoRef `$repo -FreshAppData `$fresh -PreferLocal
   if (-not `$cfg.enabled) { throw 'IA desactivee - active IA : ON dans le panneau.' }
@@ -2137,7 +2134,15 @@ function Invoke-FreshAgentTextCommand {
     }
 }
 
+function Stop-FreshAgentSttPollTimerIfRunning {
+    if (-not $script:FaSttPollTimer) { return }
+    try { $script:FaSttPollTimer.Stop() } catch { }
+    try { $script:FaSttPollTimer.Dispose() } catch { }
+    $script:FaSttPollTimer = $null
+}
+
 function Start-FreshAgentSttPollTimerIfNeeded {
+    if (-not $script:VoiceListenActive -and -not $script:VoiceAlwaysOn) { return }
     if ($script:FaSttPollTimer) { return }
     $script:FaSttPollTimer = New-Object System.Windows.Forms.Timer
     $script:FaSttPollTimer.Interval = 400
@@ -2150,6 +2155,9 @@ function Start-FreshAgentSttPollTimerIfNeeded {
 
 function Start-FreshAgentAlwaysOnVoice {
     # Legacy WhisperLoop retire. Voir Start-FreshAgentVoiceListenSession (voice_worker).
+    if (Get-Command Ensure-FreshAgentVoiceLibsLoaded -ErrorAction SilentlyContinue) {
+        Ensure-FreshAgentVoiceLibsLoaded -FreshAppData $script:FreshAppData | Out-Null
+    }
     if (Get-Command Start-FreshAgentVoiceListenSession -ErrorAction SilentlyContinue) {
         Start-FreshAgentVoiceListenSession
         return
@@ -2161,6 +2169,7 @@ function Start-FreshAgentAlwaysOnVoice {
 function Stop-FreshAgentAlwaysOnVoice {
     if (Get-Command Stop-FreshAgentVoiceListenSession -ErrorAction SilentlyContinue) {
         Stop-FreshAgentVoiceListenSession
+        Stop-FreshAgentSttPollTimerIfRunning
         return
     }
     $script:VoiceAlwaysOn = $false
@@ -2823,6 +2832,12 @@ function Open-FreshAgentDashboardPanel {
     }
     $script:FreshAgentDashboardOpening = $true
     try {
+    if (Get-Command Import-FreshAgentLibOnce -ErrorAction SilentlyContinue) {
+        Import-FreshAgentLibOnce -RelativePath 'lib/FreshAgent-Dashboard.ps1' -FreshAppData $script:FreshAppData | Out-Null
+    }
+    else {
+        Import-FreshAgentDashboardAtScriptScope | Out-Null
+    }
     $dashPath = Join-Path $script:FreshAppData 'lib\FreshAgent-Dashboard.ps1'
     if (-not (Test-Path -LiteralPath $dashPath)) {
         Write-WatchLog ("Dashboard fichier absent: {0}" -f $dashPath)
@@ -2858,6 +2873,7 @@ function Open-FreshAgentDashboardPanel {
                 if ($script:WatchMenuMonItem) {
                     $script:WatchMenuMonItem.Text = if ($On) { 'Surveillance : ON' } else { 'Surveillance : OFF' }
                 }
+                Sync-WatchAgentPollTimer
             }
             GameModeKill      = { Invoke-GameModeKillNow }
             IdleLaunchers     = { Invoke-IdleLaunchersOnly }
@@ -3063,6 +3079,7 @@ Add-WatchMenuClick $miMon {
     Set-WatchUserSettings -Settings $s
     $script:UserSettings = $s
     $miMon.Text = if ($s.monitorEnabled) { 'Surveillance : ON' } else { 'Surveillance : OFF' }
+    Sync-WatchAgentPollTimer
 }
 
 $menu.Items.Add('-') | Out-Null
@@ -3303,14 +3320,36 @@ Add-WatchMenuClick $miExit { Request-WatchAgentShutdown }
     Write-WatchLog 'Menu complet installe'
 }
 
+function Stop-WatchAgentPollTimerIfRunning {
+    if (-not $script:WatchPollTimer) { return }
+    try { $script:WatchPollTimer.Stop() } catch { }
+    try { $script:WatchPollTimer.Dispose() } catch { }
+    $script:WatchPollTimer = $null
+    Write-WatchLog 'Surveillance poll arretee'
+}
+
 function Start-WatchAgentPollTimerIfNeeded {
+    if (-not $script:UserSettings.monitorEnabled) { return }
     if ($script:WatchPollTimer) { return }
+    if (Get-Command Import-FreshAgentLibOnce -ErrorAction SilentlyContinue) {
+        Import-FreshAgentLibOnce -RelativePath 'lib/FreshAgent-Health.ps1' -FreshAppData $script:FreshAppData | Out-Null
+        Import-FreshAgentLibOnce -RelativePath 'lib/FreshAgent-IdleSuggest.ps1' -FreshAppData $script:FreshAppData | Out-Null
+    }
     $pollMs = [math]::Max(5000, [int]$script:WatchRules.pollIntervalSeconds * 1000)
     $script:WatchPollTimer = New-Object System.Windows.Forms.Timer
     $script:WatchPollTimer.Interval = $pollMs
     $script:WatchPollTimer.Add_Tick((Register-WatchUiHandler { Invoke-WatchTick }))
     $script:WatchPollTimer.Start()
     Write-WatchLog 'Surveillance poll demarree (post-boot modules)'
+}
+
+function Sync-WatchAgentPollTimer {
+    if ($script:UserSettings.monitorEnabled) {
+        Start-WatchAgentPollTimerIfNeeded
+    }
+    else {
+        Stop-WatchAgentPollTimerIfRunning
+    }
 }
 
 function Start-WatchAgentTimers {
@@ -3347,6 +3386,9 @@ function Start-WatchAgentUiBootstrap {
         Install-WatchAgentFullTrayMenu
         Start-WatchAgentTimers
         Refresh-WatchAgentTrayVisibility
+        if (Get-Command Import-FreshAgentLibOnce -ErrorAction SilentlyContinue) {
+            Import-FreshAgentLibOnce -RelativePath 'lib/FreshAgent-Overlay.ps1' -FreshAppData $script:FreshAppData | Out-Null
+        }
         if (Get-Command Show-FreshAgentOverlay -ErrorAction SilentlyContinue) {
             Show-FreshAgentOverlay -Title 'Fresh Agent' -Text 'Actif — icone dans la zone de notification (chevron ^ si masquee).' -Level Info -FadeMs 6000
         }
