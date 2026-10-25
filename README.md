@@ -114,7 +114,7 @@ Modes utiles : `standard` | `gaming` | `dev` | `custom` | `custom:mon-paquet` | 
 | `winutil-oneclick` / `maintenance` | Tweaks WinUtil (+ ShutUp10 en maintenance) |
 | `winutil-standard` / `minimal` / `advanced` | Presets WinUtil |
 | `winutil-appx` | Debloat AppX (WinUtil, inchangé) |
-| `appx-bloatware` / `appx-bloatware-apply` | Nettoyage apps préinstallées (liste repo, dry-run / apply) |
+| `appx-bloatware` / `appx-bloatware-apply` | Apps préinstallées : **simulation par défaut**, puis apply + confirmation ([guide](guides/appx-bloatware.md)) |
 | `brave-optimize` / `betterzen` | Policies Brave / Betterfox Zen |
 | `tasks` | Enregistre les tâches planifiées |
 | `game-mode` / `game-mode-shortcuts` / `game-mode-watch` | Mode jeu |
@@ -160,7 +160,7 @@ Scripts locaux : `%LOCALAPPDATA%\FreshWindows\` + marqueur `scripts.ref`. Agent 
 Core **sans IA obligatoire** : skills, session jeu, monitoring. Couche IA optionnelle (Ollama, tool calling sur le registry skills), STT **Windows Speech**, TTS Windows/Piper, RAG guides.
 
 - Doc : [guides/fresh-agent.md](guides/fresh-agent.md)
-- Nettoyage apps préinstallées : [guides/appx-bloatware.md](guides/appx-bloatware.md)
+- Nettoyage apps préinstallées (générique, dry-run d’abord) : [guides/appx-bloatware.md](guides/appx-bloatware.md)
 - Sync complet : `scripts/Sync-FreshWindowsAgent.ps1` ou menu systray / tâche `FreshWindows-SyncLocalScripts`
 - Overrides user : `agent-ai.user.json`, `skills-apps.user.json`, `inventory.json` (non écrasés)
 

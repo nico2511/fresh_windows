@@ -1,25 +1,33 @@
 # Nettoyage des applications preinstallees
 
-Fonctionnalite **separee** du debloat WinUtil (`winutil-appx.json`). La liste est versionnee dans `configs/appx-bloatware.json`.
+Outil **generique** pour tout PC Windows 10/11 : fonctionnalite **separee** du debloat WinUtil (`winutil-appx.json`). La liste est versionnee dans `configs/appx-bloatware.json`. Sur une machine sans bloat preinstalle, la simulation affiche simplement peu ou zero paquet a retirer.
 
 ## Principes
 
 - **Protected** gagne toujours sur **Remove**.
 - Paquet **inconnu** : jamais supprime (ignore).
-- **Dry-run par defaut** : liste uniquement.
+- **Dry-run par defaut** : liste uniquement, sans modification.
 - Suppression reelle : `-Apply` / mode `appx-bloatware-apply` + **confirmation** (agent ou launcher).
 - **Point de restauration** avant toute suppression reelle (echec ou limite 24h Windows gere proprement).
 - Journal : `%LOCALAPPDATA%\FreshWindows\logs\appx-bloatware-*.log` (paquet | action | resultat).
+
+## Procedure recommandee
+
+1. **Simulation** : lancer `appx-bloatware` (ou le bouton / skill agent) et lire les listes **a retirer** et **candidats a ajouter**.
+2. **Verifier** : comparer avec `configs/appx-bloatware.json` ; deplacer les candidats vers `remove` / `remove.oem` ou `protected` selon le besoin.
+3. **Apply** : seulement si la liste convient — `appx-bloatware-apply` ou skill avec `Apply=true` (confirmation + admin).
+
+Rien n est supprime tant que vous n avez pas explicitement confirme l etape Apply.
 
 ## Utilisation
 
 ### Launcher (admin)
 
 ```powershell
-# Simulation
+# 1. Simulation (defaut)
 $env:FRESH_WIN_MODE='appx-bloatware'; irm .../launcher.ps1 | iex
 
-# Suppression (apercu puis confirmation)
+# 2. Suppression (apercu puis confirmation)
 $env:FRESH_WIN_MODE='appx-bloatware-apply'; irm .../launcher.ps1 | iex
 ```
 
@@ -48,25 +56,44 @@ Invoke-FreshWindowsAppxBloatwareCleanup -RevertSilentInstall
 
 1. Editer `configs/appx-bloatware.json` :
    - `protected.exact` / `prefixes` / `suffixes`
-   - `remove.exact` / `prefixes`
-   - `confirmLater` pour les paquets a valider manuellement
+   - `remove.exact` / `prefixes` (Microsoft, partenaires, jeux)
+   - `remove.oem` (bloc **OEM / constructeur** : preloads AppX editeur machine)
+   - `confirmLater` pour reserver des paquets a revue manuelle (liste vide par defaut)
 2. Pousser sur GitHub ; bumper `FreshWindowsLibEpoch` / `agent-content.json` epoch si besoin.
 
 Prefixes : terminer par `.` (ex. `king.com.`). Suffixe systeme : `*_cw5n1h2txyewy` via `protected.suffixes`.
 
 **Note Paint** : `Microsoft.MSPaint` = Paint 3D (remove). `Microsoft.Paint` = Paint classique (protected).
 
-**confirmLater** : liste vide par defaut (mecanisme conserve pour ajouts futurs sans changer le schema). Tout paquet ni `protected` ni `remove` ni `confirmLater` = **inconnu**, jamais supprime.
+Tout paquet ni `protected` ni `remove` (y compris `remove.oem`) ni `confirmLater` = **inconnu**, jamais supprime.
 
-## Test dry-run (ex. MSI B450)
+## Ajouter une appli a la liste
 
-La liste `remove` ne vise **pas** les utilitaires carte mere / GPU typiques MSI ou AMD : pas d entrees MSI Center, Dragon Center, AMD Chipset, AMD Software (Adrenalin), etc. (les pilotes et outils s installent surtout en Win32/winget, pas en AppX listes ici). Sur un PC **MSI B450**, lancer d abord :
+1. **Trouver le nom AppX** (PowerShell admin sur la machine concernee) :
 
 ```powershell
+Get-AppxPackage *motcle* | Select-Object Name, PackageFamilyName
+```
+
+Utiliser la colonne **`Name`** (ex. `Microsoft.BingNews`) dans la config.
+
+2. **Choisir la categorie** dans `configs/appx-bloatware.json` :
+
+| Objectif | Où ajouter | Format |
+|----------|------------|--------|
+| Retirer ce paquet | `remove.exact` ou `remove.oem.exact` | Nom exact |
+| Retirer toute une famille | `remove.prefixes` ou `remove.oem.prefixes` | Prefixe finissant par `.` (ex. `king.com.`) |
+| Ne jamais retirer | `protected.exact` ou `protected.prefixes` | Nom ou prefixe |
+| Revoir plus tard sans auto-remove | `confirmLater.exact` | Nom exact |
+
+3. **Verifier** :
+
+```powershell
+powershell -NoProfile -File .\tests\Validate-Configs.ps1
 $env:FRESH_WIN_MODE='appx-bloatware'; irm .../launcher.ps1 | iex
 ```
 
-Verifier dans la sortie qu aucun paquet MSI/AMD chipset ou Adrenalin n apparait ; seules les apps Microsoft/OEM preinstallees type bloat sont concernees.
+La simulation affiche les paquets **a retirer** et, separement, les **candidats a ajouter** (inconnus installes) : utile pour enrichir la liste au fil des installations. Les candidats ne sont **jamais** supprimes, meme avec Apply.
 
 ## Restaurer des applications
 
@@ -76,4 +103,4 @@ Verifier dans la sortie qu aucun paquet MSI/AMD chipset ou Adrenalin n apparait 
 
 ## Mode jeu et Xbox
 
-Decision produit : **`Microsoft.XboxGamingOverlay`** (barre de jeu / overlay) reste en **remove**. L'app Xbox PC et les services associes sont **proteges** dans la config (`Microsoft.GamingApp`, `Microsoft.GamingServices`, `Microsoft.XboxApp` — processus mode jeu `XboxPcApp` / `GamingServices` dans `game-mode-kill.json`). Le mode jeu du depot continue de tuer des processus lourds sans toucher a ces familles. Le registre **Game Bar** pose par WinUtil (`AllowAutoGameMode`) reste independant de la suppression de l'overlay AppX.
+**`Microsoft.XboxGamingOverlay`** (barre de jeu / overlay) est en **remove**. L'app Xbox PC et les services associes sont **proteges** (`Microsoft.GamingApp`, `Microsoft.GamingServices`, `Microsoft.XboxApp` — aligne avec le mode jeu du depot). Le registre **Game Bar** pose par WinUtil (`AllowAutoGameMode`) reste independant de la suppression de l'overlay AppX.

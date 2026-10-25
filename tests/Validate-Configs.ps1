@@ -249,8 +249,12 @@ if (Test-Path -LiteralPath $bloatPath) {
     elseif (-not $bw.confirmLater -or $null -eq $bw.confirmLater.exact) {
         Fail 'appx-bloatware.json : confirmLater ou confirmLater.exact manquant'
     }
+    elseif (-not $bw.remove.oem -or $null -eq $bw.remove.oem.exact) {
+        Fail 'appx-bloatware.json : remove.oem (OEM / constructeur) manquant'
+    }
     else {
-        Ok ("appx-bloatware.json ({0} remove, {1} protected exact)" -f @($bw.remove.exact).Count, @($bw.protected.exact).Count)
+        $oemCount = @($bw.remove.oem.exact).Count
+        Ok ("appx-bloatware.json ({0} remove + {1} oem, {2} protected exact)" -f @($bw.remove.exact).Count, $oemCount, @($bw.protected.exact).Count)
     }
 }
 

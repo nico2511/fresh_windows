@@ -33,8 +33,13 @@ Describe 'Appx bloatware classification' {
     }
 
     It 'treats unlisted OEM packages as unknown (never removed)' {
-        (Get-FreshWindowsAppxBloatwareClassification -PackageIdentity 'Acer.AcerConfigurationManager' -Config $script:Config) |
+        (Get-FreshWindowsAppxBloatwareClassification -PackageIdentity 'Contoso.OemConfigurationManager' -Config $script:Config) |
             Should -Be 'Unknown'
+    }
+
+    It 'classifies remove.oem entries as Remove' {
+        (Get-FreshWindowsAppxBloatwareClassification -PackageIdentity 'DolbyLaboratories.DolbyAccess' -Config $script:Config) |
+            Should -Be 'Remove'
     }
 
     It 'removes Xbox Game Bar overlay but protects Xbox app and Gaming Services' {
@@ -46,7 +51,7 @@ Describe 'Appx bloatware classification' {
             Should -Be 'Protected'
     }
 
-    It 'dry-run does not call remove cmdlets' {
+    It 'dry-run lists unknown packages as add candidates' {
         $plan = Invoke-FreshWindowsAppxBloatwareCleanup -RepoRoot $script:RepoRoot -PackageIdentities @(
             'Microsoft.BingNews',
             'Microsoft.Paint',
@@ -55,7 +60,18 @@ Describe 'Appx bloatware classification' {
         $plan.dryRun | Should -Be $true
         $plan.toRemove | Should -Contain 'Microsoft.BingNews'
         $plan.protected | Should -Contain 'Microsoft.Paint'
-        $plan.unknown | Should -Contain 'Unknown.PersonalApp'
+        $plan.addCandidates | Should -Contain 'Unknown.PersonalApp'
+        $plan.message | Should -Match 'Candidats a ajouter'
+    }
+
+    It 'Apply never removes unknown packages' {
+        $result = Invoke-FreshWindowsAppxBloatwareCleanup -Apply -RepoRoot $script:RepoRoot -PackageIdentities @(
+            'Contoso.UnknownApp',
+            'Microsoft.BingNews'
+        )
+        $result.dryRun | Should -Be $false
+        $result.removed | Should -Not -Contain 'Contoso.UnknownApp'
+        @($result.addCandidates) | Should -Contain 'Contoso.UnknownApp'
     }
 
     It 'prefix rules match king.com family' {

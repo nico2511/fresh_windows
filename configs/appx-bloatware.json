@@ -103,14 +103,7 @@
       "Microsoft.Windows.DevHome",
       "Microsoft.WindowsDevHome",
       "Microsoft.LinkedIn",
-      "Microsoft.StartExperiencesApp",
-      "DolbyLaboratories.DolbyAccess",
-      "AutodeskSketchBook",
-      "AcerIncorporated.AcerCollection",
-      "AcerIncorporated.AcerCareCenter",
-      "AcerIncorporated.AcerQuickAccess",
-      "Acer.AcerQuickAccess",
-      "Acer.AcerCareCenter"
+      "Microsoft.StartExperiencesApp"
     ],
     "prefixes": [
       "king.com.",
@@ -118,7 +111,20 @@
       "Instagram.",
       "Microsoft.Minecraft",
       "WildTangent."
-    ]
+    ],
+    "oem": {
+      "comment": "OEM / constructeur — preloads AppX tiers courants (editer selon la machine)",
+      "exact": [
+        "DolbyLaboratories.DolbyAccess",
+        "AutodeskSketchBook",
+        "AcerIncorporated.AcerCollection",
+        "AcerIncorporated.AcerCareCenter",
+        "AcerIncorporated.AcerQuickAccess",
+        "Acer.AcerQuickAccess",
+        "Acer.AcerCareCenter"
+      ],
+      "prefixes": []
+    }
   },
   "confirmLater": {
     "exact": [],

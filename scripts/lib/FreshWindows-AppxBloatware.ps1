@@ -117,6 +117,21 @@ function Test-FreshWindowsAppxRuleListMatch {
     return $false
 }
 
+function Get-FreshWindowsAppxBloatwareRemoveRuleLists {
+    param($Config)
+    $exact = @()
+    $prefixes = @()
+    if ($Config.remove) {
+        if ($Config.remove.exact) { $exact += @($Config.remove.exact) }
+        if ($Config.remove.prefixes) { $prefixes += @($Config.remove.prefixes) }
+        if ($Config.remove.oem) {
+            if ($Config.remove.oem.exact) { $exact += @($Config.remove.oem.exact) }
+            if ($Config.remove.oem.prefixes) { $prefixes += @($Config.remove.oem.prefixes) }
+        }
+    }
+    return @{ exact = $exact; prefixes = $prefixes }
+}
+
 function Get-FreshWindowsAppxBloatwareClassification {
     param(
         [Parameter(Mandatory)][string]$PackageIdentity,
@@ -138,8 +153,9 @@ function Get-FreshWindowsAppxBloatwareClassification {
             -ExactList $Config.confirmLater.exact -PrefixList @() -SuffixList @())) {
         return 'ConfirmLater'
     }
+    $removeLists = Get-FreshWindowsAppxBloatwareRemoveRuleLists -Config $Config
     if (Test-FreshWindowsAppxRuleListMatch -PackageIdentity $PackageIdentity `
-            -ExactList $Config.remove.exact -PrefixList $Config.remove.prefixes -SuffixList @()) {
+            -ExactList $removeLists.exact -PrefixList $removeLists.prefixes -SuffixList @()) {
         return 'Remove'
     }
     return 'Unknown'
@@ -379,23 +395,35 @@ function Invoke-FreshWindowsAppxBloatwareCleanup {
         foreach ($item in $toRemove) {
             Write-FreshWindowsAppxBloatwareLogLine -LogPath $logPath -Package $item.Identity -Action 'dry-run' -Result 'would-remove'
         }
-        $summary = "Simulation: {0} a retirer, {1} proteges, {2} inconnus ignores, {3} a confirmer." -f `
-            $toRemove.Count, $protected.Count, $unknown.Count, $later.Count
+        foreach ($item in $unknown) {
+            Write-FreshWindowsAppxBloatwareLogLine -LogPath $logPath -Package $item.Identity -Action 'add-candidate' -Result 'unknown-never-removed'
+        }
+        $addCandidates = @($unknown | ForEach-Object { $_.Identity } | Select-Object -Unique)
+        $summary = "Simulation: {0} a retirer, {1} proteges, {2} candidats a ajouter (inconnus), {3} a confirmer." -f `
+            $toRemove.Count, $protected.Count, $addCandidates.Count, $later.Count
         [void]$notes.Add($summary)
         [void]$notes.Add("Journal: $logPath")
         if ($toRemove.Count -gt 0) {
             $sample = ($toRemove | Select-Object -First 20 | ForEach-Object { $_.Identity }) -join ', '
-            [void]$notes.Add("Exemples: $sample")
+            [void]$notes.Add("A retirer (extraits): $sample")
+        }
+        if ($addCandidates.Count -gt 0) {
+            $cand = ($addCandidates | Select-Object -First 30) -join ', '
+            [void]$notes.Add("Candidats a ajouter a la config (jamais supprimes): $cand")
+            if ($addCandidates.Count -gt 30) {
+                [void]$notes.Add(("... et {0} autre(s) candidat(s)." -f ($addCandidates.Count - 30)))
+            }
         }
         return @{
-            ok          = $true
-            message     = ($notes -join ' ')
-            logPath     = $logPath
-            dryRun      = $true
-            toRemove    = @($toRemove | ForEach-Object { $_.Identity })
-            protected   = @($protected | ForEach-Object { $_.Identity })
-            unknown     = @($unknown | ForEach-Object { $_.Identity })
-            confirmLater = @($later | ForEach-Object { $_.Identity })
+            ok            = $true
+            message       = ($notes -join ' ')
+            logPath       = $logPath
+            dryRun        = $true
+            toRemove      = @($toRemove | ForEach-Object { $_.Identity })
+            protected     = @($protected | ForEach-Object { $_.Identity })
+            unknown       = $addCandidates
+            addCandidates = $addCandidates
+            confirmLater  = @($later | ForEach-Object { $_.Identity })
         }
     }
 
@@ -455,16 +483,20 @@ function Invoke-FreshWindowsAppxBloatwareCleanup {
         if ($okRemove) { [void]$removed.Add($identity) } else { [void]$skipped.Add($identity) }
     }
 
+    if ($unknown.Count -gt 0) {
+        [void]$notes.Add(("{0} paquet(s) inconnu(s) ignores (jamais supprimes)." -f $unknown.Count))
+    }
     [void]$notes.Add(("Suppression: {0} OK, {1} partiels/echecs." -f $removed.Count, $skipped.Count))
     [void]$notes.Add("Journal: $logPath")
 
     return @{
-        ok       = ($skipped.Count -eq 0)
-        message  = ($notes -join ' ')
-        logPath  = $logPath
-        dryRun   = $false
-        removed  = @($removed)
-        skipped  = @($skipped)
+        ok            = ($skipped.Count -eq 0)
+        message       = ($notes -join ' ')
+        logPath       = $logPath
+        dryRun        = $false
+        removed       = @($removed)
+        skipped       = @($skipped)
+        addCandidates = @($unknown | ForEach-Object { $_.Identity } | Select-Object -Unique)
     }
 }
 
