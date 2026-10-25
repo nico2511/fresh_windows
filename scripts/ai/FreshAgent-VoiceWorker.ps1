@@ -4,6 +4,14 @@
   Telecharge depuis les releases CyberScribeNote si absent — sans installer CyberScribeNote.
 #>
 
+$sttSettingsLib = Join-Path $PSScriptRoot '..\lib\FreshAgent-SttSettings.ps1'
+if (-not (Test-Path -LiteralPath $sttSettingsLib)) {
+    $sttSettingsLib = Join-Path (Split-Path $PSScriptRoot -Parent) 'lib\FreshAgent-SttSettings.ps1'
+}
+if (Test-Path -LiteralPath $sttSettingsLib) {
+    . $sttSettingsLib
+}
+
 function Get-FreshAgentVoiceWorkerPaths {
     param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
     $bin = Join-Path $FreshAppData 'bin'
@@ -106,6 +114,9 @@ function Test-FreshAgentSttPushToTalk {
                 -FreshAppData $(if ($script:FreshAppData) { $script:FreshAppData } else { Get-FreshAgentAppDataRoot }) -PreferLocal
         }
         catch { }
+    }
+    if (Get-Command Test-FreshAgentSttPushToTalkFromConfig -ErrorAction SilentlyContinue) {
+        return Test-FreshAgentSttPushToTalkFromConfig -AiConfig $AiConfig
     }
     if (-not $AiConfig -or -not $AiConfig.stt) { return $true }
     if ($null -ne $AiConfig.stt.pushToTalk) { return [bool]$AiConfig.stt.pushToTalk }
@@ -355,6 +366,20 @@ function Send-FreshAgentVoiceWorkerCmd {
     }
 }
 
+function Send-FreshAgentVoiceRecordStart {
+    param([string]$FreshAppData = $(if ($script:FreshAppData) { $script:FreshAppData } else { Get-FreshAgentAppDataRoot }))
+    if ($script:FaVoiceTranscribing) { return $false }
+    if ($script:FaVoiceWorkerRecording) { return $false }
+    return Send-FreshAgentVoiceWorkerCmd -Payload @{ cmd = 'record_start' } -FreshAppData $FreshAppData
+}
+
+function Send-FreshAgentVoiceRecordStop {
+    param([string]$FreshAppData = $(if ($script:FreshAppData) { $script:FreshAppData } else { Get-FreshAgentAppDataRoot }))
+    if ($script:FaVoiceTranscribing) { return $false }
+    if (-not $script:FaVoiceWorkerRecording) { return $false }
+    return Send-FreshAgentVoiceWorkerCmd -Payload @{ cmd = 'record_stop' } -FreshAppData $FreshAppData
+}
+
 function Sync-FreshAgentVoiceHostStatus {
     param([string]$FreshAppData = $(if ($script:FaVoiceWorkerAppData) { $script:FaVoiceWorkerAppData } elseif ($script:FreshAppData) { $script:FreshAppData } else { Get-FreshAgentAppDataRoot }))
     $statusPath = Join-Path $FreshAppData 'fa-voice-status.json'
@@ -364,6 +389,7 @@ function Sync-FreshAgentVoiceHostStatus {
         $script:FaVoiceWorkerReady = [bool]$st.ready
         $script:FaVoiceWorkerModelLoaded = [bool]$st.modelLoaded
         $script:FaVoiceWorkerRecording = [bool]$st.recording
+        if ($null -ne $st.transcribing) { $script:FaVoiceTranscribing = [bool]$st.transcribing }
         $script:FaVoiceWorkerMicError = [bool]$st.micError
         if ($st.needRearm) { $script:FaVoiceWorkerNeedRearm = $true }
         if ($st.lastTranscriptAt) {
@@ -389,7 +415,8 @@ function Test-FreshAgentSttTranscriptUseful {
         'sous-titres', 'subtitl', 'merci', 'thanks', 'music', 'musique',
         'applaudissements', 'silence', 'you', 'the end', 'fin',
         'cest ca', 'c est ca', 'ah', 'euh', 'hmm',
-        'stimme', 'stimme stimme', 'xen', 'lors', 'loss', 'l oss'
+        'stimme', 'stimme stimme', 'xen', 'lors', 'loss', 'l oss',
+        'scribe', 'scribe scribe', 'cyber scribe', 'cyberscribe'
     )
     foreach ($j in $junkExact) {
         if ($norm -eq $j) { return $false }
@@ -425,7 +452,12 @@ function Suspend-FreshAgentVoiceListenForTts {
     $script:FaVoiceWorkerNeedRearm = $false
     # Coupe vraiment l'enregistrement en cours (sinon le micro capte le TTS).
     if ($script:FaVoiceWorkerRecording) {
-        Send-FreshAgentVoiceWorkerCmd -Payload @{ cmd = 'toggle' } | Out-Null
+        if (Get-Command Send-FreshAgentVoiceRecordStop -ErrorAction SilentlyContinue) {
+            Send-FreshAgentVoiceRecordStop -FreshAppData $FreshAppData | Out-Null
+        }
+        else {
+            Send-FreshAgentVoiceWorkerCmd -Payload @{ cmd = 'toggle' } | Out-Null
+        }
     }
 }
 
@@ -542,6 +574,17 @@ function Start-FreshAgentVoiceWorkerProcess {
             Copy-Item -LiteralPath $cand -Destination $hostPs1 -Force
         }
     }
+    $sttLibDest = Join-Path $FreshAppData 'lib\FreshAgent-SttSettings.ps1'
+    if (-not (Test-Path -LiteralPath $sttLibDest)) {
+        $sttLibSrc = Join-Path $PSScriptRoot '..\lib\FreshAgent-SttSettings.ps1'
+        if (-not (Test-Path -LiteralPath $sttLibSrc)) {
+            $sttLibSrc = Join-Path (Split-Path $PSScriptRoot -Parent) 'lib\FreshAgent-SttSettings.ps1'
+        }
+        if (Test-Path -LiteralPath $sttLibSrc) {
+            New-Item -ItemType Directory -Path (Split-Path $sttLibDest -Parent) -Force | Out-Null
+            Copy-Item -LiteralPath $sttLibSrc -Destination $sttLibDest -Force
+        }
+    }
     if (-not (Test-Path -LiteralPath $hostPs1)) {
         Write-FreshAgentVoiceWorkerLog -Message 'FreshAgent-VoiceHost.ps1 absent' -FreshAppData $FreshAppData
         return $false
@@ -551,11 +594,19 @@ function Start-FreshAgentVoiceWorkerProcess {
     $lang = 'fr'
     $model = 'small'
     $profile = 'accurate'
+    $modelsDir = ''
     if ($AiConfig -and $AiConfig.stt) {
         if ($AiConfig.stt.language) { $lang = [string]$AiConfig.stt.language }
         if ($AiConfig.stt.modelSize) { $model = [string]$AiConfig.stt.modelSize }
         if ($AiConfig.stt.transcriptionProfile) { $profile = [string]$AiConfig.stt.transcriptionProfile }
+        if ($AiConfig.stt.modelsDir -and (Test-Path -LiteralPath ([string]$AiConfig.stt.modelsDir))) {
+            $modelsDir = [string]$AiConfig.stt.modelsDir
+        }
     }
+    if (Get-Command Resolve-FreshAgentSttModelSize -ErrorAction SilentlyContinue) {
+        $model = Resolve-FreshAgentSttModelSize -Requested $model -ModelsDir $modelsDir
+    }
+    elseif ($model -eq 'base') { $model = 'small' }
 
     # Reset status/cmd files
     foreach ($f in @('fa-voice-status.json', 'fa-voice-cmd.jsonl', 'fa-voice-host.pid')) {
@@ -634,6 +685,11 @@ function Start-FreshAgentVoiceListenSession {
         $script:FaVoiceListenStartedAt = Get-Date
         $script:FaPttHolding = $false
         $script:FaPttRequireRelease = $false
+        $script:FaPttKeyWasDown = $false
+        $script:FaVoiceTranscribing = $false
+        if (Get-Command New-FreshAgentPttMachineState -ErrorAction SilentlyContinue) {
+            $script:FaPttMachine = New-FreshAgentPttMachineState
+        }
         Remove-Item -LiteralPath (Join-Path $FreshAppData 'fa-stt.paused') -Force -ErrorAction SilentlyContinue
 
         $ptt = Test-FreshAgentSttPushToTalk -AiConfig $AiConfig
@@ -694,16 +750,35 @@ function Start-FreshAgentVoiceListenSession {
     }
 }
 
+function Restart-FreshAgentVoiceListenForConfig {
+    param(
+        [string]$FreshAppData = $(if ($script:FreshAppData) { $script:FreshAppData } else { Get-FreshAgentAppDataRoot }),
+        $AiConfig = $null
+    )
+    if (-not $script:VoiceListenActive) { return }
+    try { Stop-FreshAgentVoiceListenSession } catch { }
+    Start-Sleep -Milliseconds 250
+    Start-FreshAgentVoiceListenSession -FreshAppData $FreshAppData -AiConfig $AiConfig
+}
+
 function Stop-FreshAgentVoiceListenSession {
     $script:VoiceListenActive = $false
     $script:VoiceAlwaysOn = $false
     $script:FaVoiceWorkerNeedRearm = $false
     $script:FaPttHolding = $false
     $script:FaPttRequireRelease = $false
+    $script:FaPttKeyWasDown = $false
+    $script:FaVoiceTranscribing = $false
+    $script:FaPttMachine = $null
     $script:FaVoiceAwaitFirstToggle = $false
     Stop-FreshAgentPttTimer
     if ($script:FaVoiceWorkerRecording) {
-        Send-FreshAgentVoiceWorkerCmd -Payload @{ cmd = 'toggle' } | Out-Null
+        if (Get-Command Send-FreshAgentVoiceRecordStop -ErrorAction SilentlyContinue) {
+            Send-FreshAgentVoiceRecordStop | Out-Null
+        }
+        else {
+            Send-FreshAgentVoiceWorkerCmd -Payload @{ cmd = 'toggle' } | Out-Null
+        }
         Start-Sleep -Milliseconds 100
     }
     Stop-FreshAgentVoiceWorkerProcess
@@ -725,29 +800,47 @@ function Invoke-FreshAgentPttTick {
     if (-not $script:FaPttHotkeySpec) {
         $script:FaPttHotkeySpec = Get-FreshAgentPttHotkeySpec -Hotkey (Get-FreshAgentPttHotkeyLabel)
     }
+    if (-not $script:FaPttMachine -and (Get-Command New-FreshAgentPttMachineState -ErrorAction SilentlyContinue)) {
+        $script:FaPttMachine = New-FreshAgentPttMachineState
+    }
 
     $down = Test-FreshAgentPttHotkeyDown -Spec $script:FaPttHotkeySpec
-    if ($down) {
-        if ($script:FaPttRequireRelease) { return }
-        if (-not $script:FaVoiceWorkerRecording -and -not $script:FaPttHolding) {
-            $script:FaPttHolding = $true
-            Send-FreshAgentVoiceWorkerCmd -Payload @{ cmd = 'toggle' } -FreshAppData $FreshAppData | Out-Null
-            Write-FreshAgentVoiceWorkerLog -Message 'ptt start' -FreshAppData $FreshAppData
+    if ($script:FaPttMachine -and (Get-Command Update-FreshAgentPttMachine -ErrorAction SilentlyContinue)) {
+        $step = Update-FreshAgentPttMachine -State $script:FaPttMachine -KeyDown $down `
+            -Recording ([bool]$script:FaVoiceWorkerRecording) -Transcribing ([bool]$script:FaVoiceTranscribing)
+        $script:FaPttMachine = $step.State
+        $script:FaPttHolding = [bool]$script:FaPttMachine.Holding
+        $script:FaPttRequireRelease = [bool]$script:FaPttMachine.RequireRelease
+        foreach ($act in @($step.Actions)) {
+            if ($act -eq 'start') {
+                Send-FreshAgentVoiceRecordStart -FreshAppData $FreshAppData | Out-Null
+                Write-FreshAgentVoiceWorkerLog -Message 'ptt start' -FreshAppData $FreshAppData
+            }
+            elseif ($act -eq 'stop') {
+                Send-FreshAgentVoiceRecordStop -FreshAppData $FreshAppData | Out-Null
+                Write-FreshAgentVoiceWorkerLog -Message 'ptt stop' -FreshAppData $FreshAppData
+            }
         }
         return
     }
 
-    # Relachement
-    if ($script:FaPttRequireRelease) { $script:FaPttRequireRelease = $false }
-    if ($script:FaPttHolding -or $script:FaVoiceWorkerRecording) {
-        $wasHolding = [bool]$script:FaPttHolding
+    # Fallback legacy (sans lib STT)
+    $wasDown = [bool]$script:FaPttKeyWasDown
+    $script:FaPttKeyWasDown = $down
+    if ($script:FaVoiceTranscribing) { return }
+    if ($script:FaPttRequireRelease) {
+        if (-not $down) { $script:FaPttRequireRelease = $false }
+        return
+    }
+    if ($down -and -not $wasDown -and -not $script:FaVoiceWorkerRecording) {
+        $script:FaPttHolding = $true
+        Send-FreshAgentVoiceRecordStart -FreshAppData $FreshAppData | Out-Null
+        Write-FreshAgentVoiceWorkerLog -Message 'ptt start' -FreshAppData $FreshAppData
+    }
+    elseif (-not $down -and $wasDown -and $script:FaVoiceWorkerRecording) {
         $script:FaPttHolding = $false
-        if ($script:FaVoiceWorkerRecording) {
-            Send-FreshAgentVoiceWorkerCmd -Payload @{ cmd = 'toggle' } -FreshAppData $FreshAppData | Out-Null
-            if ($wasHolding) {
-                Write-FreshAgentVoiceWorkerLog -Message 'ptt stop' -FreshAppData $FreshAppData
-            }
-        }
+        Send-FreshAgentVoiceRecordStop -FreshAppData $FreshAppData | Out-Null
+        Write-FreshAgentVoiceWorkerLog -Message 'ptt stop' -FreshAppData $FreshAppData
     }
 }
 
@@ -847,8 +940,17 @@ function Invoke-FreshAgentVoiceWatchTick {
 
     # PTT: enregistrement pilote par hotkey (timer dedie).
     if ($script:FaVoicePushToTalk) {
-        if (-not $script:FaVoiceWorkerRecording -and $script:FaPttHolding) {
-            # Silence / fin utterance pendant maintien -> attendre relachement.
+        $down = $false
+        if ($script:FaPttHotkeySpec) {
+            $down = Test-FreshAgentPttHotkeyDown -Spec $script:FaPttHotkeySpec
+        }
+        if ($script:FaPttMachine -and (Get-Command Sync-FreshAgentPttMachineAfterRecording -ErrorAction SilentlyContinue)) {
+            $script:FaPttMachine = Sync-FreshAgentPttMachineAfterRecording -State $script:FaPttMachine `
+                -KeyDown $down -Recording ([bool]$script:FaVoiceWorkerRecording)
+            $script:FaPttHolding = [bool]$script:FaPttMachine.Holding
+            $script:FaPttRequireRelease = [bool]$script:FaPttMachine.RequireRelease
+        }
+        elseif (-not $script:FaVoiceWorkerRecording -and $script:FaPttHolding) {
             $script:FaPttRequireRelease = $true
             $script:FaPttHolding = $false
         }

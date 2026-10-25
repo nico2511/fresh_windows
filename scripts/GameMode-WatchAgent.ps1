@@ -2347,6 +2347,9 @@ function Invoke-FreshAgentPttHotkeyPickMenu {
             -MiSttState $m.SttState -MiAiListen $m.Listen -MiTtsCycle $m.TtsCycle -MiRagToggle $m.RagToggle `
             -MiListenMode $m.ListenMode -SkipNetworkChecks
     }
+    if ($script:VoiceListenActive -and (Get-Command Restart-FreshAgentVoiceListenForConfig -ErrorAction SilentlyContinue)) {
+        Restart-FreshAgentVoiceListenForConfig -FreshAppData $FreshAppData -AiConfig $script:FreshAgentAi
+    }
     if (Get-Command Update-FreshAgentDashboardIfOpen -ErrorAction SilentlyContinue) {
         Update-FreshAgentDashboardIfOpen
     }
@@ -2383,9 +2386,14 @@ function Invoke-FreshAgentListenModeCycleMenu {
     Show-FreshAgentUserNotice -Title 'Mode ecoute' -Text $notice -Level Info
     # Relancer la session pour appliquer timings / auto-rearm host.
     if ($script:VoiceListenActive -or $script:VoiceAlwaysOn) {
-        try { Stop-FreshAgentAlwaysOnVoice } catch { }
-        Start-Sleep -Milliseconds 200
-        Invoke-FreshAgentVoiceListenOn
+        if (Get-Command Restart-FreshAgentVoiceListenForConfig -ErrorAction SilentlyContinue) {
+            Restart-FreshAgentVoiceListenForConfig -FreshAppData $FreshAppData -AiConfig $script:FreshAgentAi
+        }
+        else {
+            try { Stop-FreshAgentAlwaysOnVoice } catch { }
+            Start-Sleep -Milliseconds 200
+            Invoke-FreshAgentVoiceListenOn
+        }
     }
     if ($script:FreshAgentAiMenu) {
         $m = $script:FreshAgentAiMenu

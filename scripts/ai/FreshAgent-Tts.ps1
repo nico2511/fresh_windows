@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
-  TTS Fresh Agent : edge-tts (defaut), Windows SAPI / Piper seulement si provider explicite.
-  Pas de fallback silencieux entre providers.
+  TTS Fresh Agent : edge-tts (defaut), repli Windows SAPI si edge echoue.
+  Piper / windows explicites sinon.
 #>
 
 function Write-FreshAgentTtsLog {
@@ -140,12 +140,24 @@ asyncio.run(main())
 "@
     $pyFile = Join-Path $outDir 'edge_speak.py'
     Set-Content -LiteralPath $pyFile -Value $code -Encoding UTF8
-    $p = Start-Process -FilePath $py -ArgumentList @($pyFile, $txt, $voice, $rate, $volume, $mp3) -Wait -PassThru -WindowStyle Hidden
+    $errFile = Join-Path $outDir ('edge-err-{0}.txt' -f ([guid]::NewGuid().ToString('N')))
+    $p = Start-Process -FilePath $py -ArgumentList @($pyFile, $txt, $voice, $rate, $volume, $mp3) `
+        -Wait -PassThru -WindowStyle Hidden -RedirectStandardError $errFile
     try { Remove-Item -LiteralPath $txt -Force -ErrorAction SilentlyContinue } catch { }
     if ($p.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $mp3)) {
-        Write-FreshAgentTtsLog -Message ("edge synthesize failed exit=$($p.ExitCode)") -FreshAppData $FreshAppData
+        $errSnippet = ''
+        if (Test-Path -LiteralPath $errFile) {
+            try {
+                $errSnippet = ((Get-Content -LiteralPath $errFile -Raw -ErrorAction SilentlyContinue) -replace '\s+', ' ').Trim()
+                if ($errSnippet.Length -gt 360) { $errSnippet = $errSnippet.Substring(0, 357) + '...' }
+            }
+            catch { }
+        }
+        Write-FreshAgentTtsLog -Message ("edge synthesize failed exit=$($p.ExitCode) stderr=$errSnippet") -FreshAppData $FreshAppData
+        try { Remove-Item -LiteralPath $errFile -Force -ErrorAction SilentlyContinue } catch { }
         return $false
     }
+    try { Remove-Item -LiteralPath $errFile -Force -ErrorAction SilentlyContinue } catch { }
     try {
         Add-Type -AssemblyName presentationCore -ErrorAction Stop
         $player = New-Object System.Windows.Media.MediaPlayer
@@ -236,10 +248,12 @@ function Invoke-FreshAgentSpeak {
         $spoken = $spoken.Substring(0, 317) + '...'
     }
     $provider = Get-FreshAgentTtsProvider -AiConfig $AiConfig
-    # Vague 3: pas de fallback silencieux entre providers.
     switch ($provider) {
         'edge' {
-            return [bool](Invoke-FreshAgentEdgeTts -Text $spoken -AiConfig $AiConfig -FreshAppData $FreshAppData)
+            $ok = [bool](Invoke-FreshAgentEdgeTts -Text $spoken -AiConfig $AiConfig -FreshAppData $FreshAppData)
+            if ($ok) { return $true }
+            Write-FreshAgentTtsLog -Message 'edge failed -> windows SAPI fallback' -FreshAppData $FreshAppData
+            return [bool](Invoke-FreshAgentWindowsTts -Text $spoken -AiConfig $AiConfig)
         }
         'windows' {
             return [bool](Invoke-FreshAgentWindowsTts -Text $spoken -AiConfig $AiConfig)

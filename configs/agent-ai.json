@@ -28,7 +28,7 @@
     "exe": "",
     "downloadUrl": "https://github.com/nico2511/CyberScribeNote/releases/latest/download/CyberScribeNote-win.zip",
     "language": "fr",
-    "modelSize": "base",
+    "modelSize": "small",
     "transcriptionProfile": "accurate",
     "modelsDir": "D:\\models\\cyberscribe_models",
     "initialPrompt": "Dictée commandes PC en français clair: lance Steam, lance Discord, lance Grok Bot, lance Cursor, ouvre Chrome, état du système, mode jeu, nettoyage.",
@@ -45,7 +45,7 @@
   },
   "tts": {
     "provider": "edge",
-    "comment": "edge par defaut. Pas de fallback silencieux vers windows/piper si edge echoue.",
+    "comment": "edge par defaut; repli Windows SAPI si edge echoue. Piper/windows = provider explicite.",
     "speakSkillResults": true,
     "edge": {
       "voice": "fr-FR-DeniseNeural",
