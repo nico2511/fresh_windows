@@ -353,29 +353,48 @@ function Write-FreshWindowsJsonFile {
     $Object | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $Path -Encoding UTF8
 }
 
+function Test-FreshWindowsIsHostTerminalProcess {
+    param([string]$ProcessName)
+    $n = ([string]$ProcessName).ToLowerInvariant()
+    return ($n -in @('windowsterminal.exe', 'wt.exe', 'openconsole.exe'))
+}
+
+function Resolve-FreshWindowsKnownProcessRole {
+    param(
+        [string]$CommandLine,
+        [string]$ProcessName
+    )
+    $cl = [string]$CommandLine
+    if ($cl -match 'GameMode-WatchAgent') { return 'agent systray' }
+    if ($cl -match 'FreshAgent-BackgroundWorker') { return 'worker' }
+    if ($cl -match 'FreshAgent-VoiceWorker|voice_worker') { return 'voix' }
+    $pn = ([string]$ProcessName).ToLowerInvariant()
+    if ($pn -eq 'voice_worker.exe') { return 'voix' }
+    if ($pn -eq 'ollama.exe' -or $pn -eq 'ollama app.exe') { return 'ollama' }
+    if ($cl -match '(?i)ollama') { return 'ollama' }
+    return $null
+}
+
 function Get-FreshWindowsFreshProcesses {
     param([string]$FreshAppData = $(Join-Path $env:LOCALAPPDATA 'FreshWindows'))
     $found = @()
     if (-not (Test-FreshWindowsBackgroundAuditOnWindows)) { return $found }
 
-    $freshEsc = $FreshAppData.Replace('\', '\\')
+    $seenPids = @{}
     try {
         $cim = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue
         foreach ($p in $cim) {
+            $pidNum = [int]$p.ProcessId
+            if ($pidNum -eq $PID) { continue }
+            if (Test-FreshWindowsIsHostTerminalProcess -ProcessName $p.Name) { continue }
             $cl = [string]$p.CommandLine
-            if ([string]::IsNullOrWhiteSpace($cl)) { continue }
-            $isFresh = $false
-            $role = ''
-            if ($cl -match 'GameMode-WatchAgent') { $isFresh = $true; $role = 'watch-agent' }
-            elseif ($cl -match 'FreshAgent-BackgroundWorker') { $isFresh = $true; $role = 'bg-worker' }
-            elseif ($cl -match 'FreshAgent-VoiceHost') { $isFresh = $true; $role = 'voice-host' }
-            elseif ($cl -match 'idle-ai-run\.ps1') { $isFresh = $true; $role = 'idle-ai' }
-            elseif ($cl -match $freshEsc) { $isFresh = $true; $role = 'fresh-appdata' }
-            if (-not $isFresh) { continue }
-            $proc = Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue
+            $role = Resolve-FreshWindowsKnownProcessRole -CommandLine $cl -ProcessName $p.Name
+            if (-not $role) { continue }
+            $proc = Get-Process -Id $pidNum -ErrorAction SilentlyContinue
+            $seenPids[$pidNum] = $true
             $found += [ordered]@{
                 role    = $role
-                pid     = [int]$p.ProcessId
+                pid     = $pidNum
                 name    = [string]$p.Name
                 cpu     = if ($proc) { $proc.CPU } else { $null }
                 wsMb    = if ($proc) { [math]::Round($proc.WorkingSet64 / 1MB, 1) } else { $null }
@@ -386,16 +405,36 @@ function Get-FreshWindowsFreshProcesses {
     catch { }
 
     foreach ($vw in @(Get-Process -Name 'voice_worker' -ErrorAction SilentlyContinue)) {
+        if ($vw.Id -eq $PID) { continue }
+        if ($seenPids.ContainsKey($vw.Id)) { continue }
         $path = ''
         try { $path = $vw.MainModule.FileName } catch { }
-        if ($path -and $path -notlike "*$FreshAppData*") { continue }
         $found += [ordered]@{
-            role    = 'voice_worker'
+            role    = 'voix'
             pid     = $vw.Id
             name    = $vw.ProcessName
             cpu     = $vw.CPU
             wsMb    = [math]::Round($vw.WorkingSet64 / 1MB, 1)
-            cmdLine = $path
+            cmdLine = if ($path) { $path } else { 'voice_worker.exe' }
+        }
+        $seenPids[$vw.Id] = $true
+    }
+
+    foreach ($ollamaName in @('ollama', 'ollama app')) {
+        foreach ($op in @(Get-Process -Name $ollamaName -ErrorAction SilentlyContinue)) {
+            if ($op.Id -eq $PID) { continue }
+            if ($seenPids.ContainsKey($op.Id)) { continue }
+            $path = ''
+            try { $path = $op.MainModule.FileName } catch { }
+            $found += [ordered]@{
+                role    = 'ollama'
+                pid     = $op.Id
+                name    = $op.ProcessName
+                cpu     = $op.CPU
+                wsMb    = [math]::Round($op.WorkingSet64 / 1MB, 1)
+                cmdLine = if ($path) { $path } else { $ollamaName }
+            }
+            $seenPids[$op.Id] = $true
         }
     }
     return @($found)

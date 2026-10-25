@@ -49,7 +49,7 @@ Le dépôt **n’enregistre pas** de service Windows dédié « Fresh ». La mai
 
 | Processus | Quand | Source | CPU / RAM probable | Vérifier | Réduire |
 |-----------|-------|--------|-------------------|----------|---------|
-| `powershell.exe` + `GameMode-WatchAgent.ps1` | Tâche ou Startup | `scripts/GameMode-WatchAgent.ps1` | Moyen–élevé si surveillance ON | `Get-CimInstance Win32_Process \| ? { $_.CommandLine -match 'GameMode-WatchAgent' }` | Tray **Quitter**, désactiver tâche, `monitorEnabled=false` |
+| `powershell.exe` + `GameMode-WatchAgent.ps1` | Tâche ou Startup | `scripts/GameMode-WatchAgent.ps1` | Moyen–élevé si surveillance ON | Rapport audit section **Processus Fresh** (`[agent systray]`) ou `Get-CimInstance Win32_Process \| ? { $_.CommandLine -match 'GameMode-WatchAgent' }` | Tray **Quitter**, désactiver tâche, `monitorEnabled=false` |
 | `voice_worker.exe` | Écoute vocale ON | `scripts/ai/FreshAgent-VoiceWorker.ps1` | **Élevé** (Whisper) | `Get-Process voice_worker` | Écoute OFF / `voice.enabled=false` |
 | `ollama.exe` / `ollama app.exe` | IA ON + autoStart | `scripts/ai/Ollama-Manager.ps1` | **Élevé** (modèle en RAM) | `Test-OllamaApi` ; `Get-Process ollama*` | IA OFF dans le tray |
 | `powershell.exe` + `FreshAgent-BackgroundWorker.ps1` | Pull modèle, RAG | `scripts/ai/FreshAgent-BackgroundWorker.ps1` | Pic temporaire | CommandLine match `BackgroundWorker` | Attendre fin ; IA OFF |
@@ -86,8 +86,9 @@ Config surveillance : `%LOCALAPPDATA%\FreshWindows\watch-agent-user.json` (`moni
 3. **Voix + Whisper** : `voice_worker.exe` est le principal suspect CPU/RAM si l’écoute est ON (même en PTT, modèle chargé côté worker).
 4. **Ollama** : `Enable-FreshAgentAi` force `autoStart` ; modèles 7B+ sur B450 → pics soutenus. `keepAliveMinutes: 0` dans `agent-ai.json` (comportement Ollama côté API à surveiller).
 5. **Timers rapides** : STT 400 ms, PTT 100 ms (anciennement 50 ms — corrigé en PR pour limiter le polling clavier).
-6. **Tâches admin** : dimanche 12:00 maintenance + 12:30 sync peuvent chevaucher (charge disque/CPU ponctuelle).
-7. **Legacy** : `scripts/ai/_legacy/FreshAgent-WhisperLoop.ps1` (boucle Python) — **non utilisé** par le chemin voice_worker actuel.
+6. **Tâches admin** : dimanche 12:00 maintenance + 12:30 sync peuvent chevaucher (charge disque/CPU ponctuelle). Les déclencheurs sont enregistrés avec une **heure locale** (`StartBoundary` sans offset `+02:00`) pour éviter un décalage d’1 h après le passage à l’heure d’hiver — ré-enregistrer via menu **9 → 1** si une ancienne tâche affiche encore 11:00.
+7. **Faux positifs processus** : l’audit ne liste plus tout processus lancé depuis `%LOCALAPPDATA%\FreshWindows` (ex. Windows Terminal ou la session PowerShell de l’audit). Seuls les rôles connus apparaissent : `agent systray`, `worker`, `voix`, `ollama`.
+8. **Legacy** : `scripts/ai/_legacy/FreshAgent-WhisperLoop.ps1` (boucle Python) — **non utilisé** par le chemin voice_worker actuel.
 
 ---
 
