@@ -32,9 +32,18 @@ Describe 'Appx bloatware classification' {
             Should -Be 'Protected'
     }
 
-    It 'marks Acer Configuration Manager as confirm later' {
+    It 'treats unlisted OEM packages as unknown (never removed)' {
         (Get-FreshWindowsAppxBloatwareClassification -PackageIdentity 'Acer.AcerConfigurationManager' -Config $script:Config) |
-            Should -Be 'ConfirmLater'
+            Should -Be 'Unknown'
+    }
+
+    It 'removes Xbox Game Bar overlay but protects Xbox app and Gaming Services' {
+        (Get-FreshWindowsAppxBloatwareClassification -PackageIdentity 'Microsoft.XboxGamingOverlay' -Config $script:Config) |
+            Should -Be 'Remove'
+        (Get-FreshWindowsAppxBloatwareClassification -PackageIdentity 'Microsoft.GamingApp' -Config $script:Config) |
+            Should -Be 'Protected'
+        (Get-FreshWindowsAppxBloatwareClassification -PackageIdentity 'Microsoft.GamingServices' -Config $script:Config) |
+            Should -Be 'Protected'
     }
 
     It 'dry-run does not call remove cmdlets' {

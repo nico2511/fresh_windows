@@ -56,7 +56,17 @@ Prefixes : terminer par `.` (ex. `king.com.`). Suffixe systeme : `*_cw5n1h2txyew
 
 **Note Paint** : `Microsoft.MSPaint` = Paint 3D (remove). `Microsoft.Paint` = Paint classique (protected).
 
-**Acer Configuration Manager** : dans `confirmLater`, pas dans `remove`.
+**confirmLater** : liste vide par defaut (mecanisme conserve pour ajouts futurs sans changer le schema). Tout paquet ni `protected` ni `remove` ni `confirmLater` = **inconnu**, jamais supprime.
+
+## Test dry-run (ex. MSI B450)
+
+La liste `remove` ne vise **pas** les utilitaires carte mere / GPU typiques MSI ou AMD : pas d entrees MSI Center, Dragon Center, AMD Chipset, AMD Software (Adrenalin), etc. (les pilotes et outils s installent surtout en Win32/winget, pas en AppX listes ici). Sur un PC **MSI B450**, lancer d abord :
+
+```powershell
+$env:FRESH_WIN_MODE='appx-bloatware'; irm .../launcher.ps1 | iex
+```
+
+Verifier dans la sortie qu aucun paquet MSI/AMD chipset ou Adrenalin n apparait ; seules les apps Microsoft/OEM preinstallees type bloat sont concernees.
 
 ## Restaurer des applications
 
@@ -64,6 +74,6 @@ Prefixes : terminer par `.` (ex. `king.com.`). Suffixe systeme : `*_cw5n1h2txyew
 - **Microsoft Store** : reinstaller l'app.
 - **Provisionnement** : certaines apps reviennent apres mise a jour feature Windows ; relancer la simulation pour verifier.
 
-## Mode jeu et Xbox Game Bar
+## Mode jeu et Xbox
 
-La liste retire `Microsoft.XboxGamingOverlay` (barre de jeu). Le mode jeu du depot active surtout le **plan d'alimentation** et tue des processus ; il protege `XboxPcApp` / `GamingServices` mais pas l'overlay. Retirer la barre de jeu peut limiter raccourcis overlay / enregistrement clip ; le registre **Game Bar** pose par WinUtil (`AllowAutoGameMode`) reste independant. En cas de besoin gaming overlay, retirer l'entree de `remove.exact` dans votre fork.
+Decision produit : **`Microsoft.XboxGamingOverlay`** (barre de jeu / overlay) reste en **remove**. L'app Xbox PC et les services associes sont **proteges** dans la config (`Microsoft.GamingApp`, `Microsoft.GamingServices`, `Microsoft.XboxApp` — processus mode jeu `XboxPcApp` / `GamingServices` dans `game-mode-kill.json`). Le mode jeu du depot continue de tuer des processus lourds sans toucher a ces familles. Le registre **Game Bar** pose par WinUtil (`AllowAutoGameMode`) reste independant de la suppression de l'overlay AppX.

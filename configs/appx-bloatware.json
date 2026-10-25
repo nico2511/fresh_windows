@@ -38,7 +38,10 @@
       "Microsoft.WindowsAppRuntime.1.2",
       "Microsoft.WindowsAppRuntime.1.1",
       "Microsoft.WindowsAppRuntime",
-      "Microsoft.WindowsNotepad"
+      "Microsoft.WindowsNotepad",
+      "Microsoft.GamingApp",
+      "Microsoft.GamingServices",
+      "Microsoft.XboxApp"
     ],
     "prefixes": [
       "Microsoft.UI.Xaml.",
@@ -96,8 +99,6 @@
       "Microsoft.XboxGamingOverlay",
       "Microsoft.XboxGameOverlay",
       "Microsoft.Xbox.TCUI",
-      "Microsoft.GamingApp",
-      "Microsoft.XboxApp",
       "Microsoft.Copilot",
       "Microsoft.Windows.DevHome",
       "Microsoft.WindowsDevHome",
@@ -120,11 +121,8 @@
     ]
   },
   "confirmLater": {
-    "exact": [
-      "AcerIncorporated.AcerConfigurationManager",
-      "Acer.AcerConfigurationManager"
-    ],
-    "note": "Acer Configuration Manager : dependance pilotes probable — ne pas supprimer automatiquement."
+    "exact": [],
+    "note": "Paquets listes ici ne sont jamais supprimes automatiquement (reserve usage futur). Liste vide = tout inconnu hors protected/remove reste ignore."
   },
   "contentDeliveryManager": {
     "comment": "Desactive suggestions et installations silencieuses (reversible via backup JSON).",

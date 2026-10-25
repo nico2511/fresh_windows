@@ -237,8 +237,17 @@ if (Test-Path -LiteralPath $bloatPath) {
     elseif (-not ($bw.remove.exact -contains 'Microsoft.MSPaint')) {
         Fail 'appx-bloatware.json : Microsoft.MSPaint (Paint 3D) doit etre en remove'
     }
-    elseif (-not $bw.confirmLater -or -not $bw.confirmLater.exact) {
-        Fail 'appx-bloatware.json : confirmLater manquant'
+    elseif (-not ($bw.remove.exact -contains 'Microsoft.XboxGamingOverlay')) {
+        Fail 'appx-bloatware.json : Microsoft.XboxGamingOverlay doit rester en remove'
+    }
+    elseif (-not ($bw.protected.exact -contains 'Microsoft.GamingApp')) {
+        Fail 'appx-bloatware.json : Microsoft.GamingApp (Xbox PC) doit etre protege'
+    }
+    elseif (-not ($bw.protected.exact -contains 'Microsoft.GamingServices')) {
+        Fail 'appx-bloatware.json : Microsoft.GamingServices doit etre protege'
+    }
+    elseif (-not $bw.confirmLater -or $null -eq $bw.confirmLater.exact) {
+        Fail 'appx-bloatware.json : confirmLater ou confirmLater.exact manquant'
     }
     else {
         Ok ("appx-bloatware.json ({0} remove, {1} protected exact)" -f @($bw.remove.exact).Count, @($bw.protected.exact).Count)
