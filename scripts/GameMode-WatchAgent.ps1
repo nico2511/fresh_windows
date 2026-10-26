@@ -756,13 +756,7 @@ function Complete-WatchAgentModuleBoot {
         if (Get-Command Invoke-FreshAgentPostInitMemoryCleanup -ErrorAction SilentlyContinue) {
             try {
                 $trim = Invoke-FreshAgentPostInitMemoryCleanup -FreshAppData $script:FreshAppData
-                if ($trim.skipped) {
-                    Write-WatchLog ("Module boot: memory trim ignore ({0})" -f $(if ($trim.message) { $trim.message } else { 'skipped' }))
-                }
-                else {
-                    Write-WatchLog ("Module boot: memory trim WS {0}->{1} Mo prive {2}->{3} Mo ok={4}" -f `
-                            $trim.wsMbBefore, $trim.wsMbAfter, $trim.privateMbBefore, $trim.privateMbAfter, $trim.ok)
-                }
+                Write-WatchLog (Format-FreshAgentWatchMemoryTrimBootLogLine -TrimResult $trim)
             }
             catch {
                 Write-WatchLog ("Module boot: memory trim: {0}" -f $_.Exception.Message)
