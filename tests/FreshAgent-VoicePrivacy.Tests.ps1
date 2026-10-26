@@ -60,18 +60,24 @@ Describe 'Resolve-FreshAgentModelsDir' {
         Resolve-FreshAgentModelsDir -FreshAppData $script:Tmp | Should -Be $expected
     }
 
-    It 'retrocompat D:\models\cyberscribe_models si present et sans reglage' {
-        if (-not ($IsWindows -or $env:OS -eq 'Windows_NT')) {
-            Set-ItResult -Inconclusive -Because 'chemin legacy D:\ uniquement sous Windows'
+    It 'retrocompat chemin legacy si present et sans reglage (isole)' {
+        $legacy = Join-Path $script:Tmp 'legacy-cyberscribe-models'
+        New-Item -ItemType Directory -Path $legacy -Force | Out-Null
+        $logged = New-Object System.Collections.ArrayList
+        $null = Resolve-FreshAgentModelsDir -FreshAppData $script:Tmp -LegacyModelsPath $legacy -OnLegacyPath {
+            param($m)
+            [void]$logged.Add($m)
         }
-        $legacy = 'D:\models\cyberscribe_models'
-        if (-not (Test-Path -LiteralPath $legacy)) {
-            Set-ItResult -Inconclusive -Because 'D:\models\cyberscribe_models absent sur cette machine'
-        }
-        $logged = @()
-        $null = Resolve-FreshAgentModelsDir -FreshAppData $script:Tmp -OnLegacyPath { param($m) $logged += $m }
-        Resolve-FreshAgentModelsDir -FreshAppData $script:Tmp | Should -Be $legacy
+        Resolve-FreshAgentModelsDir -FreshAppData $script:Tmp -LegacyModelsPath $legacy | Should -Be $legacy
         $logged.Count | Should -BeGreaterOrEqual 1
+        $flag = Join-Path $script:Tmp 'fa-models-legacy-notified.txt'
+        Test-Path -LiteralPath $flag | Should -Be $true
+        $logged2 = New-Object System.Collections.ArrayList
+        $null = Resolve-FreshAgentModelsDir -FreshAppData $script:Tmp -LegacyModelsPath $legacy -OnLegacyPath {
+            param($m)
+            [void]$logged2.Add($m)
+        }
+        $logged2.Count | Should -Be 0
     }
 }
 

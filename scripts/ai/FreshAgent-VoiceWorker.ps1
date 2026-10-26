@@ -4,11 +4,27 @@
   Telecharge depuis les releases CyberScribeNote si absent — sans installer CyberScribeNote.
 #>
 
-$sttSettingsLib = Join-Path $PSScriptRoot '..\lib\FreshAgent-SttSettings.ps1'
-if (-not (Test-Path -LiteralPath $sttSettingsLib)) {
-    $sttSettingsLib = Join-Path (Split-Path $PSScriptRoot -Parent) 'lib\FreshAgent-SttSettings.ps1'
+$sttSettingsLib = $null
+if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+    $sttSettingsLib = Join-Path $PSScriptRoot '..\lib\FreshAgent-SttSettings.ps1'
+    if (-not (Test-Path -LiteralPath $sttSettingsLib)) {
+        $sttSettingsLib = Join-Path (Split-Path $PSScriptRoot -Parent) 'lib\FreshAgent-SttSettings.ps1'
+    }
 }
-if (Test-Path -LiteralPath $sttSettingsLib) {
+if (-not $sttSettingsLib -or -not (Test-Path -LiteralPath $sttSettingsLib)) {
+    $appdataBootstrap = $null
+    if ($script:FreshAppData -and -not [string]::IsNullOrWhiteSpace([string]$script:FreshAppData)) {
+        $appdataBootstrap = [string]$script:FreshAppData
+    }
+    elseif ($env:FRESH_WIN_APPDATA -and -not [string]::IsNullOrWhiteSpace($env:FRESH_WIN_APPDATA)) {
+        $appdataBootstrap = $env:FRESH_WIN_APPDATA.Trim()
+    }
+    else {
+        $appdataBootstrap = Join-Path $env:LOCALAPPDATA 'FreshWindows'
+    }
+    $sttSettingsLib = Join-Path $appdataBootstrap 'lib\FreshAgent-SttSettings.ps1'
+}
+if ($sttSettingsLib -and (Test-Path -LiteralPath $sttSettingsLib)) {
     . $sttSettingsLib
 }
 
@@ -567,20 +583,31 @@ function Start-FreshAgentVoiceWorkerProcess {
 
     $hostPs1 = Join-Path $FreshAppData 'ai\FreshAgent-VoiceHost.ps1'
     if (-not (Test-Path -LiteralPath $hostPs1)) {
-        # Fallback repo / script root for Dev before sync
-        $cand = Join-Path (Split-Path $PSScriptRoot -Parent) 'ai\FreshAgent-VoiceHost.ps1'
-        if (Test-Path -LiteralPath $cand) {
+        $cand = $null
+        if (Get-Command Resolve-FreshAgentBootstrapLibPath -ErrorAction SilentlyContinue) {
+            $cand = Resolve-FreshAgentBootstrapLibPath -RelativePath 'ai\FreshAgent-VoiceHost.ps1' -FreshAppData $FreshAppData
+        }
+        if (-not $cand -and -not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+            $cand = Join-Path (Split-Path $PSScriptRoot -Parent) 'ai\FreshAgent-VoiceHost.ps1'
+        }
+        if ($cand -and (Test-Path -LiteralPath $cand)) {
             New-Item -ItemType Directory -Path (Split-Path $hostPs1 -Parent) -Force | Out-Null
             Copy-Item -LiteralPath $cand -Destination $hostPs1 -Force
         }
     }
     $sttLibDest = Join-Path $FreshAppData 'lib\FreshAgent-SttSettings.ps1'
     if (-not (Test-Path -LiteralPath $sttLibDest)) {
-        $sttLibSrc = Join-Path $PSScriptRoot '..\lib\FreshAgent-SttSettings.ps1'
-        if (-not (Test-Path -LiteralPath $sttLibSrc)) {
-            $sttLibSrc = Join-Path (Split-Path $PSScriptRoot -Parent) 'lib\FreshAgent-SttSettings.ps1'
+        $sttLibSrc = $null
+        if (Get-Command Resolve-FreshAgentBootstrapLibPath -ErrorAction SilentlyContinue) {
+            $sttLibSrc = Resolve-FreshAgentBootstrapLibPath -RelativePath 'lib\FreshAgent-SttSettings.ps1' -FreshAppData $FreshAppData
         }
-        if (Test-Path -LiteralPath $sttLibSrc) {
+        if (-not $sttLibSrc -and -not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+            $sttLibSrc = Join-Path $PSScriptRoot '..\lib\FreshAgent-SttSettings.ps1'
+            if (-not (Test-Path -LiteralPath $sttLibSrc)) {
+                $sttLibSrc = Join-Path (Split-Path $PSScriptRoot -Parent) 'lib\FreshAgent-SttSettings.ps1'
+            }
+        }
+        if ($sttLibSrc -and (Test-Path -LiteralPath $sttLibSrc)) {
             New-Item -ItemType Directory -Path (Split-Path $sttLibDest -Parent) -Force | Out-Null
             Copy-Item -LiteralPath $sttLibSrc -Destination $sttLibDest -Force
         }

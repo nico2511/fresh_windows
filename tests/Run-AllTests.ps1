@@ -76,7 +76,10 @@ if ($pesterMod) {
     }
 }
 else {
-    Write-Host "`nPester 5.x introuvable - les tests ne sont pas ignores." -ForegroundColor Red
+    Write-Host "`nPester 5.x introuvable : suite Pester non executee (echec)." -ForegroundColor Red
+    Write-Host "Windows integre souvent Pester 3.4 uniquement. Installer Pester 5.6.1 :" -ForegroundColor Yellow
+    Write-Host "  Install-Module Pester -RequiredVersion 5.6.1 -Scope CurrentUser -SkipPublisherCheck" -ForegroundColor Yellow
+    Write-Host "(Pester 6.x n'est pas pris en charge par ces tests.)" -ForegroundColor Yellow
     $failed++
 }
 

@@ -653,9 +653,7 @@ function Get-FreshAgentMinimalBootModuleList {
         'lib/FreshAgent-SkillHandlers.ps1',
         'lib/FreshAgent-GameSession.ps1',
         'lib/FreshAgent-Confirm.ps1',
-        'lib/FreshAgent-ActionLog.ps1',
-        'lib/FreshAgent-VoiceRouter.ps1',
-        'lib/FreshAgent-AiLifecycle.ps1'
+        'lib/FreshAgent-ActionLog.ps1'
     )
 }
 
@@ -733,6 +731,36 @@ function Ensure-FreshAgentAiBridgeLoaded {
     return [bool](Get-Command Invoke-FreshAgentAiTurn -ErrorAction SilentlyContinue)
 }
 
+function Ensure-FreshAgentVoiceRouterLoaded {
+    param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
+    Import-FreshAgentLibOnce -RelativePath 'lib/FreshAgent-VoiceRouter.ps1' -FreshAppData $FreshAppData | Out-Null
+    return [bool](Get-Command Invoke-FreshAgentVoiceRouter -ErrorAction SilentlyContinue)
+}
+
+function Ensure-FreshAgentAiLifecycleLoaded {
+    param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
+    Import-FreshAgentLibOnce -RelativePath 'lib/FreshAgent-AiLifecycle.ps1' -FreshAppData $FreshAppData | Out-Null
+    return [bool](Get-Command Set-FreshAgentAiEnabled -ErrorAction SilentlyContinue)
+}
+
+function Ensure-FreshAgentHealthLibsLoaded {
+    param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
+    Import-FreshAgentLibOnce -RelativePath 'lib/FreshAgent-Health.ps1' -FreshAppData $FreshAppData | Out-Null
+    return [bool](Get-Command Get-FreshAgentHealthSnapshot -ErrorAction SilentlyContinue)
+}
+
+function Ensure-FreshAgentIdleSuggestLoaded {
+    param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
+    Import-FreshAgentLibOnce -RelativePath 'lib/FreshAgent-IdleSuggest.ps1' -FreshAppData $FreshAppData | Out-Null
+    return [bool](Get-Command Invoke-FreshAgentIdleSuggestTick -ErrorAction SilentlyContinue)
+}
+
+function Ensure-FreshAgentOverlayLoaded {
+    param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
+    Import-FreshAgentLibOnce -RelativePath 'lib/FreshAgent-Overlay.ps1' -FreshAppData $FreshAppData | Out-Null
+    return [bool](Get-Command Show-FreshAgentOverlay -ErrorAction SilentlyContinue)
+}
+
 function Ensure-FreshAgentVoiceLibsLoaded {
     param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
     foreach ($mod in @(
@@ -774,17 +802,38 @@ function Invoke-FreshAgentPostInitMemoryCleanup {
     if (-not (Get-FreshAgentWatchMemoryTrimEnabled -FreshAppData $FreshAppData)) {
         return @{ ok = $true; skipped = $true; message = 'memoryTrimAfterInit=false' }
     }
+    Import-FreshAgentLibOnce -RelativePath 'lib/FreshAgent-Optimize.ps1' -FreshAppData $FreshAppData | Out-Null
+    $before = @{ wsMb = 0; privateMb = 0 }
+    $after = @{ wsMb = 0; privateMb = 0 }
+    if (Get-Command Get-FreshAgentProcessMemoryMb -ErrorAction SilentlyContinue) {
+        $before = Get-FreshAgentProcessMemoryMb
+    }
     try {
         [GC]::Collect()
         [GC]::WaitForPendingFinalizers()
         [GC]::Collect()
     }
     catch { }
-    Import-FreshAgentLibOnce -RelativePath 'lib/FreshAgent-Optimize.ps1' -FreshAppData $FreshAppData | Out-Null
+    $trim = @{ ok = $false; trimmed = $false }
     if (Get-Command Invoke-FreshAgentWorkingSetTrim -ErrorAction SilentlyContinue) {
-        return Invoke-FreshAgentWorkingSetTrim
+        $trim = Invoke-FreshAgentWorkingSetTrim
     }
-    return @{ ok = $true; skipped = $true; message = 'Invoke-FreshAgentWorkingSetTrim absent' }
+    else {
+        $trim = @{ ok = $true; skipped = $true; message = 'Invoke-FreshAgentWorkingSetTrim absent' }
+    }
+    if (Get-Command Get-FreshAgentProcessMemoryMb -ErrorAction SilentlyContinue) {
+        $after = Get-FreshAgentProcessMemoryMb
+    }
+    return @{
+        ok             = [bool]$trim.ok
+        skipped        = [bool]$trim.skipped
+        trimmed        = [bool]$trim.trimmed
+        message        = [string]$trim.message
+        wsMbBefore     = $before.wsMb
+        wsMbAfter      = $after.wsMb
+        privateMbBefore = $before.privateMb
+        privateMbAfter  = $after.privateMb
+    }
 }
 
 function Import-FreshAgentStandardModules {

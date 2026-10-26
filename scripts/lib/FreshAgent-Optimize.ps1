@@ -3,6 +3,19 @@
   Optimisation : nettoyage, audit demarrage/services, restore point, rapport hebdo.
 #>
 
+function Get-FreshAgentProcessMemoryMb {
+    try {
+        $p = [System.Diagnostics.Process]::GetCurrentProcess()
+        return @{
+            wsMb      = [math]::Round($p.WorkingSet64 / 1MB, 1)
+            privateMb = [math]::Round($p.PrivateMemorySize64 / 1MB, 1)
+        }
+    }
+    catch {
+        return @{ wsMb = 0; privateMb = 0 }
+    }
+}
+
 function Invoke-FreshAgentWorkingSetTrim {
     try {
         if (-not ('FreshAgentMemNative' -as [type])) {
