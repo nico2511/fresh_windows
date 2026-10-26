@@ -16,11 +16,24 @@ Agent **Fresh Windows** : mode jeu, skills, panneau dashboard. Chantier voix/IA 
 
 | Fichier | Role |
 |---------|------|
-| `agent-ai.user.json` | Override IA / TTS / voix |
+| `agent-ai.user.json` | Override IA / TTS / voix (`freshModelsDir`, `logTranscripts`) |
+| `watch-agent-user.json` | Surveillance + prefs (`freshModelsDir`, `logTranscripts`) |
 | `bin/voice_worker.exe` | Asset STT (telecharge au besoin) |
 | `skills-apps.user.json` | Aliases apps perso |
 | `inventory.json` | Jeux Steam, navigateur |
 | `configs/skills/router/fr-pc.json` | Patterns vocaux → skills |
+
+### Modeles STT (voice_worker)
+
+Resolution (`Resolve-FreshAgentModelsDir`) :
+
+1. `freshModelsDir` / `stt.modelsDir` dans `agent-ai.user.json` ou `watch-agent-user.json`
+2. Variable d'environnement `FRESH_MODELS_DIR`
+3. Sinon `%LOCALAPPDATA%\FreshWindows\models` (retrocompat : `D:\models\cyberscribe_models` si present, journalise une fois)
+
+### Confidentialite des logs voix
+
+Par defaut, `watch-agent.log` et `voice-worker-host.log` n'ecrivent pas le texte transcrit (longueur + 8 caracteres hex SHA-256). Opt-in : `"logTranscripts": true` dans `watch-agent-user.json` ou `agent-ai.user.json`.
 
 ## Developpement local (sans casser la prod)
 

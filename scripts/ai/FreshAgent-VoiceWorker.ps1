@@ -595,12 +595,19 @@ function Start-FreshAgentVoiceWorkerProcess {
     $model = 'small'
     $profile = 'accurate'
     $modelsDir = ''
+    if (Get-Command Resolve-FreshAgentModelsDir -ErrorAction SilentlyContinue) {
+        $modelsDir = Resolve-FreshAgentModelsDir -FreshAppData $FreshAppData
+    }
     if ($AiConfig -and $AiConfig.stt) {
         if ($AiConfig.stt.language) { $lang = [string]$AiConfig.stt.language }
         if ($AiConfig.stt.modelSize) { $model = [string]$AiConfig.stt.modelSize }
         if ($AiConfig.stt.transcriptionProfile) { $profile = [string]$AiConfig.stt.transcriptionProfile }
-        if ($AiConfig.stt.modelsDir -and (Test-Path -LiteralPath ([string]$AiConfig.stt.modelsDir))) {
-            $modelsDir = [string]$AiConfig.stt.modelsDir
+        if ($AiConfig.stt.modelsDir) {
+            $md = [string]$AiConfig.stt.modelsDir
+            if (Get-Command Expand-FreshAgentModelsPath -ErrorAction SilentlyContinue) {
+                $md = Expand-FreshAgentModelsPath -Path $md
+            }
+            if ($md -and (Test-Path -LiteralPath $md)) { $modelsDir = $md }
         }
     }
     if (Get-Command Resolve-FreshAgentSttModelSize -ErrorAction SilentlyContinue) {

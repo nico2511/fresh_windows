@@ -19,6 +19,14 @@ function Write-WatchLog {
     } catch { }
 }
 
+function Format-WatchLogUserSpeech {
+    param([string]$Text)
+    if (Get-Command Format-FreshAgentTranscriptForLog -ErrorAction SilentlyContinue) {
+        return Format-FreshAgentTranscriptForLog -Text $Text -FreshAppData $script:FreshAppData
+    }
+    return $Text
+}
+
 # FreshAppData AVANT le mutex (sinon Split-Path null).
 $RepoRef = if ($env:FRESH_WIN_REF) { $env:FRESH_WIN_REF.Trim() } else { 'main' }
 $RepoRawRoot = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef"
@@ -1955,11 +1963,11 @@ $script:FreshAgentSttPoll = {
     $text = $text.Trim()
     if (Get-Command Test-FreshAgentSttTranscriptUseful -ErrorAction SilentlyContinue) {
         if (-not (Test-FreshAgentSttTranscriptUseful -Text $text)) {
-            Write-WatchLog ("STT ignore (bruit): {0}" -f $text)
+            Write-WatchLog ("STT ignore (bruit): {0}" -f (Format-WatchLogUserSpeech -Text $text))
             return
         }
     }
-    Write-WatchLog ("STT entendu: {0}" -f $text)
+    Write-WatchLog ("STT entendu: {0}" -f (Format-WatchLogUserSpeech -Text $text))
     Show-FreshAgentUserNotice -Title 'Entendu' -Text $text -Level Info
     try {
         if ($script:FreshAgentDashboardUi -and $script:FreshAgentDashboardUi.LblStatus) {
@@ -1994,7 +2002,7 @@ $script:FreshAgentSttPoll = {
             $launchName = Resolve-FreshAgentSpokenAppName -Name $launchName -FreshAppData $script:FreshAppData
         }
         if ($launchName) {
-            Write-WatchLog ("STT fallback launch_app: {0}" -f $launchName)
+            Write-WatchLog ("STT fallback launch_app: {0}" -f (Format-WatchLogUserSpeech -Text $launchName))
             Show-FreshAgentUserNotice -Title 'Skill' -Text ("Lancement: {0}" -f $launchName) -Level Info
             Start-FreshAgentUiSkillBackground -SkillId 'launch_app' -Parameters @{ name = $launchName }
             $routed = $true
@@ -2014,7 +2022,7 @@ $script:FreshAgentSttPoll = {
                 Start-FreshAgentAiPromptBackground -Prompt $text
             }
             else {
-                Write-WatchLog ("STT no-skill (route=$route): {0}" -f $text)
+                Write-WatchLog ("STT no-skill (route=$route): {0}" -f (Format-WatchLogUserSpeech -Text $text))
                 Show-FreshAgentUserNotice -Title 'Voix' -Text 'Commande non reconnue. Reessaie: lance Steam / lance Grok Bot.' -Level Info
             }
         }
@@ -2107,7 +2115,7 @@ function Invoke-FreshAgentTextCommand {
     param([string]$Text)
     if ([string]::IsNullOrWhiteSpace($Text)) { return }
     $Text = $Text.Trim()
-    Write-WatchLog ("Text cmd: {0}" -f $Text)
+    Write-WatchLog ("Text cmd: {0}" -f (Format-WatchLogUserSpeech -Text $Text))
     $routed = $false
     try { $routed = [bool](Invoke-FreshAgentRoutedCommand -Text $Text -Source 'text') } catch { $routed = $false }
     if ($routed) { return }

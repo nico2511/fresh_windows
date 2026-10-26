@@ -23,6 +23,13 @@ if (-not (Test-Path -LiteralPath $sttSettingsLib)) {
 if (Test-Path -LiteralPath $sttSettingsLib) {
     . $sttSettingsLib
 }
+$logLib = Join-Path $PSScriptRoot '..\lib\FreshAgent-Log.ps1'
+if (-not (Test-Path -LiteralPath $logLib)) {
+    $logLib = Join-Path (Split-Path $PSScriptRoot -Parent) 'lib\FreshAgent-Log.ps1'
+}
+if (Test-Path -LiteralPath $logLib) {
+    . $logLib
+}
 
 $ErrorActionPreference = 'Continue'
 $logPath = Join-Path $FreshAppData 'voice-worker-host.log'
@@ -50,6 +57,18 @@ function Write-HostLog([string]$Message) {
         Add-Content -LiteralPath $logPath -Value ('{0} HOST {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message) -Encoding UTF8
     }
     catch { }
+}
+
+function Write-HostLogSpeech {
+    param(
+        [string]$Prefix,
+        [string]$Text
+    )
+    $detail = $Text
+    if (Get-Command Format-FreshAgentTranscriptForLog -ErrorAction SilentlyContinue) {
+        $detail = Format-FreshAgentTranscriptForLog -Text $Text -FreshAppData $FreshAppData
+    }
+    Write-HostLog ("{0}{1}" -f $Prefix, $detail)
 }
 
 function Write-HostStatus {
@@ -109,7 +128,7 @@ function Process-HostEventLine {
                 }
             }
             if ($paused -and -not $isConfirmWord) {
-                Write-HostLog "transcript ignored (paused): $text"
+                Write-HostLogSpeech -Prefix 'transcript ignored (paused): ' -Text $text
             }
             elseif (-not [string]::IsNullOrWhiteSpace($text)) {
                 $useful = $true
@@ -117,18 +136,18 @@ function Process-HostEventLine {
                     $useful = Test-FreshAgentVoiceHostTranscriptUseful -Text $text
                 }
                 if (-not $useful) {
-                    Write-HostLog "transcript ignored (noise): $text"
+                    Write-HostLogSpeech -Prefix 'transcript ignored (noise): ' -Text $text
                 }
                 else {
                 try {
                     Set-Content -LiteralPath $pendingPath -Value $text.Trim() -Encoding UTF8
                     $script:HostLastTranscriptAt = (Get-Date).ToString('o')
                     if ($isConfirmWord) {
-                        Write-HostLog "transcript queued (confirm override): $text"
+                        Write-HostLogSpeech -Prefix 'transcript queued (confirm override): ' -Text $text
                         try { Remove-Item -LiteralPath $pausePath -Force -ErrorAction SilentlyContinue } catch { }
                     }
                     else {
-                        Write-HostLog "transcript queued: $text"
+                        Write-HostLogSpeech -Prefix 'transcript queued: ' -Text $text
                     }
                 }
                 catch {
@@ -255,12 +274,11 @@ namespace FreshAgent {
     $silenceMs = 700
     $minRec = 400
     $modelsDir = ''
-    # Reutiliser le cache modeles CyberScribe si present
-    foreach ($cand in @(
-            'D:\models\cyberscribe_models',
-            (Join-Path $env:LOCALAPPDATA 'Programs\CyberScribe\models')
-        )) {
-        if ($cand -and (Test-Path -LiteralPath $cand)) { $modelsDir = $cand; break }
+    if (Get-Command Resolve-FreshAgentModelsDir -ErrorAction SilentlyContinue) {
+        $modelsDir = Resolve-FreshAgentModelsDir -FreshAppData $FreshAppData -OnLegacyPath ${function:Write-HostLog}
+    }
+    else {
+        $modelsDir = Join-Path $env:LOCALAPPDATA 'FreshWindows\models'
     }
     try {
         $csCfgPath = Join-Path $env:LOCALAPPDATA 'Programs\CyberScribe\config.json'
@@ -293,8 +311,15 @@ namespace FreshAgent {
             if ($stt.modelSize) { $ModelSize = [string]$stt.modelSize }
             if ($stt.transcriptionProfile) { $TranscriptionProfile = [string]$stt.transcriptionProfile }
             if ($stt.initialPrompt) { $initialPrompt = [string]$stt.initialPrompt }
-            if ($stt.modelsDir -and (Test-Path -LiteralPath ([string]$stt.modelsDir))) {
-                $modelsDir = [string]$stt.modelsDir
+            if ($stt.modelsDir) {
+                $md = $stt.modelsDir
+                if (Get-Command Expand-FreshAgentModelsPath -ErrorAction SilentlyContinue) {
+                    $md = Expand-FreshAgentModelsPath -Path ([string]$stt.modelsDir)
+                }
+                elseif (Get-Command Expand-FreshAgentPath -ErrorAction SilentlyContinue) {
+                    $md = Expand-FreshAgentPath -Path ([string]$stt.modelsDir)
+                }
+                if ($md -and (Test-Path -LiteralPath $md)) { $modelsDir = $md }
             }
             if ($null -ne $stt.maxRecordSeconds) { $maxRec = [int]$stt.maxRecordSeconds }
             elseif ($null -ne $stt.listenSeconds) { $maxRec = [int]$stt.listenSeconds }

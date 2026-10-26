@@ -69,10 +69,10 @@ Describe 'Fresh Agent RAM / lazy-load' {
         Get-FreshAgentWatchMemoryTrimEnabled -FreshAppData $script:Tmp | Should -Be $true
     }
 
-    It 'agent-content epoch est 53' {
+    It 'agent-content epoch est 54' {
         $contentPath = Join-Path $script:RepoRoot 'configs\agent-content.json'
         $meta = Get-Content -LiteralPath $contentPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        [string]$meta.epoch | Should -Be '53'
+        [string]$meta.epoch | Should -Be '54'
     }
 }
 
