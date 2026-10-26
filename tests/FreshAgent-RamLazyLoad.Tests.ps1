@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 
 Describe 'Fresh Agent RAM / lazy-load' {
@@ -29,7 +29,15 @@ Describe 'Fresh Agent RAM / lazy-load' {
                 Copy-Item -LiteralPath $src -Destination (Join-Path $libDir $name) -Force
             }
         }
-        $script:FreshAgentLibsLoaded = @{}
+    }
+
+    BeforeEach {
+        if (Get-Command Reset-FreshAgentLibLoadRegistry -ErrorAction SilentlyContinue) {
+            Reset-FreshAgentLibLoadRegistry
+        }
+        else {
+            $script:FreshAgentLibsLoaded = @{}
+        }
     }
 
     AfterAll {
@@ -82,10 +90,19 @@ Describe 'Fresh Agent RAM / lazy-load' {
         Get-FreshAgentWatchMemoryTrimEnabled -FreshAppData $script:Tmp | Should -Be $true
     }
 
-    It 'agent-content epoch est 55' {
+    It 'agent-content epoch est 56' {
         $contentPath = Join-Path $script:RepoRoot 'configs\agent-content.json'
         $meta = Get-Content -LiteralPath $contentPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        [string]$meta.epoch | Should -Be '55'
+        [string]$meta.epoch | Should -Be '56'
+    }
+
+    It 'Format-FreshAgentWatchMemoryTrimBootLogLine inclut WS et prive en Mo' {
+        $line = Format-FreshAgentWatchMemoryTrimBootLogLine -TrimResult @{
+            ok = $true; skipped = $false; wsMbBefore = 185; wsMbAfter = 16; privateMbBefore = 150; privateMbAfter = 115
+        }
+        $line | Should -Match '^Module boot: memory trim ok=True WS 185->16 Mo, prive 150->115 Mo$'
+        $skip = Format-FreshAgentWatchMemoryTrimBootLogLine -TrimResult @{ ok = $true; skipped = $true; message = 'memoryTrimAfterInit=false' }
+        $skip | Should -Be 'Module boot: memory trim ignore (memoryTrimAfterInit=false)'
     }
 }
 

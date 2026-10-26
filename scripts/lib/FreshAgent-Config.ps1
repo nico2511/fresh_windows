@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
   Chargement configs Fresh Agent (repo GitHub + override LocalAppData).
 #>
@@ -620,6 +620,10 @@ function Get-FreshAgentLibLoadRegistry {
     return $script:FreshAgentLibsLoaded
 }
 
+function Reset-FreshAgentLibLoadRegistry {
+    $script:FreshAgentLibsLoaded = @{}
+}
+
 function Import-FreshAgentLibOnce {
     param(
         [Parameter(Mandatory)]
@@ -797,6 +801,27 @@ function Get-FreshAgentWatchMemoryTrimEnabled {
     return $true
 }
 
+function Format-FreshAgentWatchMemoryTrimBootLogLine {
+    param($TrimResult)
+    if ($TrimResult -and $TrimResult.skipped) {
+        $msg = if ($TrimResult.message) { [string]$TrimResult.message } else { 'skipped' }
+        return ("Module boot: memory trim ignore ({0})" -f $msg)
+    }
+    $ok = $false
+    $wsB = 0
+    $wsA = 0
+    $prB = 0
+    $prA = 0
+    if ($TrimResult) {
+        if ($null -ne $TrimResult.ok) { $ok = [bool]$TrimResult.ok }
+        if ($null -ne $TrimResult.wsMbBefore) { $wsB = [double]$TrimResult.wsMbBefore }
+        if ($null -ne $TrimResult.wsMbAfter) { $wsA = [double]$TrimResult.wsMbAfter }
+        if ($null -ne $TrimResult.privateMbBefore) { $prB = [double]$TrimResult.privateMbBefore }
+        if ($null -ne $TrimResult.privateMbAfter) { $prA = [double]$TrimResult.privateMbAfter }
+    }
+    return ("Module boot: memory trim ok={0} WS {1}->{2} Mo, prive {3}->{4} Mo" -f $ok, $wsB, $wsA, $prB, $prA)
+}
+
 function Invoke-FreshAgentPostInitMemoryCleanup {
     param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
     if (-not (Get-FreshAgentWatchMemoryTrimEnabled -FreshAppData $FreshAppData)) {
@@ -824,15 +849,23 @@ function Invoke-FreshAgentPostInitMemoryCleanup {
     if (Get-Command Get-FreshAgentProcessMemoryMb -ErrorAction SilentlyContinue) {
         $after = Get-FreshAgentProcessMemoryMb
     }
+    $wsBefore = 0
+    $wsAfter = 0
+    $prBefore = 0
+    $prAfter = 0
+    if ($before -and $null -ne $before.wsMb) { $wsBefore = [double]$before.wsMb }
+    if ($after -and $null -ne $after.wsMb) { $wsAfter = [double]$after.wsMb }
+    if ($before -and $null -ne $before.privateMb) { $prBefore = [double]$before.privateMb }
+    if ($after -and $null -ne $after.privateMb) { $prAfter = [double]$after.privateMb }
     return @{
-        ok             = [bool]$trim.ok
-        skipped        = [bool]$trim.skipped
-        trimmed        = [bool]$trim.trimmed
-        message        = [string]$trim.message
-        wsMbBefore     = $before.wsMb
-        wsMbAfter      = $after.wsMb
-        privateMbBefore = $before.privateMb
-        privateMbAfter  = $after.privateMb
+        ok              = [bool]$trim.ok
+        skipped         = [bool]$trim.skipped
+        trimmed         = [bool]$trim.trimmed
+        message         = [string]$trim.message
+        wsMbBefore      = $wsBefore
+        wsMbAfter       = $wsAfter
+        privateMbBefore = $prBefore
+        privateMbAfter  = $prAfter
     }
 }
 

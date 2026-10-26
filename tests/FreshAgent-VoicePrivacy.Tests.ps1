@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 
 Describe 'Resolve-FreshAgentModelsDir' {
@@ -46,18 +46,13 @@ Describe 'Resolve-FreshAgentModelsDir' {
     }
 
     It 'defaut LOCALAPPDATA FreshWindows models sans legacy Windows' {
-        if ($IsWindows -or $env:OS -eq 'Windows_NT') {
-            $legacy = 'D:\models\cyberscribe_models'
-            if (Test-Path -LiteralPath $legacy) {
-                Set-ItResult -Inconclusive -Because 'D:\models\cyberscribe_models present (retrocompat Windows)'
-            }
-        }
         $local = $env:LOCALAPPDATA
         if ([string]::IsNullOrWhiteSpace($local) -and $env:USERPROFILE) {
             $local = Join-Path $env:USERPROFILE 'AppData\Local'
         }
         $expected = Join-Path $local 'FreshWindows\models'
-        Resolve-FreshAgentModelsDir -FreshAppData $script:Tmp | Should -Be $expected
+        $noLegacy = Join-Path $TestDrive 'FreshAgent-NoLegacyModelsDir'
+        Resolve-FreshAgentModelsDir -FreshAppData $script:Tmp -LegacyModelsPath $noLegacy | Should -Be $expected
     }
 
     It 'retrocompat chemin legacy si present et sans reglage (isole)' {
