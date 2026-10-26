@@ -52,11 +52,24 @@ Describe 'Fresh Agent RAM / lazy-load' {
         Import-FreshAgentMinimalBootModules -FreshAppData $script:FreshAppData
         Test-FreshAgentLibLoaded -RelativePath 'ai/FreshAgent-VoiceWorker.ps1' | Should -Be $false
         Test-FreshAgentLibLoaded -RelativePath 'ai/Ollama-Manager.ps1' | Should -Be $false
+        Test-FreshAgentLibLoaded -RelativePath 'lib/FreshAgent-VoiceRouter.ps1' | Should -Be $false
+        Test-FreshAgentLibLoaded -RelativePath 'lib/FreshAgent-Dashboard.ps1' | Should -Be $false
         Ensure-FreshAgentVoiceLibsLoaded -FreshAppData $script:FreshAppData | Out-Null
         $reg = Get-FreshAgentLibLoadRegistry
         $reg.ContainsKey('ai/freshagent-voiceworker.ps1') | Should -Be $true
         if ($IsWindows -or $env:OS -eq 'Windows_NT') {
             Test-FreshAgentLibLoaded -RelativePath 'ai/FreshAgent-VoiceWorker.ps1' | Should -Be $true
+            Get-Command Start-FreshAgentVoiceListenSession -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It 'VoiceWorker charge via Import-FreshAgentFileIntoScriptScope (PSScriptRoot vide)' {
+        $vwPath = Join-Path $script:FreshAppData 'ai\FreshAgent-VoiceWorker.ps1'
+        Test-Path -LiteralPath $vwPath | Should -Be $true
+        Test-FreshAgentLibLoaded -RelativePath 'ai/FreshAgent-VoiceWorker.ps1' | Should -Be $false
+        Import-FreshAgentFileIntoScriptScope -LiteralPath $vwPath
+        Get-Command Get-FreshAgentVoiceWorkerPaths -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+        if ($IsWindows -or $env:OS -eq 'Windows_NT') {
             Get-Command Start-FreshAgentVoiceListenSession -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
         }
     }
@@ -69,10 +82,10 @@ Describe 'Fresh Agent RAM / lazy-load' {
         Get-FreshAgentWatchMemoryTrimEnabled -FreshAppData $script:Tmp | Should -Be $true
     }
 
-    It 'agent-content epoch est 54' {
+    It 'agent-content epoch est 55' {
         $contentPath = Join-Path $script:RepoRoot 'configs\agent-content.json'
         $meta = Get-Content -LiteralPath $contentPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        [string]$meta.epoch | Should -Be '54'
+        [string]$meta.epoch | Should -Be '55'
     }
 }
 

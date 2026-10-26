@@ -734,10 +734,6 @@ function Ensure-FreshAgentConfigLoadedForBoot {
 function Complete-WatchAgentModuleBoot {
     try {
         Write-WatchLog 'Module boot: finalisation...'
-        if (-not (Get-Command Show-FreshAgentDashboard -ErrorAction SilentlyContinue)) {
-            Write-WatchLog 'Module boot: dashboard charge (script)'
-            Invoke-WatchAgentDotModuleAtScript -RelativePath 'lib/FreshAgent-Dashboard.ps1' | Out-Null
-        }
         if (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue) {
             $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData -PreferLocal
             $script:FreshAgentReady = $true
@@ -760,7 +756,13 @@ function Complete-WatchAgentModuleBoot {
         if (Get-Command Invoke-FreshAgentPostInitMemoryCleanup -ErrorAction SilentlyContinue) {
             try {
                 $trim = Invoke-FreshAgentPostInitMemoryCleanup -FreshAppData $script:FreshAppData
-                Write-WatchLog ("Module boot: memory trim ok={0} skipped={1}" -f $trim.ok, $trim.skipped)
+                if ($trim.skipped) {
+                    Write-WatchLog ("Module boot: memory trim ignore ({0})" -f $(if ($trim.message) { $trim.message } else { 'skipped' }))
+                }
+                else {
+                    Write-WatchLog ("Module boot: memory trim WS {0}->{1} Mo prive {2}->{3} Mo ok={4}" -f `
+                            $trim.wsMbBefore, $trim.wsMbAfter, $trim.privateMbBefore, $trim.privateMbAfter, $trim.ok)
+                }
             }
             catch {
                 Write-WatchLog ("Module boot: memory trim: {0}" -f $_.Exception.Message)
@@ -962,13 +964,27 @@ function Invoke-WatchTick {
     if (Get-Command Update-FreshAgentDashboardIfOpen -ErrorAction SilentlyContinue) {
         Update-FreshAgentDashboardIfOpen
     }
-    if (Get-Command Invoke-FreshAgentIdleSuggestTick -ErrorAction SilentlyContinue) {
-        try {
-            Invoke-FreshAgentIdleSuggestTick -FreshAppData $script:FreshAppData -RepoRef $script:RepoRef -AiConfig $script:FreshAgentAi
+    $wantIdleSuggest = $false
+    try {
+        if ($script:UserSettings.autoSuggestKill) { $wantIdleSuggest = $true }
+        if ($script:FreshAgentAi -and $script:FreshAgentAi.enabled) { $wantIdleSuggest = $true }
+    }
+    catch { }
+    if ($wantIdleSuggest) {
+        if (Get-Command Ensure-FreshAgentIdleSuggestLoaded -ErrorAction SilentlyContinue) {
+            Ensure-FreshAgentIdleSuggestLoaded -FreshAppData $script:FreshAppData | Out-Null
         }
-        catch { }
+        if (Get-Command Invoke-FreshAgentIdleSuggestTick -ErrorAction SilentlyContinue) {
+            try {
+                Invoke-FreshAgentIdleSuggestTick -FreshAppData $script:FreshAppData -RepoRef $script:RepoRef -AiConfig $script:FreshAgentAi
+            }
+            catch { }
+        }
     }
     if (Get-Command Invoke-FreshAgentWeeklyHealthReportIfDue -ErrorAction SilentlyContinue) {
+        if (Get-Command Ensure-FreshAgentHealthLibsLoaded -ErrorAction SilentlyContinue) {
+            Ensure-FreshAgentHealthLibsLoaded -FreshAppData $script:FreshAppData | Out-Null
+        }
         try {
             $wr = Invoke-FreshAgentWeeklyHealthReportIfDue -FreshAppData $script:FreshAppData
             if ($wr -and $wr.ok) {
@@ -988,6 +1004,9 @@ function Invoke-WatchTick {
         catch { }
         if ($due) {
             try {
+                if (Get-Command Ensure-FreshAgentHealthLibsLoaded -ErrorAction SilentlyContinue) {
+                    Ensure-FreshAgentHealthLibsLoaded -FreshAppData $script:FreshAppData | Out-Null
+                }
                 $snap = Get-FreshAgentHealthSnapshot -FreshAppData $script:FreshAppData
                 Add-FreshAgentHealthHistory -Snapshot $snap -FreshAppData $script:FreshAppData
                 $script:FaHealthSampleAt = Get-Date
@@ -2065,6 +2084,11 @@ function Invoke-FreshAgentRoutedCommand {
     }
 
     if (-not (Get-Command Invoke-FreshAgentVoiceRouter -ErrorAction SilentlyContinue)) {
+        if (Get-Command Ensure-FreshAgentVoiceRouterLoaded -ErrorAction SilentlyContinue) {
+            Ensure-FreshAgentVoiceRouterLoaded -FreshAppData $script:FreshAppData | Out-Null
+        }
+    }
+    if (-not (Get-Command Invoke-FreshAgentVoiceRouter -ErrorAction SilentlyContinue)) {
         return $false
     }
     $r = Invoke-FreshAgentVoiceRouter -Transcript $Text -FreshAppData $script:FreshAppData -RepoRef $script:RepoRef -MatchOnly
@@ -2274,6 +2298,11 @@ function Show-FreshAgentUserNotice {
         [ValidateSet('Info', 'Warning', 'Error')]
         [string]$Level = 'Info'
     )
+    if (-not (Get-Command Show-FreshAgentOverlay -ErrorAction SilentlyContinue)) {
+        if (Get-Command Ensure-FreshAgentOverlayLoaded -ErrorAction SilentlyContinue) {
+            Ensure-FreshAgentOverlayLoaded -FreshAppData $script:FreshAppData | Out-Null
+        }
+    }
     if (Get-Command Show-FreshAgentOverlay -ErrorAction SilentlyContinue) {
         Show-FreshAgentOverlay -Title $Title -Text $Text -Level $Level
         return
@@ -2802,7 +2831,12 @@ function Set-FreshAgentAiEnabledFromUi {
         return
     }
     if (-not (Get-Command Set-FreshAgentAiEnabled -ErrorAction SilentlyContinue)) {
-        Import-FreshAgentModule -RelativePath 'lib/FreshAgent-AiLifecycle.ps1' -FreshAppData $script:FreshAppData | Out-Null
+        if (Get-Command Ensure-FreshAgentAiLifecycleLoaded -ErrorAction SilentlyContinue) {
+            Ensure-FreshAgentAiLifecycleLoaded -FreshAppData $script:FreshAppData | Out-Null
+        }
+        else {
+            Import-FreshAgentModule -RelativePath 'lib/FreshAgent-AiLifecycle.ps1' -FreshAppData $script:FreshAppData | Out-Null
+        }
     }
     $script:FreshAgentAi = Set-FreshAgentAiEnabled -Enabled $Enabled -FreshAppData $script:FreshAppData -RepoRef $script:RepoRef -OnEnsureModel {
         Start-FreshAgentBackgroundWork -Action EnsureModel -BusyTitle 'Fresh Agent IA' -BusyText 'Demarrage Ollama + modele...'
@@ -3339,10 +3373,6 @@ function Stop-WatchAgentPollTimerIfRunning {
 function Start-WatchAgentPollTimerIfNeeded {
     if (-not $script:UserSettings.monitorEnabled) { return }
     if ($script:WatchPollTimer) { return }
-    if (Get-Command Import-FreshAgentLibOnce -ErrorAction SilentlyContinue) {
-        Import-FreshAgentLibOnce -RelativePath 'lib/FreshAgent-Health.ps1' -FreshAppData $script:FreshAppData | Out-Null
-        Import-FreshAgentLibOnce -RelativePath 'lib/FreshAgent-IdleSuggest.ps1' -FreshAppData $script:FreshAppData | Out-Null
-    }
     $pollMs = [math]::Max(5000, [int]$script:WatchRules.pollIntervalSeconds * 1000)
     $script:WatchPollTimer = New-Object System.Windows.Forms.Timer
     $script:WatchPollTimer.Interval = $pollMs
@@ -3394,15 +3424,7 @@ function Start-WatchAgentUiBootstrap {
         Install-WatchAgentFullTrayMenu
         Start-WatchAgentTimers
         Refresh-WatchAgentTrayVisibility
-        if (Get-Command Import-FreshAgentLibOnce -ErrorAction SilentlyContinue) {
-            Import-FreshAgentLibOnce -RelativePath 'lib/FreshAgent-Overlay.ps1' -FreshAppData $script:FreshAppData | Out-Null
-        }
-        if (Get-Command Show-FreshAgentOverlay -ErrorAction SilentlyContinue) {
-            Show-FreshAgentOverlay -Title 'Fresh Agent' -Text 'Actif — icone dans la zone de notification (chevron ^ si masquee).' -Level Info -FadeMs 6000
-        }
-        else {
-            Show-Balloon -Title 'Fresh Agent' -Text 'Agent actif — regardez la zone de notification (icones cachees ^).' -Icon Info
-        }
+        Show-Balloon -Title 'Fresh Agent' -Text 'Agent actif — regardez la zone de notification (icones cachees ^).' -Icon Info
         Write-WatchLog 'UI bootstrap OK'
     }
     catch {

@@ -30,6 +30,50 @@ function Expand-FreshAgentModelsPath {
     return [Environment]::ExpandEnvironmentVariables($Path)
 }
 
+function Resolve-FreshAgentBootstrapLibPath {
+    <#
+      Chemins lib/ai quand le module est charge via Invoke-Expression (PSScriptRoot vide).
+    #>
+    param(
+        [Parameter(Mandatory)][string]$RelativePath,
+        [string]$FreshAppData = ''
+    )
+    if ([string]::IsNullOrWhiteSpace($FreshAppData)) {
+        if (Get-Command Get-FreshAgentAppDataRoot -ErrorAction SilentlyContinue) {
+            $FreshAppData = Get-FreshAgentAppDataRoot
+        }
+        elseif ($script:FreshAppData -and -not [string]::IsNullOrWhiteSpace([string]$script:FreshAppData)) {
+            $FreshAppData = [string]$script:FreshAppData
+        }
+        else {
+            $FreshAppData = Join-Path $env:LOCALAPPDATA 'FreshWindows'
+        }
+    }
+    $rel = $RelativePath -replace '/', [IO.Path]::DirectorySeparatorChar
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    if (-not [string]::IsNullOrWhiteSpace($FreshAppData)) {
+        [void]$candidates.Add((Join-Path $FreshAppData $rel))
+    }
+    if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        [void]$candidates.Add((Join-Path $PSScriptRoot $rel))
+        $parent = Split-Path $PSScriptRoot -Parent
+        if ($parent) {
+            [void]$candidates.Add((Join-Path $parent $rel))
+        }
+        $leaf = Split-Path $PSScriptRoot -Leaf
+        if ($leaf -eq 'ai' -and $rel -like '..\*') {
+            [void]$candidates.Add((Join-Path $PSScriptRoot ($rel -replace '^\.\.\\', '..\')))
+        }
+        if ($rel -like 'lib\*') {
+            [void]$candidates.Add((Join-Path $PSScriptRoot ($rel -replace '^lib\\', '')))
+        }
+    }
+    foreach ($path in ($candidates | Select-Object -Unique)) {
+        if ($path -and (Test-Path -LiteralPath $path)) { return $path }
+    }
+    return $null
+}
+
 function Write-FreshAgentModelsDirLegacyLogOnce {
     param(
         [Parameter(Mandatory)][string]$FreshAppData,
@@ -80,7 +124,8 @@ function Resolve-FreshAgentModelsDir {
     #>
     param(
         [Parameter(Mandatory)][string]$FreshAppData,
-        [scriptblock]$OnLegacyPath = $null
+        [scriptblock]$OnLegacyPath = $null,
+        [string]$LegacyModelsPath = ''
     )
     $fromUser = Get-FreshAgentModelsDirFromUserConfigs -FreshAppData $FreshAppData
     if (-not [string]::IsNullOrWhiteSpace($fromUser)) {
@@ -90,6 +135,9 @@ function Resolve-FreshAgentModelsDir {
         return Expand-FreshAgentModelsPath -Path $env:FRESH_MODELS_DIR.Trim()
     }
     $legacy = 'D:\models\cyberscribe_models'
+    if (-not [string]::IsNullOrWhiteSpace($LegacyModelsPath)) {
+        $legacy = $LegacyModelsPath.Trim()
+    }
     if (Test-Path -LiteralPath $legacy) {
         $msg = "modelsDir legacy D:\models\cyberscribe_models (definir freshModelsDir, FRESH_MODELS_DIR ou %LOCALAPPDATA%\FreshWindows\models)"
         Write-FreshAgentModelsDirLegacyLogOnce -FreshAppData $FreshAppData -Message $msg -OnLegacyPath $OnLegacyPath

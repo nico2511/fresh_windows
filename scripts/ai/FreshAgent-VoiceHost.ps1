@@ -16,20 +16,31 @@ param(
     [string]$TranscriptionProfile = 'accurate'
 )
 
-$sttSettingsLib = Join-Path $PSScriptRoot '..\lib\FreshAgent-SttSettings.ps1'
-if (-not (Test-Path -LiteralPath $sttSettingsLib)) {
-    $sttSettingsLib = Join-Path (Split-Path $PSScriptRoot -Parent) 'lib\FreshAgent-SttSettings.ps1'
+function Resolve-FreshAgentVoiceHostLibPath {
+    param([Parameter(Mandatory)][string]$RelativePath)
+    if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        $cand = Join-Path $PSScriptRoot $RelativePath
+        if (Test-Path -LiteralPath $cand) { return $cand }
+        $parent = Split-Path $PSScriptRoot -Parent
+        if ($parent) {
+            $cand2 = Join-Path $parent ($RelativePath -replace '^\.\.\\', '')
+            if (Test-Path -LiteralPath $cand2) { return $cand2 }
+        }
+    }
+    $appdata = $FreshAppData
+    if ([string]::IsNullOrWhiteSpace($appdata)) {
+        if ($env:FRESH_WIN_APPDATA) { $appdata = $env:FRESH_WIN_APPDATA.Trim() }
+        else { $appdata = Join-Path $env:LOCALAPPDATA 'FreshWindows' }
+    }
+    $fromApp = Join-Path $appdata ($RelativePath -replace '^\.\.\\lib\\', 'lib\')
+    if (Test-Path -LiteralPath $fromApp) { return $fromApp }
+    return $null
 }
-if (Test-Path -LiteralPath $sttSettingsLib) {
-    . $sttSettingsLib
-}
-$logLib = Join-Path $PSScriptRoot '..\lib\FreshAgent-Log.ps1'
-if (-not (Test-Path -LiteralPath $logLib)) {
-    $logLib = Join-Path (Split-Path $PSScriptRoot -Parent) 'lib\FreshAgent-Log.ps1'
-}
-if (Test-Path -LiteralPath $logLib) {
-    . $logLib
-}
+
+$sttSettingsLib = Resolve-FreshAgentVoiceHostLibPath -RelativePath '..\lib\FreshAgent-SttSettings.ps1'
+if ($sttSettingsLib) { . $sttSettingsLib }
+$logLib = Resolve-FreshAgentVoiceHostLibPath -RelativePath '..\lib\FreshAgent-Log.ps1'
+if ($logLib) { . $logLib }
 
 $ErrorActionPreference = 'Continue'
 $logPath = Join-Path $FreshAppData 'voice-worker-host.log'
