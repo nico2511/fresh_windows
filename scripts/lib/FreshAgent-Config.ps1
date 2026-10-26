@@ -500,6 +500,7 @@ function Sync-FreshAgentLocalAssets {
         'lib/FreshAgent-History.ps1',
         'lib/FreshAgent-Profiles.ps1',
         'lib/FreshAgent-Log.ps1',
+        'lib/FreshAgent-SttSettings.ps1',
         'lib/FreshAgent-Dashboard.ps1',
         'lib/FreshAgent-Overlay.ps1',
         'lib/FreshAgent-VoiceRouter.ps1',

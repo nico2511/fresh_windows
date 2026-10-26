@@ -8,6 +8,67 @@ function Get-FreshAgentLogPath {
     return Join-Path $FreshAppData $Name
 }
 
+function Get-FreshAgentLogTranscriptsEnabled {
+    param([string]$FreshAppData)
+    if ([string]::IsNullOrWhiteSpace($FreshAppData)) {
+        if (Get-Command Get-FreshAgentAppDataRoot -ErrorAction SilentlyContinue) {
+            $FreshAppData = Get-FreshAgentAppDataRoot
+        }
+        elseif ($env:FRESH_WIN_APPDATA -and -not [string]::IsNullOrWhiteSpace($env:FRESH_WIN_APPDATA)) {
+            $FreshAppData = $env:FRESH_WIN_APPDATA.Trim()
+        }
+        else {
+            $FreshAppData = Join-Path $env:LOCALAPPDATA 'FreshWindows'
+        }
+    }
+    foreach ($path in @(
+            (Join-Path $FreshAppData 'watch-agent-user.json'),
+            (Join-Path $FreshAppData 'agent-ai.user.json')
+        )) {
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        try {
+            $u = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($null -ne $u.logTranscripts) { return [bool]$u.logTranscripts }
+            if ($u.stt -and $null -ne $u.stt.logTranscripts) { return [bool]$u.stt.logTranscripts }
+        }
+        catch { }
+    }
+    return $false
+}
+
+function Get-FreshAgentTranscriptSha256Prefix8 {
+    param([string]$Text)
+    if ($null -eq $Text) { $Text = '' }
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha.ComputeHash($bytes)
+    }
+    finally {
+        if ($sha -is [IDisposable]) { $sha.Dispose() }
+    }
+    return (-join ($hash[0..3] | ForEach-Object { $_.ToString('x2') }))
+}
+
+function Format-FreshAgentTranscriptForLog {
+    <#
+      Par defaut : longueur + 8 premiers hex du SHA-256 (UTF-8).
+      Texte en clair si logTranscripts=true dans watch-agent-user.json ou agent-ai.user.json.
+    #>
+    param(
+        [string]$Text,
+        [string]$FreshAppData
+    )
+    if ($null -eq $Text) { $Text = '' }
+    if (Get-FreshAgentLogTranscriptsEnabled -FreshAppData $FreshAppData) {
+        return $Text
+    }
+    $len = $Text.Length
+    if ($len -eq 0) { return 'len=0' }
+    $fp = Get-FreshAgentTranscriptSha256Prefix8 -Text $Text
+    return ('len={0} sha256={1}' -f $len, $fp)
+}
+
 function Write-FreshAgentLog {
     param(
         [string]$Category = 'Core',

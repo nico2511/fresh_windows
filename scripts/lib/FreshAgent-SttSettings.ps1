@@ -21,6 +21,90 @@ function Test-FreshAgentSttPushToTalkFromConfig {
     return (Get-FreshAgentSttListenMode -AiConfig $AiConfig) -eq 'pushToTalk'
 }
 
+function Expand-FreshAgentModelsPath {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $Path }
+    if (Get-Command Expand-FreshAgentPath -ErrorAction SilentlyContinue) {
+        return Expand-FreshAgentPath -Path $Path
+    }
+    return [Environment]::ExpandEnvironmentVariables($Path)
+}
+
+function Write-FreshAgentModelsDirLegacyLogOnce {
+    param(
+        [Parameter(Mandatory)][string]$FreshAppData,
+        [Parameter(Mandatory)][string]$Message,
+        [scriptblock]$OnLegacyPath = $null
+    )
+    $flag = Join-Path $FreshAppData 'fa-models-legacy-notified.txt'
+    if (Test-Path -LiteralPath $flag) { return }
+    try {
+        Set-Content -LiteralPath $flag -Value (Get-Date).ToString('o') -Encoding UTF8 -NoNewline
+    }
+    catch { return }
+    if ($OnLegacyPath) {
+        try { & $OnLegacyPath $Message } catch { }
+    }
+}
+
+function Get-FreshAgentModelsDirFromUserConfigs {
+    param([Parameter(Mandatory)][string]$FreshAppData)
+    foreach ($path in @(
+            (Join-Path $FreshAppData 'agent-ai.user.json'),
+            (Join-Path $FreshAppData 'watch-agent-user.json')
+        )) {
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        try {
+            $u = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+            $candidates = @()
+            if ($u.freshModelsDir) { $candidates += [string]$u.freshModelsDir }
+            if ($u.modelsDir) { $candidates += [string]$u.modelsDir }
+            if ($u.stt -and $u.stt.modelsDir) { $candidates += [string]$u.stt.modelsDir }
+            foreach ($c in $candidates) {
+                if (-not [string]::IsNullOrWhiteSpace($c)) {
+                    return Expand-FreshAgentModelsPath -Path $c.Trim()
+                }
+            }
+        }
+        catch { }
+    }
+    return $null
+}
+
+function Resolve-FreshAgentModelsDir {
+    <#
+      a) config user (watch-agent-user.json, agent-ai.user.json : freshModelsDir, modelsDir, stt.modelsDir)
+      b) env FRESH_MODELS_DIR
+      c) defaut %LOCALAPPDATA%\FreshWindows\models
+      Retrocompat (aucun reglage a/b) : D:\models\cyberscribe_models si present (journalise une fois).
+    #>
+    param(
+        [Parameter(Mandatory)][string]$FreshAppData,
+        [scriptblock]$OnLegacyPath = $null
+    )
+    $fromUser = Get-FreshAgentModelsDirFromUserConfigs -FreshAppData $FreshAppData
+    if (-not [string]::IsNullOrWhiteSpace($fromUser)) {
+        return $fromUser
+    }
+    if ($env:FRESH_MODELS_DIR -and -not [string]::IsNullOrWhiteSpace($env:FRESH_MODELS_DIR)) {
+        return Expand-FreshAgentModelsPath -Path $env:FRESH_MODELS_DIR.Trim()
+    }
+    $legacy = 'D:\models\cyberscribe_models'
+    if (Test-Path -LiteralPath $legacy) {
+        $msg = "modelsDir legacy D:\models\cyberscribe_models (definir freshModelsDir, FRESH_MODELS_DIR ou %LOCALAPPDATA%\FreshWindows\models)"
+        Write-FreshAgentModelsDirLegacyLogOnce -FreshAppData $FreshAppData -Message $msg -OnLegacyPath $OnLegacyPath
+        return $legacy
+    }
+    $localApp = $env:LOCALAPPDATA
+    if ([string]::IsNullOrWhiteSpace($localApp) -and $env:USERPROFILE) {
+        $localApp = Join-Path $env:USERPROFILE 'AppData\Local'
+    }
+    if ([string]::IsNullOrWhiteSpace($localApp)) {
+        $localApp = if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
+    }
+    return (Join-Path $localApp 'FreshWindows\models')
+}
+
 function Resolve-FreshAgentSttModelSize {
     param(
         [string]$Requested = 'small',
