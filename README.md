@@ -215,6 +215,12 @@ Respecte les licences et conditions de chaque projet. Fresh Windows ne redistrib
 
 ---
 
+## Désinstallation
+
+Pour retirer l’agent, les tâches planifiées Fresh Windows, le cache local et les raccourcis **sans** désinstaller les apps winget ni annuler WinUtil / ShutUp10 : voir [guides/desinstallation.md](guides/desinstallation.md).
+
+---
+
 ## Tests
 
 ```powershell
