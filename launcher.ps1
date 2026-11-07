@@ -72,7 +72,7 @@ $FreshAppData = Join-Path $env:LOCALAPPDATA "FreshWindows"
 $CustomAppsLocalDir = Join-Path $FreshAppData "apps-custom"
 $script:FreshBrand = "Fresh Windows"
 # Incrementer quand les libs changent alors que FRESH_WIN_REF reste "main" (sinon cache perime)
-$script:FreshWindowsLibEpoch = 55
+$script:FreshWindowsLibEpoch = 59
 
 function Ensure-FreshWindowsExecutionPolicy {
     <#
@@ -1315,6 +1315,8 @@ function Show-Menu {
     Write-Host "10  GPU / Chipset (AMD, NVIDIA, Intel DSA)" -ForegroundColor DarkYellow
     Write-Host "--- Mode jeu ---" -ForegroundColor DarkCyan
     Write-Host "11  Mode jeu (lancer / raccourci / agent)" -ForegroundColor Red
+    Write-Host "--- Maintenance ---" -ForegroundColor DarkCyan
+    Write-Host "12  Desinstallation (agent, taches, cache local)" -ForegroundColor DarkYellow
     Write-Host " 0  Quitter" -ForegroundColor DarkGray
     Write-Host ""
 }
@@ -1722,6 +1724,7 @@ do {
             "9" { Open-ScheduledTasksMenu }
             "10" { Open-GpuMenu }
             "11" { Open-GameModeSetupMenu }
+            "12" { Open-FreshWindowsUninstallMenu -RepoRawRoot $RepoRawRoot -LocalRepoRoot $PSScriptRoot }
             "0" { exit 0 }
             default {
                 Write-Host "Choix invalide" -ForegroundColor Red
