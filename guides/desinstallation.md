@@ -10,9 +10,9 @@ Ce guide décrit comment retirer Fresh Windows de la machine **sans** désinstal
   - `FreshWindows-WatchAgent`
   - `FreshWindows-WingetUpgrade`
   - `FreshWindows-WinUtilReapply`
-- Les **raccourcis Bureau** Fresh : « Fresh Windows » / `FreshWindows.lnk`, et `Mode Jeu.lnk` (profil utilisateur et Bureau public).
+- Les **raccourcis Bureau** attribués à Fresh (cible vérifiable) : « Fresh Windows » / `FreshWindows.lnk`, `Mode Jeu.lnk` si pointeur Fresh ; homonymes tiers conservés.
 - Le dossier **`%LOCALAPPDATA%\FreshWindows`** (scripts mis en cache, configs locales, logs).
-- Les dossiers temporaires de test **`%TEMP%\fw-test*`** s’ils existent.
+- Les dossiers **`%TEMP%\fw-test*`** portant le fichier marqueur **`.fresh-windows-uninstall-owned`** (les autres `fw-test*` sont signalés mais non supprimés).
 
 ## Ce qui est conservé
 
@@ -25,7 +25,7 @@ Ce guide décrit comment retirer Fresh Windows de la machine **sans** désinstal
 1. Lancer le **launcher** en PowerShell **administrateur** (one-liner README ou raccourci Bureau).
 2. Choisir **12 — Désinstallation**.
 3. Options :
-   - **3 — Simulation (DryRun)** : aucune modification, prévisualisation des actions.
+   - **3 — Simulation (DryRun)** : aucune suppression agent/tâches/cache ; depuis un clone local, exécution **en mémoire** ; sinon staging temporaire sous `%TEMP%` (annoncé) supprimé après la simulation.
    - **2 — Désinstallation complète** : confirmation **OUI** requise ; supprime l’installation locale Fresh puis quitte le launcher.
    - **1 — Désinstaller puis réinstaller** : taper exactement **OUI** ; nettoyage vérifié puis relance du launcher **`main`** via un stub temporaire sous `%TEMP%\FreshWindows-Reinstall-*\` (auto-nettoyé, hors cache supprimé).
 4. Seule la saisie exacte **OUI** confirme ; toute autre réponse **annule** sans effet.
@@ -44,21 +44,40 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 cd chemin\vers\fresh_windows\scripts
 .\Uninstall-FreshWindows.ps1 -DryRun
 # puis, si OK :
-.\Uninstall-FreshWindows.ps1
+.\Uninstall-FreshWindows.ps1 -Confirmed
 ```
 
-### Sans cloner le dépôt (une ligne, simulation)
+### Sans cloner le dépôt (simulation DryRun)
 
-Télécharge le script depuis la branche `main` dans `%TEMP%` et lance la simulation :
+Télécharger le **wrapper** et la **bibliothèque** dans la même arborescence :
 
 ```powershell
-irm https://raw.githubusercontent.com/nico2511/fresh_windows/main/scripts/Uninstall-FreshWindows.ps1 -OutFile $env:TEMP\Uninstall-FreshWindows.ps1; & $env:TEMP\Uninstall-FreshWindows.ps1 -DryRun
+$dir = Join-Path $env:TEMP ('FreshWindows-UninstallCli-' + [guid]::NewGuid().ToString('n'))
+New-Item -ItemType Directory -Path (Join-Path $dir 'lib') -Force | Out-Null
+irm https://raw.githubusercontent.com/nico2511/fresh_windows/main/scripts/Uninstall-FreshWindows.ps1 -OutFile (Join-Path $dir 'Uninstall-FreshWindows.ps1')
+irm https://raw.githubusercontent.com/nico2511/fresh_windows/main/scripts/lib/FreshWindows-Uninstall.ps1 -OutFile (Join-Path $dir 'lib/FreshWindows-Uninstall.ps1')
+& (Join-Path $dir 'Uninstall-FreshWindows.ps1') -DryRun
 ```
 
-Pour la suppression réelle, exécuter la même commande **sans** `-DryRun` :
+Suppression réelle (PowerShell **admin**) :
 
 ```powershell
-irm https://raw.githubusercontent.com/nico2511/fresh_windows/main/scripts/Uninstall-FreshWindows.ps1 -OutFile $env:TEMP\Uninstall-FreshWindows.ps1; & $env:TEMP\Uninstall-FreshWindows.ps1
+& (Join-Path $dir 'Uninstall-FreshWindows.ps1') -Confirmed
+```
+
+Réinstallation après nettoyage : ajouter `-Confirmed -ReinstallAfter` (code sortie **5** = relance démarrée, succès `irm` non garanti).
+
+### Vérification non destructive (Windows PS 5.1)
+
+Fichiers à télécharger depuis `main` (sans clone complet) :
+
+| Fichier | Rôle |
+|---------|------|
+| `scripts/lib/FreshWindows-Uninstall.ps1` | Logique testable hors admin en `-DryRun` |
+| `tests/Invoke-UninstallSafeHarness.ps1` | Lance sandbox sous `%TEMP%` + DryRun |
+
+```powershell
+powershell -NoProfile -File .\tests\Invoke-UninstallSafeHarness.ps1
 ```
 
 ## Méthode manuelle (sans script)

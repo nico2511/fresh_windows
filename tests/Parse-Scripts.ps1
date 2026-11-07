@@ -36,7 +36,8 @@ $files = @(
     'scripts\ai\FreshAgent-BackgroundWorker.ps1',
     'scripts\lib\FreshWindows-BackgroundAudit.ps1',
     'scripts\Invoke-FreshWindowsBackgroundAudit.ps1',
-    'scripts\Uninstall-FreshWindows.ps1'
+    'scripts\Uninstall-FreshWindows.ps1',
+    'scripts\lib\FreshWindows-Uninstall.ps1'
 )
 function Test-FreshPs1Utf8Bom {
     param(

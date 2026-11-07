@@ -348,7 +348,90 @@ function Confirm-FreshWindowsUninstallAction {
     Write-Host 'Conserve : apps winget, tweaks WinUtil/ShutUp10, CyberScribe et modeles externes.' -ForegroundColor DarkGray
     Write-Host $Prompt -ForegroundColor Yellow
     $line = Read-Host
-    return ([string]$line).Trim() -ceq 'OUI'
+    if ($null -eq $line) { return $false }
+    return ([string]$line) -ceq 'OUI'
+}
+
+function Get-FreshWindowsUninstallImmuneProcessIds {
+    $ids = [System.Collections.ArrayList]@()
+    $cur = $PID
+    $guard = 0
+    while ($cur -gt 0 -and $guard -lt 64) {
+        $guard++
+        [void]$ids.Add([int]$cur)
+        $parentId = 0
+        try {
+            $cim = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $cur) -ErrorAction Stop
+            $parentId = [int]$cim.ParentProcessId
+        }
+        catch { break }
+        if ($parentId -le 0 -or $ids -contains $parentId) { break }
+        $cur = $parentId
+    }
+    return ,@($ids)
+}
+
+function New-FreshWindowsUninstallRunStaging {
+    param(
+        [Parameter(Mandatory)][string]$SourceScriptPath,
+        [Parameter(Mandatory)][string]$SourceLibPath,
+        [string]$SessionId = ''
+    )
+    if ([string]::IsNullOrWhiteSpace($SessionId)) {
+        $SessionId = [guid]::NewGuid().ToString('N')
+    }
+    $tempRoot = $env:TEMP
+    if ([string]::IsNullOrWhiteSpace($tempRoot)) { throw 'TEMP indisponible' }
+    $stage = Join-Path $tempRoot ("FreshWindows-UninstallRun-{0}" -f $SessionId)
+    $libDir = Join-Path $stage 'lib'
+    New-Item -ItemType Directory -Path $libDir -Force | Out-Null
+    $runScript = Join-Path $stage 'Uninstall-FreshWindows.ps1'
+    Copy-Item -LiteralPath $SourceScriptPath -Destination $runScript -Force
+    Copy-Item -LiteralPath $SourceLibPath -Destination (Join-Path $libDir 'FreshWindows-Uninstall.ps1') -Force
+    return [pscustomobject]@{
+        SessionId  = $SessionId
+        StageDir   = $stage
+        RunScript  = $runScript
+        LibPath    = Join-Path $libDir 'FreshWindows-Uninstall.ps1'
+    }
+}
+
+function Resolve-FreshWindowsUninstallLibPath {
+    param(
+        [Parameter(Mandatory)][string]$RepoRawRoot,
+        [string]$LocalRepoRoot = ''
+    )
+    if (-not [string]::IsNullOrWhiteSpace($LocalRepoRoot)) {
+        $local = Join-Path $LocalRepoRoot 'scripts/lib/FreshWindows-Uninstall.ps1'
+        if (Test-Path -LiteralPath $local) { return $local }
+    }
+    $dest = Join-Path $env:TEMP 'FreshWindows-Uninstall.lib.ps1'
+    $url = "$RepoRawRoot/scripts/lib/FreshWindows-Uninstall.ps1"
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+        return $dest
+    }
+    catch {
+        throw "Telechargement FreshWindows-Uninstall.ps1 (lib) impossible : $($_.Exception.Message)"
+    }
+}
+
+function Invoke-FreshWindowsUninstallLibDryRun {
+    param(
+        [Parameter(Mandatory)][string]$LibPath,
+        [int[]]$ImmuneProcessIds = @()
+    )
+    . $LibPath -DryRun -ImmuneProcessIds $ImmuneProcessIds
+    return (Invoke-FreshWindowsUninstall)
+}
+
+function Remove-FreshWindowsUninstallRunStaging {
+    param([string]$StageDir = '')
+    if ([string]::IsNullOrWhiteSpace($StageDir)) { return }
+    if (Test-Path -LiteralPath $StageDir) {
+        Remove-Item -LiteralPath $StageDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Resolve-FreshWindowsUninstallScriptPath {
@@ -380,26 +463,45 @@ function Invoke-FreshWindowsUninstallFromMenu {
         [Parameter(Mandatory)][string]$RepoRawRoot,
         [string]$LocalRepoRoot = ''
     )
-    $scriptPath = Resolve-FreshWindowsUninstallScriptPath -RepoRawRoot $RepoRawRoot -LocalRepoRoot $LocalRepoRoot
-    if (-not (Test-Path -LiteralPath $scriptPath)) {
-        throw "Script desinstallation introuvable."
+    $immune = @(Get-FreshWindowsUninstallImmuneProcessIds)
+    if ($DryRun -and -not [string]::IsNullOrWhiteSpace($LocalRepoRoot)) {
+        $lib = Join-Path $LocalRepoRoot 'scripts/lib/FreshWindows-Uninstall.ps1'
+        if (Test-Path -LiteralPath $lib) {
+            Write-Host 'Simulation : execution en memoire (sans copie disque).' -ForegroundColor DarkCyan
+            return (Invoke-FreshWindowsUninstallLibDryRun -LibPath $lib -ImmuneProcessIds $immune)
+        }
     }
-    $tempRoot = $env:TEMP
-    if ([string]::IsNullOrWhiteSpace($tempRoot)) { throw 'TEMP indisponible pour lancer la desinstallation.' }
-    $runPath = Join-Path $tempRoot ("Uninstall-FreshWindows-{0}.ps1" -f [guid]::NewGuid().ToString('N'))
-    Copy-Item -LiteralPath $scriptPath -Destination $runPath -Force
-    try { Unblock-File -LiteralPath $runPath -ErrorAction SilentlyContinue } catch { }
-    $psi = 'powershell.exe'
-    $argList = @(
-        '-NoProfile',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', $runPath
-    )
-    if ($DryRun) { $argList += '-DryRun' }
-    if ($ReinstallAfter) { $argList += '-ReinstallAfter' }
-    if (-not $DryRun) { $argList += '-Confirmed' }
-    & $psi @argList
-    return $LASTEXITCODE
+    $scriptPath = Resolve-FreshWindowsUninstallScriptPath -RepoRawRoot $RepoRawRoot -LocalRepoRoot $LocalRepoRoot
+    $libPath = Resolve-FreshWindowsUninstallLibPath -RepoRawRoot $RepoRawRoot -LocalRepoRoot $LocalRepoRoot
+    if (-not (Test-Path -LiteralPath $scriptPath)) { throw 'Script desinstallation introuvable.' }
+    if (-not (Test-Path -LiteralPath $libPath)) { throw 'Bibliotheque desinstallation introuvable.' }
+    $sessionId = [guid]::NewGuid().ToString('N')
+    $staging = New-FreshWindowsUninstallRunStaging -SourceScriptPath $scriptPath -SourceLibPath $libPath -SessionId $sessionId
+    if ($DryRun) {
+        Write-Host "Simulation : staging temporaire $($staging.StageDir) (supprime apres run)." -ForegroundColor DarkCyan
+    }
+    try {
+        $argList = @(
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', $staging.RunScript,
+            '-OwnedSessionId', $sessionId
+        )
+        if ($immune.Count -gt 0) {
+            $argList += '-ImmuneProcessIds'
+            foreach ($id in $immune) { $argList += [string]$id }
+        }
+        if ($DryRun) { $argList += '-DryRun' }
+        if ($ReinstallAfter) { $argList += '-ReinstallAfter' }
+        if (-not $DryRun) { $argList += '-Confirmed' }
+        & powershell.exe @argList
+        return $LASTEXITCODE
+    }
+    finally {
+        if ($DryRun) {
+            Remove-FreshWindowsUninstallRunStaging -StageDir $staging.StageDir
+        }
+    }
 }
 
 function Open-FreshWindowsUninstallMenu {
@@ -428,7 +530,7 @@ function Open-FreshWindowsUninstallMenu {
                     continue
                 }
                 $code = Invoke-FreshWindowsUninstallFromMenu -ReinstallAfter -RepoRawRoot $RepoRawRoot -LocalRepoRoot $LocalRepoRoot
-                if ($code -eq 0) {
+                if ($code -eq 0 -or $code -eq 5) {
                     Write-Host 'Desinstallation terminee. Fermeture du launcher (relance dans une nouvelle fenetre).' -ForegroundColor Green
                     exit 0
                 }
