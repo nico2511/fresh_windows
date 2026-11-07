@@ -6,6 +6,7 @@ param(
     [switch]$ReinstallAfter,
     [switch]$Confirmed,
     [int[]]$ImmuneProcessIds = @(),
+    [string]$ImmuneProcessIdsCsv = '',
     [string]$OwnedSessionId = '',
     [string]$SandboxLocalAppDataRoot = ''
 )

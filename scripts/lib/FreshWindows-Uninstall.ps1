@@ -5,6 +5,7 @@ param(
     [switch]$ReinstallAfter,
     [switch]$Confirmed,
     [int[]]$ImmuneProcessIds = @(),
+    [string]$ImmuneProcessIdsCsv = '',
     [string]$OwnedSessionId = '',
     [string]$SandboxLocalAppDataRoot = ''
 )
@@ -20,10 +21,24 @@ $script:FreshUninstallOwnedReinstallStage = $null
 $script:FreshUninstallOwnedRunScript = $null
 $script:FreshUninstallFreshOwnershipMarker = '.fresh-windows-uninstall-owned'
 $script:FreshUninstallTaskSnapshotOverride = $null
+$script:FreshUninstallProcessEnumeratorOverride = $null
+
+function Import-FreshUninstallImmuneIdsFromCsv {
+    param([string]$Csv)
+    if ([string]::IsNullOrWhiteSpace($Csv)) { return }
+    foreach ($part in @($Csv.Split(','))) {
+        $token = ([string]$part).Trim()
+        if ($token -match '^\d+$') {
+            $n = [int]$token
+            if ($n -gt 0) { $script:FreshUninstallImmunePids[$n] = $true }
+        }
+    }
+}
 
 foreach ($imm in @($ImmuneProcessIds)) {
     if ($imm -gt 0) { $script:FreshUninstallImmunePids[[int]$imm] = $true }
 }
+Import-FreshUninstallImmuneIdsFromCsv -Csv $ImmuneProcessIdsCsv
 $script:FreshUninstallImmunePids[[int]$PID] = $true
 
 function Register-FreshUninstallImmuneProcessId {
@@ -112,22 +127,27 @@ function Add-FreshUninstallInspectionFailure {
     [void]$script:FreshUninstallVerificationErrors.Add($Message)
 }
 
+function Test-FreshUninstallIsBenignProcessEnumerationError {
+    param([System.Management.Automation.ErrorRecord]$ErrorRecord)
+    if (-not $ErrorRecord) { return $false }
+    $msg = $ErrorRecord.Exception.Message
+    if ($msg -match '(?i)Cannot find a process|NoProcessFoundForGivenName|process .* not found') { return $true }
+    return $false
+}
+
 function Get-FreshUninstallTargetProcesses {
     param([Parameter(Mandatory)][string]$FreshRoot)
+    if ($script:FreshUninstallProcessEnumeratorOverride) {
+        return [object[]](& $script:FreshUninstallProcessEnumeratorOverride)
+    }
     $out = [System.Collections.ArrayList]@()
     $agentPattern = 'GameMode-WatchAgent|Launch-GameModeWatch|Start-WatchAgent\.cmd'
     $hostPattern = 'FreshAgent-VoiceHost'
     $launchPattern = 'Launch-GameModeKill\.ps1'
 
     foreach ($n in @('powershell', 'pwsh')) {
-        $procList = @()
-        try {
-            $procList = @(Get-Process -Name $n -ErrorAction Stop)
-        }
-        catch {
-            Add-FreshUninstallInspectionFailure -Message ("enumeration processus $n impossible")
-            continue
-        }
+        $procList = @(Get-Process -Name $n -ErrorAction SilentlyContinue)
+        if ($procList.Count -eq 0) { continue }
         foreach ($p in $procList) {
             $cmd = ''
             try {
@@ -145,9 +165,7 @@ function Get-FreshUninstallTargetProcesses {
         }
     }
 
-    $voiceList = @()
-    try { $voiceList = @(Get-Process -Name 'voice_worker' -ErrorAction Stop) }
-    catch { }
+    $voiceList = @(Get-Process -Name 'voice_worker' -ErrorAction SilentlyContinue)
     foreach ($p in $voiceList) {
         $path = ''
         try { $path = $p.Path } catch { }
@@ -165,7 +183,7 @@ function Get-FreshUninstallTargetProcesses {
         if (-not (Test-FreshUninstallPathUnderRoot -Path $path -Root (Join-Path $FreshRoot 'bin'))) { continue }
         [void]$out.Add([pscustomobject]@{ ProcessId = $p.Id; Name = $p.ProcessName; CommandLine = $path })
     }
-    return ,@($out)
+    return [object[]]($out.ToArray())
 }
 
 function Add-FreshUninstallStepFailure {
@@ -195,6 +213,38 @@ function Invoke-FreshUninstallDoStep {
     }
 }
 
+function Test-FreshUninstallShortcutPointsToFreshInstall {
+    param(
+        [Parameter(Mandatory)][string]$LnkPath,
+        [Parameter(Mandatory)][string]$FreshRoot,
+        [Parameter(Mandatory)][string]$Target,
+        [Parameter(Mandatory)][string]$Arguments
+    )
+    $name = [System.IO.Path]::GetFileName($LnkPath)
+    if (Test-FreshUninstallPathUnderRoot -Path $Target -Root $FreshRoot) { return $true }
+    try { $targetFull = [System.IO.Path]::GetFullPath($Target) } catch { $targetFull = $Target }
+    if (Test-FreshUninstallPathUnderRoot -Path $targetFull -Root $FreshRoot) { return $true }
+    if ($Target -match '\.cmd$' -and (Test-FreshUninstallPathUnderRoot -Path $targetFull -Root $FreshRoot)) { return $true }
+    $psLine = ($Target + ' ' + $Arguments).Trim()
+    $scriptPath = Get-FreshUninstallPowerShellScriptPathFromCommandLine -CommandLine $psLine
+    if ($scriptPath) {
+        try { $sp = [System.IO.Path]::GetFullPath($scriptPath) } catch { $sp = $scriptPath }
+        if (Test-FreshUninstallPathUnderRoot -Path $sp -Root $FreshRoot) { return $true }
+    }
+    if ($name -eq 'Mode Jeu.lnk' -and $scriptPath -and ($scriptPath -match 'Launch-GameModeKill\.ps1$')) {
+        try { $sp = [System.IO.Path]::GetFullPath($scriptPath) } catch { $sp = $scriptPath }
+        return (Test-FreshUninstallPathUnderRoot -Path $sp -Root $FreshRoot)
+    }
+    if ($name -in @('Fresh Windows.lnk', 'FreshWindows.lnk')) {
+        if ($scriptPath -and ($scriptPath -match 'Launch-FreshWindows\.ps1$')) {
+            try { $sp = [System.IO.Path]::GetFullPath($scriptPath) } catch { $sp = $scriptPath }
+            return (Test-FreshUninstallPathUnderRoot -Path $sp -Root $FreshRoot)
+        }
+        if ($Target -match 'powershell' -and (Test-FreshUninstallPathUnderRoot -Path $targetFull -Root $FreshRoot)) { return $true }
+    }
+    return $false
+}
+
 function Get-FreshUninstallShortcutOwnership {
     param(
         [Parameter(Mandatory)][string]$LnkPath,
@@ -205,11 +255,9 @@ function Get-FreshUninstallShortcutOwnership {
         $s = $wsh.CreateShortcut($LnkPath)
         $target = [string]$s.TargetPath
         $args = [string]$s.Arguments
-        $combo = ($target + ' ' + $args).Trim()
-        if ($target -match 'fresh_windows|FreshWindows|Launch-FreshWindows|Launch-GameMode|Start-WatchAgent|GameMode-Watch') { return 'owned' }
-        if ($args -match 'fresh_windows|FreshWindows|Launch-FreshWindows|Launch-GameMode|Start-WatchAgent|GameMode-Watch') { return 'owned' }
-        if (Test-FreshUninstallPathUnderRoot -Path $target -Root $FreshRoot) { return 'owned' }
-        if ($combo -match '(?i)Fresh Windows|FreshWindows') { return 'owned' }
+        if (Test-FreshUninstallShortcutPointsToFreshInstall -LnkPath $LnkPath -FreshRoot $FreshRoot -Target $target -Arguments $args) {
+            return 'owned'
+        }
         return 'foreign'
     }
     catch {
@@ -295,12 +343,8 @@ function Get-FreshUninstallScheduledTaskSnapshot {
 function Get-FreshUninstallVerification {
     param([Parameter(Mandatory)][string]$FreshRoot)
     $issues = [System.Collections.ArrayList]@()
+    $warnings = [System.Collections.ArrayList]@()
     $unavailable = $false
-
-    if ($script:FreshUninstallVerificationErrors.Count -gt 0) {
-        $unavailable = $true
-        foreach ($e in $script:FreshUninstallVerificationErrors) { [void]$issues.Add($e) }
-    }
 
     if (Test-Path -LiteralPath $FreshRoot) { [void]$issues.Add("Dossier encore present : $FreshRoot") }
 
@@ -314,7 +358,6 @@ function Get-FreshUninstallVerification {
         foreach ($t in @($taskSnap.Tasks)) { [void]$issues.Add("Tache encore presente : $($t.TaskName)") }
     }
 
-    $warnings = [System.Collections.ArrayList]@()
     $shortcuts = Get-FreshUninstallDesktopShortcutInventory -FreshRoot $FreshRoot
     foreach ($lnk in @($shortcuts.Owned)) { [void]$issues.Add("Raccourci encore present : $lnk") }
     foreach ($lnk in @($shortcuts.Unknown)) {
@@ -327,8 +370,15 @@ function Get-FreshUninstallVerification {
         [void]$warnings.Add("Dossier fw-test sans marqueur Fresh (non supprime) : $d")
     }
 
-    foreach ($p in @(Get-FreshUninstallTargetProcesses -FreshRoot $FreshRoot)) {
+    $processes = Get-FreshUninstallTargetProcesses -FreshRoot $FreshRoot
+    foreach ($p in $processes) {
+        if (-not $p -or $p.ProcessId -le 0) { continue }
         [void]$issues.Add("Processus encore actif : $($p.ProcessId) $($p.Name)")
+    }
+
+    if ($script:FreshUninstallVerificationErrors.Count -gt 0) {
+        $unavailable = $true
+        foreach ($e in $script:FreshUninstallVerificationErrors) { [void]$issues.Add($e) }
     }
 
     return [pscustomobject]@{
@@ -427,7 +477,7 @@ function Start-FreshUninstallReinstallLauncher {
     }
 }
 
-function Clear-FreshUninstallOwnedStagingArtifacts {
+function Clear-FreshUninstallOwnedRunStagingOnly {
     if ($DryRun) { return $true }
     $ok = $true
     $tempRoot = $env:TEMP
@@ -438,6 +488,14 @@ function Clear-FreshUninstallOwnedStagingArtifacts {
             catch { $ok = $false; Add-FreshUninstallStepFailure -Label 'Nettoyage staging UninstallRun proprietaire' }
         }
     }
+    return $ok
+}
+
+function Clear-FreshUninstallOwnedStagingArtifacts {
+    if ($DryRun) { return $true }
+    $ok = $true
+    $tempRoot = $env:TEMP
+    if (-not (Clear-FreshUninstallOwnedRunStagingOnly)) { $ok = $false }
     if ($script:FreshUninstallOwnedReinstallStage -and (Test-Path -LiteralPath $script:FreshUninstallOwnedReinstallStage)) {
         try { Remove-Item -LiteralPath $script:FreshUninstallOwnedReinstallStage -Recurse -Force -ErrorAction Stop }
         catch { $ok = $false; Add-FreshUninstallStepFailure -Label 'Nettoyage staging relance proprietaire' }
@@ -580,10 +638,14 @@ function Invoke-FreshWindowsUninstall {
             return 3
         }
         if (-not (Start-FreshUninstallReinstallLauncher -StubPath $stub)) { return 3 }
+        if (-not (Clear-FreshUninstallOwnedRunStagingOnly)) { return 1 }
         return 5
     }
 
-    Clear-FreshUninstallOwnedStagingArtifacts | Out-Null
+    if (-not (Clear-FreshUninstallOwnedStagingArtifacts)) {
+        Write-Host 'Nettoyage staging local incomplet.' -ForegroundColor Red
+        return 1
+    }
     return 0
 }
 

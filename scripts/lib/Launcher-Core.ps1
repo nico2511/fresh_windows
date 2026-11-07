@@ -368,61 +368,61 @@ function Get-FreshWindowsUninstallImmuneProcessIds {
         if ($parentId -le 0 -or $ids -contains $parentId) { break }
         $cur = $parentId
     }
-    return ,@($ids)
+    return [int[]]@($ids.ToArray())
 }
 
 function New-FreshWindowsUninstallRunStaging {
     param(
-        [Parameter(Mandatory)][string]$SourceScriptPath,
-        [Parameter(Mandatory)][string]$SourceLibPath,
+        [Parameter(Mandatory)][string]$RepoRawRoot,
+        [string]$LocalRepoRoot = '',
         [string]$SessionId = ''
     )
     if ([string]::IsNullOrWhiteSpace($SessionId)) {
         $SessionId = [guid]::NewGuid().ToString('N')
     }
     $tempRoot = $env:TEMP
+    if ([string]::IsNullOrWhiteSpace($tempRoot)) { $tempRoot = [System.IO.Path]::GetTempPath() }
     if ([string]::IsNullOrWhiteSpace($tempRoot)) { throw 'TEMP indisponible' }
     $stage = Join-Path $tempRoot ("FreshWindows-UninstallRun-{0}" -f $SessionId)
     $libDir = Join-Path $stage 'lib'
-    New-Item -ItemType Directory -Path $libDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $libDir -Force -ErrorAction Stop | Out-Null
     $runScript = Join-Path $stage 'Uninstall-FreshWindows.ps1'
-    Copy-Item -LiteralPath $SourceScriptPath -Destination $runScript -Force
-    Copy-Item -LiteralPath $SourceLibPath -Destination (Join-Path $libDir 'FreshWindows-Uninstall.ps1') -Force
-    return [pscustomobject]@{
-        SessionId  = $SessionId
-        StageDir   = $stage
-        RunScript  = $runScript
-        LibPath    = Join-Path $libDir 'FreshWindows-Uninstall.ps1'
-    }
-}
-
-function Resolve-FreshWindowsUninstallLibPath {
-    param(
-        [Parameter(Mandatory)][string]$RepoRawRoot,
-        [string]$LocalRepoRoot = ''
-    )
+    $libScript = Join-Path $libDir 'FreshWindows-Uninstall.ps1'
     if (-not [string]::IsNullOrWhiteSpace($LocalRepoRoot)) {
-        $local = Join-Path $LocalRepoRoot 'scripts/lib/FreshWindows-Uninstall.ps1'
-        if (Test-Path -LiteralPath $local) { return $local }
+        $wrapperSrc = Join-Path $LocalRepoRoot 'scripts/Uninstall-FreshWindows.ps1'
+        $libSrc = Join-Path $LocalRepoRoot 'scripts/lib/FreshWindows-Uninstall.ps1'
+        if (-not (Test-Path -LiteralPath $wrapperSrc) -or -not (Test-Path -LiteralPath $libSrc)) {
+            throw 'Fichiers desinstallation locaux introuvables.'
+        }
+        Copy-Item -LiteralPath $wrapperSrc -Destination $runScript -Force -ErrorAction Stop
+        Copy-Item -LiteralPath $libSrc -Destination $libScript -Force -ErrorAction Stop
     }
-    $dest = Join-Path $env:TEMP 'FreshWindows-Uninstall.lib.ps1'
-    $url = "$RepoRawRoot/scripts/lib/FreshWindows-Uninstall.ps1"
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
-        return $dest
+    else {
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        }
+        catch { }
+        $wrapperUrl = "$RepoRawRoot/scripts/Uninstall-FreshWindows.ps1"
+        $libUrl = "$RepoRawRoot/scripts/lib/FreshWindows-Uninstall.ps1"
+        Invoke-WebRequest -Uri $wrapperUrl -OutFile $runScript -UseBasicParsing -ErrorAction Stop
+        Invoke-WebRequest -Uri $libUrl -OutFile $libScript -UseBasicParsing -ErrorAction Stop
+        try { Unblock-File -LiteralPath $runScript -ErrorAction SilentlyContinue } catch { }
+        try { Unblock-File -LiteralPath $libScript -ErrorAction SilentlyContinue } catch { }
     }
-    catch {
-        throw "Telechargement FreshWindows-Uninstall.ps1 (lib) impossible : $($_.Exception.Message)"
+    return [pscustomobject]@{
+        SessionId = $SessionId
+        StageDir  = $stage
+        RunScript = $runScript
+        LibPath   = $libScript
     }
 }
 
 function Invoke-FreshWindowsUninstallLibDryRun {
     param(
         [Parameter(Mandatory)][string]$LibPath,
-        [int[]]$ImmuneProcessIds = @()
+        [string]$ImmuneProcessIdsCsv = ''
     )
-    . $LibPath -DryRun -ImmuneProcessIds $ImmuneProcessIds
+    . $LibPath -DryRun -ImmuneProcessIdsCsv $ImmuneProcessIdsCsv
     return (Invoke-FreshWindowsUninstall)
 }
 
@@ -434,28 +434,6 @@ function Remove-FreshWindowsUninstallRunStaging {
     }
 }
 
-function Resolve-FreshWindowsUninstallScriptPath {
-    param(
-        [Parameter(Mandatory)][string]$RepoRawRoot,
-        [string]$LocalRepoRoot = ''
-    )
-    if (-not [string]::IsNullOrWhiteSpace($LocalRepoRoot)) {
-        $local = Join-Path $LocalRepoRoot 'scripts/Uninstall-FreshWindows.ps1'
-        if (Test-Path -LiteralPath $local) { return $local }
-    }
-    $dest = Join-Path $env:TEMP 'Uninstall-FreshWindows.ps1'
-    $url = "$RepoRawRoot/scripts/Uninstall-FreshWindows.ps1"
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
-        try { Unblock-File -LiteralPath $dest -ErrorAction SilentlyContinue } catch { }
-        return $dest
-    }
-    catch {
-        throw "Telechargement Uninstall-FreshWindows.ps1 impossible : $($_.Exception.Message)"
-    }
-}
-
 function Invoke-FreshWindowsUninstallFromMenu {
     param(
         [switch]$DryRun,
@@ -463,22 +441,25 @@ function Invoke-FreshWindowsUninstallFromMenu {
         [Parameter(Mandatory)][string]$RepoRawRoot,
         [string]$LocalRepoRoot = ''
     )
-    $immune = @(Get-FreshWindowsUninstallImmuneProcessIds)
+    $immuneFlat = Get-FreshWindowsUninstallImmuneProcessIds
+    $immuneCsv = (($immuneFlat | ForEach-Object { [string]$_ }) -join ',')
     if ($DryRun -and -not [string]::IsNullOrWhiteSpace($LocalRepoRoot)) {
         $lib = Join-Path $LocalRepoRoot 'scripts/lib/FreshWindows-Uninstall.ps1'
         if (Test-Path -LiteralPath $lib) {
             Write-Host 'Simulation : execution en memoire (sans copie disque).' -ForegroundColor DarkCyan
-            return (Invoke-FreshWindowsUninstallLibDryRun -LibPath $lib -ImmuneProcessIds $immune)
+            return (Invoke-FreshWindowsUninstallLibDryRun -LibPath $lib -ImmuneProcessIdsCsv $immuneCsv)
         }
     }
-    $scriptPath = Resolve-FreshWindowsUninstallScriptPath -RepoRawRoot $RepoRawRoot -LocalRepoRoot $LocalRepoRoot
-    $libPath = Resolve-FreshWindowsUninstallLibPath -RepoRawRoot $RepoRawRoot -LocalRepoRoot $LocalRepoRoot
-    if (-not (Test-Path -LiteralPath $scriptPath)) { throw 'Script desinstallation introuvable.' }
-    if (-not (Test-Path -LiteralPath $libPath)) { throw 'Bibliotheque desinstallation introuvable.' }
     $sessionId = [guid]::NewGuid().ToString('N')
-    $staging = New-FreshWindowsUninstallRunStaging -SourceScriptPath $scriptPath -SourceLibPath $libPath -SessionId $sessionId
+    try {
+        $staging = New-FreshWindowsUninstallRunStaging -RepoRawRoot $RepoRawRoot -LocalRepoRoot $LocalRepoRoot -SessionId $sessionId
+    }
+    catch {
+        Write-Host "Echec preparation staging desinstallation : $($_.Exception.Message)" -ForegroundColor Red
+        return 1
+    }
     if ($DryRun) {
-        Write-Host "Simulation : staging temporaire $($staging.StageDir) (supprime apres run)." -ForegroundColor DarkCyan
+        Write-Host "Simulation : staging GUID $($staging.StageDir) (supprime apres run)." -ForegroundColor DarkCyan
     }
     try {
         $argList = @(
@@ -487,9 +468,9 @@ function Invoke-FreshWindowsUninstallFromMenu {
             '-File', $staging.RunScript,
             '-OwnedSessionId', $sessionId
         )
-        if ($immune.Count -gt 0) {
-            $argList += '-ImmuneProcessIds'
-            foreach ($id in $immune) { $argList += [string]$id }
+        if (-not [string]::IsNullOrWhiteSpace($immuneCsv)) {
+            $argList += '-ImmuneProcessIdsCsv'
+            $argList += $immuneCsv
         }
         if ($DryRun) { $argList += '-DryRun' }
         if ($ReinstallAfter) { $argList += '-ReinstallAfter' }

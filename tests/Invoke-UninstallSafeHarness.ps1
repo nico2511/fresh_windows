@@ -5,10 +5,12 @@
 .DESCRIPTION
   Mode sur par defaut : DryRun + SandboxLocalAppDataRoot sous %TEMP%.
   Aucun arret de processus, aucune tache reelle, aucune elevation requise pour -DryRun.
-  Fichiers necessaires (sans clone) depuis la branche main :
+  Fichiers necessaires (sans clone) au SHA de la PR (PAS main avant fusion) :
     - scripts/lib/FreshWindows-Uninstall.ps1
     - tests/Invoke-UninstallSafeHarness.ps1
-  Optionnel (tests menu staging uniquement si present localement) :
+  Optionnel :
+  - tests/Uninstall-NativeCsvProbe.ps1 (frontiere powershell.exe -File -ImmuneProcessIdsCsv)
+  - scripts/Uninstall-FreshWindows.ps1 + Launcher-Core si test menu complet
     - scripts/Uninstall-FreshWindows.ps1
     - scripts/lib/Launcher-Core.ps1
 .EXAMPLE
@@ -16,7 +18,6 @@
   powershell -NoProfile -File .\tests\Invoke-UninstallSafeHarness.ps1
 #>
 param(
-    [switch]$StrictOui,
     [switch]$RunPesterSelf
 )
 
@@ -35,7 +36,7 @@ $fresh = Join-Path $sandbox 'FreshWindows'
 New-Item -ItemType Directory -Path $fresh -Force | Out-Null
 
 Write-Host "Harness sandbox : $sandbox" -ForegroundColor Cyan
-. $lib -DryRun -SandboxLocalAppDataRoot $sandbox -ImmuneProcessIds @($PID)
+. $lib -DryRun -SandboxLocalAppDataRoot $sandbox -ImmuneProcessIdsCsv ([string]$PID)
 $code = Invoke-FreshWindowsUninstall
 Write-Host "DryRun exit code : $code" -ForegroundColor $(if ($code -eq 0) { 'Green' } else { 'Red' })
 

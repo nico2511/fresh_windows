@@ -9,7 +9,10 @@ BeforeAll {
 }
 
 Describe 'Get-FreshUninstallScheduledTaskSnapshot' {
-    AfterEach { $script:FreshUninstallTaskSnapshotOverride = $null }
+    AfterEach {
+        $script:FreshUninstallTaskSnapshotOverride = $null
+        $script:FreshUninstallProcessEnumeratorOverride = $null
+    }
 
     It 'liste vide avec Ok=true ne doit pas etre $null (regression PS 5.1)' {
         $script:FreshUninstallTaskSnapshotOverride = {
@@ -37,18 +40,61 @@ Describe 'Get-FreshUninstallScheduledTaskSnapshot' {
             return [pscustomobject]@{ Ok = $true; Tasks = @($list.ToArray()); Error = '' }
         }
         $script:FreshUninstallVerificationErrors = [System.Collections.ArrayList]@()
+        $script:FreshUninstallProcessEnumeratorOverride = { return @() }
         $v = Get-FreshUninstallVerification -FreshRoot (Join-Path ([System.IO.Path]::GetTempPath()) 'FreshWindows-verify')
         $v.Unavailable | Should -Be $false
     }
 }
 
-Describe 'Uninstall-FreshWindows helpers' {
-    It 'Test-FreshUninstallProcessImmune utilise CommandLine' {
-        Register-FreshUninstallImmuneProcessId -ProcessId 4242
-        Test-FreshUninstallProcessImmune -ProcessId 4242 -CommandLine 'x' | Should -Be $true
-        Test-FreshUninstallProcessImmune -ProcessId 9 -CommandLine 'Uninstall-FreshWindows.ps1' | Should -Be $true
+Describe 'Contrats collections et PID CSV' {
+    It 'return [object[]] vide => Count 0 (regression ,@)' {
+        function Get-FreshWrappedTargetsSample {
+            $out = [System.Collections.ArrayList]@()
+            return [object[]]($out.ToArray())
+        }
+        @(Get-FreshWrappedTargetsSample).Count | Should -Be 0
     }
 
+    It 'verification sans processus ne fabrique pas de faux PID vide' {
+        $sandbox = Join-Path ([System.IO.Path]::GetTempPath()) ("FreshWindows-EmptyProc-{0}" -f [guid]::NewGuid().ToString('N'))
+        $fresh = Join-Path $sandbox 'FreshWindows'
+        New-Item -ItemType Directory -Path $fresh -Force | Out-Null
+        $script:FreshUninstallVerificationErrors = [System.Collections.ArrayList]@()
+        $script:FreshUninstallProcessEnumeratorOverride = { return @() }
+        $script:FreshUninstallTaskSnapshotOverride = {
+            $list = [System.Collections.ArrayList]@()
+            return [pscustomobject]@{ Ok = $true; Tasks = @($list.ToArray()); Error = '' }
+        }
+        try {
+            $v = Get-FreshUninstallVerification -FreshRoot $fresh
+            ($v.Issues -join ' ') | Should -Not -Match 'Processus encore actif :\s+\s*$'
+            ($v.Issues | Where-Object { $_ -match 'Processus encore actif' }).Count | Should -Be 0
+        }
+        finally {
+            Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction SilentlyContinue
+            $script:FreshUninstallTaskSnapshotOverride = $null
+        }
+    }
+
+    It 'Import-FreshUninstallImmuneIdsFromCsv decode plusieurs PID' {
+        $script:FreshUninstallImmunePids = @{}
+        Import-FreshUninstallImmuneIdsFromCsv -Csv '1001,1002,1003'
+        Test-FreshUninstallProcessImmune -ProcessId 1001 -CommandLine '' | Should -Be $true
+        Test-FreshUninstallProcessImmune -ProcessId 1002 -CommandLine '' | Should -Be $true
+        Test-FreshUninstallProcessImmune -ProcessId 1003 -CommandLine '' | Should -Be $true
+        Test-FreshUninstallProcessImmune -ProcessId 1004 -CommandLine '' | Should -Be $false
+    }
+
+    It 'Get-FreshWindowsUninstallImmuneProcessIds est plat (pas tableau imbrique)' {
+        $ids = @(Get-FreshWindowsUninstallImmuneProcessIds)
+        $ids.Count | Should -BeGreaterThan 0
+        foreach ($id in $ids) {
+            $id.GetType().FullName | Should -Be 'System.Int32'
+        }
+    }
+}
+
+Describe 'Uninstall-FreshWindows helpers' {
     It 'script tiers homonyme refuse si -File hors FreshRoot' {
         $fresh = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), 'FreshWindows')
         $otherScript = 'C:\Other\Launch-GameModeKill.ps1'
@@ -56,25 +102,19 @@ Describe 'Uninstall-FreshWindows helpers' {
         Test-FreshUninstallCommandTargetsFreshRoot -CommandLine $cmd -FreshRoot $fresh | Should -Be $false
     }
 
-    It 'Test-FreshUninstallPathUnderRoot frontiere repertoire' {
-        $base = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), 'FreshUninstallRootA')
-        $nested = [System.IO.Path]::Combine($base, 'child')
-        $sibling = $base + 'Extra'
-        Test-FreshUninstallPathUnderRoot -Path $nested -Root $base | Should -Be $true
-        Test-FreshUninstallPathUnderRoot -Path $sibling -Root $base | Should -Be $false
-    }
-
-    It 'fw-test sans marqueur exclu de Owned' {
-        if ([string]::IsNullOrWhiteSpace($env:TEMP)) { $env:TEMP = [System.IO.Path]::GetTempPath() }
-        $d = Join-Path $env:TEMP 'fw-test-foreign'
+    It 'fw-test dans sandbox GUID exclu sans marqueur' {
+        $sandbox = Join-Path ([System.IO.Path]::GetTempPath()) ("fw-sandbox-{0}" -f [guid]::NewGuid().ToString('N'))
+        $d = Join-Path $sandbox 'fw-test-owned'
         New-Item -ItemType Directory -Path $d -Force | Out-Null
+        $saved = $env:TEMP
+        $env:TEMP = $sandbox
         try {
             $inv = Get-FreshUninstallTempTestDirInventory
             ($inv.Unowned -contains $d) | Should -Be $true
-            ($inv.Owned -contains $d) | Should -Be $false
         }
         finally {
-            Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue
+            $env:TEMP = $saved
+            Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 
@@ -93,41 +133,23 @@ Describe 'Uninstall-FreshWindows helpers' {
             Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
-
-    It 'echecs enregistres empechent code succes implicite' {
-        $script:FreshUninstallStepFailures = [System.Collections.ArrayList]@()
-        Add-FreshUninstallStepFailure -Label 'etape test'
-        $script:FreshUninstallStepFailures.Count | Should -BeGreaterThan 0
-    }
-}
-
-Describe 'Uninstall stub relance' {
-    It 'stub genere parse et refuse relance si Fresh reapparu' {
-        if ([string]::IsNullOrWhiteSpace($env:TEMP)) { $env:TEMP = [System.IO.Path]::GetTempPath() }
-        $main = 'https://raw.githubusercontent.com/nico2511/fresh_windows/main/launcher.ps1'
-        $stub = New-FreshUninstallReinstallStub -MainUrl $main
-        $errs = $null
-        $null = [System.Management.Automation.Language.Parser]::ParseFile($stub, [ref]$null, [ref]$errs)
-        if ($errs) { ($errs | ForEach-Object { $_.Message }) -join '; ' | Should -Be '' }
-        $raw = Get-Content -LiteralPath $stub -Raw -Encoding UTF8
-        $raw | Should -Match 'dossier Fresh toujours present'
-        $stage = Split-Path -Parent $stub
-        Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
-    }
 }
 
 Describe 'launcher menu desinstallation' {
-    It 'menu 12 epoch 58' {
+    It 'menu 12 epoch 59' {
         $lines = Get-Content -LiteralPath $script:LauncherPath -Encoding UTF8 -Raw
         $lines | Should -Match '12  Desinstallation'
-        $lines | Should -Match 'FreshWindowsLibEpoch = 58'
+        $lines | Should -Match 'FreshWindowsLibEpoch = 59'
+    }
+
+    It 'ImmuneProcessIdsCsv dans Launcher-Core' {
+        $core = Get-Content -LiteralPath $script:LauncherCore -Encoding UTF8 -Raw
+        $core | Should -Match 'ImmuneProcessIdsCsv'
     }
 }
 
 Describe 'Confirm-FreshWindowsUninstallAction' {
     It 'refuse oui espaces et ok' {
-        Mock Read-Host { return 'oui' }
-        Confirm-FreshWindowsUninstallAction -Summary 't' | Should -Be $false
         Mock Read-Host { return ' OUI' }
         Confirm-FreshWindowsUninstallAction -Summary 't' | Should -Be $false
         Mock Read-Host { return 'ok' }

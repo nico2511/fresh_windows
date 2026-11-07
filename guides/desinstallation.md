@@ -69,15 +69,22 @@ Réinstallation après nettoyage : ajouter `-Confirmed -ReinstallAfter` (code so
 
 ### Vérification non destructive (Windows PS 5.1)
 
-Fichiers à télécharger depuis `main` (sans clone complet) :
+Utiliser le **SHA de la branche `feat/uninstall-procedure` (PR #61)** — pas `main` tant que la PR n’est pas fusionnée.
+
+Fichiers minimum (sans clone complet) :
 
 | Fichier | Rôle |
 |---------|------|
 | `scripts/lib/FreshWindows-Uninstall.ps1` | Logique testable hors admin en `-DryRun` |
-| `tests/Invoke-UninstallSafeHarness.ps1` | Lance sandbox sous `%TEMP%` + DryRun |
+| `tests/Invoke-UninstallSafeHarness.ps1` | Sandbox GUID sous `%TEMP%` + DryRun (aucun admin) |
+| `tests/Uninstall-NativeCsvProbe.ps1` | (Optionnel) Sonde `powershell.exe -File` + `-ImmuneProcessIdsCsv` |
 
 ```powershell
-powershell -NoProfile -File .\tests\Invoke-UninstallSafeHarness.ps1
+Set-ExecutionPolicy -Scope Process Bypass -Force
+cd chemin\vers\dossier_téléchargé
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Invoke-UninstallSafeHarness.ps1
+# Frontière native (remplacer 12345 par $PID) :
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Uninstall-NativeCsvProbe.ps1 -ImmuneProcessIdsCsv "12345"
 ```
 
 ## Méthode manuelle (sans script)
