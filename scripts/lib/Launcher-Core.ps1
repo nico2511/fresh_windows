@@ -337,3 +337,126 @@ exit /b 0
 
     return $true
 }
+
+function Confirm-FreshWindowsUninstallAction {
+    param(
+        [Parameter(Mandatory)][string]$Summary,
+        [string]$Prompt = 'Tape OUI pour confirmer, autre chose pour annuler'
+    )
+    Write-Host ''
+    Write-Host $Summary -ForegroundColor Yellow
+    Write-Host 'Conserve : apps winget, tweaks WinUtil/ShutUp10, CyberScribe et modeles externes.' -ForegroundColor DarkGray
+    if (Get-Command Wait-FreshWindowsBloatwareApplyConfirm -ErrorAction SilentlyContinue) {
+        return Wait-FreshWindowsBloatwareApplyConfirm -Prompt $Prompt
+    }
+    Write-Host $Prompt -ForegroundColor Yellow
+    $line = Read-Host
+    $n = ([string]$line).Trim().ToLowerInvariant()
+    if ($n -match '^(oui|ouais|ok|yes|confirme|valide|go)$') { return $true }
+    return $false
+}
+
+function Resolve-FreshWindowsUninstallScriptPath {
+    param(
+        [Parameter(Mandatory)][string]$RepoRawRoot,
+        [string]$LocalRepoRoot = ''
+    )
+    if (-not [string]::IsNullOrWhiteSpace($LocalRepoRoot)) {
+        $local = Join-Path $LocalRepoRoot 'scripts/Uninstall-FreshWindows.ps1'
+        if (Test-Path -LiteralPath $local) { return $local }
+    }
+    $dest = Join-Path $env:TEMP 'Uninstall-FreshWindows.ps1'
+    $url = "$RepoRawRoot/scripts/Uninstall-FreshWindows.ps1"
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+        try { Unblock-File -LiteralPath $dest -ErrorAction SilentlyContinue } catch { }
+        return $dest
+    }
+    catch {
+        throw "Telechargement Uninstall-FreshWindows.ps1 impossible : $($_.Exception.Message)"
+    }
+}
+
+function Invoke-FreshWindowsUninstallFromMenu {
+    param(
+        [switch]$DryRun,
+        [switch]$ReinstallAfter,
+        [Parameter(Mandatory)][string]$RepoRawRoot,
+        [string]$LocalRepoRoot = ''
+    )
+    $scriptPath = Resolve-FreshWindowsUninstallScriptPath -RepoRawRoot $RepoRawRoot -LocalRepoRoot $LocalRepoRoot
+    if (-not (Test-Path -LiteralPath $scriptPath)) {
+        throw "Script desinstallation introuvable."
+    }
+    $psi = 'powershell.exe'
+    $argList = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $scriptPath
+    )
+    if ($DryRun) { $argList += '-DryRun' }
+    if ($ReinstallAfter) { $argList += '-ReinstallAfter' }
+    if (-not $DryRun) { $argList += '-Confirmed' }
+    & $psi @argList
+    return $LASTEXITCODE
+}
+
+function Open-FreshWindowsUninstallMenu {
+    param(
+        [Parameter(Mandatory)][string]$RepoRawRoot,
+        [string]$LocalRepoRoot = ''
+    )
+    do {
+        Clear-Host
+        Write-Host '=== DESINSTALLATION FRESH WINDOWS ===' -ForegroundColor Cyan
+        Write-Host 'Retire agent, taches FreshWindows-*, cache %LOCALAPPDATA%\FreshWindows, raccourcis Fresh.' -ForegroundColor DarkGray
+        Write-Host 'Ne retire pas les apps winget, CyberScribe, ni les modeles vocaux externes.' -ForegroundColor DarkGray
+        Write-Host ''
+        Write-Host '1. Desinstaller puis reinstaller (launcher main GitHub)' -ForegroundColor Cyan
+        Write-Host '2. Desinstallation complete' -ForegroundColor Yellow
+        Write-Host '3. Simulation uniquement (DryRun)' -ForegroundColor Green
+        Write-Host '4. Retour' -ForegroundColor DarkGray
+        Write-Host ''
+        $c = Read-Host 'Choix'
+        switch ($c) {
+            '1' {
+                $summary = 'Desinstall puis relance le launcher officiel (branche main).'
+                if (-not (Confirm-FreshWindowsUninstallAction -Summary $summary)) {
+                    Write-Host 'Annule : aucune modification.' -ForegroundColor DarkYellow
+                    if (Get-Command Wait-ForUser -ErrorAction SilentlyContinue) { Wait-ForUser }
+                    continue
+                }
+                $code = Invoke-FreshWindowsUninstallFromMenu -ReinstallAfter -RepoRawRoot $RepoRawRoot -LocalRepoRoot $LocalRepoRoot
+                if ($code -eq 0) {
+                    Write-Host 'Desinstallation terminee. Fermeture du launcher (relance dans une nouvelle fenetre).' -ForegroundColor Green
+                    exit 0
+                }
+                if (Get-Command Wait-ForUser -ErrorAction SilentlyContinue) { Wait-ForUser }
+            }
+            '2' {
+                $summary = 'Desinstallation complete sans relance automatique.'
+                if (-not (Confirm-FreshWindowsUninstallAction -Summary $summary)) {
+                    Write-Host 'Annule : aucune modification.' -ForegroundColor DarkYellow
+                    if (Get-Command Wait-ForUser -ErrorAction SilentlyContinue) { Wait-ForUser }
+                    continue
+                }
+                $code = Invoke-FreshWindowsUninstallFromMenu -RepoRawRoot $RepoRawRoot -LocalRepoRoot $LocalRepoRoot
+                if ($code -eq 0) {
+                    Write-Host 'Desinstallation terminee. Vous pouvez relancer Fresh via le one-liner README.' -ForegroundColor Green
+                    exit 0
+                }
+                if (Get-Command Wait-ForUser -ErrorAction SilentlyContinue) { Wait-ForUser }
+            }
+            '3' {
+                $null = Invoke-FreshWindowsUninstallFromMenu -DryRun -RepoRawRoot $RepoRawRoot -LocalRepoRoot $LocalRepoRoot
+                if (Get-Command Wait-ForUser -ErrorAction SilentlyContinue) { Wait-ForUser }
+            }
+            '4' { return }
+            default {
+                Write-Host 'Choix invalide' -ForegroundColor Red
+                Start-Sleep 1
+            }
+        }
+    } while ($true)
+}

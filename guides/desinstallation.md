@@ -4,13 +4,13 @@ Ce guide décrit comment retirer Fresh Windows de la machine **sans** désinstal
 
 ## Ce qui est supprimé
 
-- L’**agent** (systray) et tout processus dont la ligne de commande contient `FreshWindows` ou `GameMode-Watch` (hors session PowerShell du script).
+- L’**agent** (systray) et les processus Fresh ciblés par chemin `%LOCALAPPDATA%\FreshWindows\` (Watch Agent, VoiceHost, stubs jeu, `voice_worker` sous `bin\` uniquement) — **pas** les apps tierces type CyberScribe installées ailleurs.
 - Les **tâches planifiées** dont le nom commence par `FreshWindows-*`, notamment :
   - `FreshWindows-SyncLocalScripts`
   - `FreshWindows-WatchAgent`
   - `FreshWindows-WingetUpgrade`
   - `FreshWindows-WinUtilReapply`
-- Les **raccourcis Bureau** « Fresh Windows » / `FreshWindows.lnk` (profil utilisateur et Bureau public).
+- Les **raccourcis Bureau** Fresh : « Fresh Windows » / `FreshWindows.lnk`, et `Mode Jeu.lnk` (profil utilisateur et Bureau public).
 - Le dossier **`%LOCALAPPDATA%\FreshWindows`** (scripts mis en cache, configs locales, logs).
 - Les dossiers temporaires de test **`%TEMP%\fw-test*`** s’ils existent.
 
@@ -20,11 +20,22 @@ Ce guide décrit comment retirer Fresh Windows de la machine **sans** désinstal
 - Les **réglages WinUtil** et **ShutUp10++** déjà appliqués : le script ne les annule pas.
 - Les **dossiers de modèles vocaux externes** éventuels (hors `%LOCALAPPDATA%\FreshWindows`), si vous les aviez placés ailleurs pour Piper / STT.
 
-## Méthode recommandée (script du dépôt)
+## Via le menu Fresh Windows (recommandé)
+
+1. Lancer le **launcher** en PowerShell **administrateur** (one-liner README ou raccourci Bureau).
+2. Choisir **12 — Désinstallation**.
+3. Options :
+   - **3 — Simulation (DryRun)** : aucune modification, prévisualisation des actions.
+   - **2 — Désinstallation complète** : confirmation **OUI** requise ; supprime l’installation locale Fresh puis quitte le launcher.
+   - **1 — Désinstaller puis réinstaller** : confirmation **OUI** ; nettoyage identique, puis relance du launcher officiel (**branche `main`**) dans une nouvelle fenêtre admin, via un stub dans `%ProgramData%\FreshWindows\` (hors du cache supprimé).
+4. Toute réponse autre que **oui / OUI** à la confirmation **annule** sans effet.
+
+## Méthode CLI (script du dépôt)
 
 1. Ouvrir **PowerShell en administrateur**.
 2. Lancer d’abord une **simulation** (`-DryRun`) : aucun fichier ni tâche n’est supprimé ; le script affiche ce qu’il ferait.
-3. Si la simulation convient, relancer **sans** `-DryRun` pour la suppression réelle.
+3. Pour une suppression réelle : ajouter **`-Confirmed`** (obligatoire hors DryRun).
+4. Pour **réinstaller ensuite** : `-Confirmed -ReinstallAfter` (relance `main` uniquement après vérification du nettoyage).
 
 Depuis une copie locale du dépôt :
 
