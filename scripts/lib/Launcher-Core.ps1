@@ -341,19 +341,14 @@ exit /b 0
 function Confirm-FreshWindowsUninstallAction {
     param(
         [Parameter(Mandatory)][string]$Summary,
-        [string]$Prompt = 'Tape OUI pour confirmer, autre chose pour annuler'
+        [string]$Prompt = 'Tape exactement OUI pour confirmer (toute autre reponse annule)'
     )
     Write-Host ''
     Write-Host $Summary -ForegroundColor Yellow
     Write-Host 'Conserve : apps winget, tweaks WinUtil/ShutUp10, CyberScribe et modeles externes.' -ForegroundColor DarkGray
-    if (Get-Command Wait-FreshWindowsBloatwareApplyConfirm -ErrorAction SilentlyContinue) {
-        return Wait-FreshWindowsBloatwareApplyConfirm -Prompt $Prompt
-    }
     Write-Host $Prompt -ForegroundColor Yellow
     $line = Read-Host
-    $n = ([string]$line).Trim().ToLowerInvariant()
-    if ($n -match '^(oui|ouais|ok|yes|confirme|valide|go)$') { return $true }
-    return $false
+    return ([string]$line).Trim() -ceq 'OUI'
 }
 
 function Resolve-FreshWindowsUninstallScriptPath {
@@ -389,11 +384,16 @@ function Invoke-FreshWindowsUninstallFromMenu {
     if (-not (Test-Path -LiteralPath $scriptPath)) {
         throw "Script desinstallation introuvable."
     }
+    $tempRoot = $env:TEMP
+    if ([string]::IsNullOrWhiteSpace($tempRoot)) { throw 'TEMP indisponible pour lancer la desinstallation.' }
+    $runPath = Join-Path $tempRoot ("Uninstall-FreshWindows-{0}.ps1" -f [guid]::NewGuid().ToString('N'))
+    Copy-Item -LiteralPath $scriptPath -Destination $runPath -Force
+    try { Unblock-File -LiteralPath $runPath -ErrorAction SilentlyContinue } catch { }
     $psi = 'powershell.exe'
     $argList = @(
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
-        '-File', $scriptPath
+        '-File', $runPath
     )
     if ($DryRun) { $argList += '-DryRun' }
     if ($ReinstallAfter) { $argList += '-ReinstallAfter' }

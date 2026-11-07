@@ -27,8 +27,8 @@ Ce guide décrit comment retirer Fresh Windows de la machine **sans** désinstal
 3. Options :
    - **3 — Simulation (DryRun)** : aucune modification, prévisualisation des actions.
    - **2 — Désinstallation complète** : confirmation **OUI** requise ; supprime l’installation locale Fresh puis quitte le launcher.
-   - **1 — Désinstaller puis réinstaller** : confirmation **OUI** ; nettoyage identique, puis relance du launcher officiel (**branche `main`**) dans une nouvelle fenêtre admin, via un stub dans `%ProgramData%\FreshWindows\` (hors du cache supprimé).
-4. Toute réponse autre que **oui / OUI** à la confirmation **annule** sans effet.
+   - **1 — Désinstaller puis réinstaller** : taper exactement **OUI** ; nettoyage vérifié puis relance du launcher **`main`** via un stub temporaire sous `%TEMP%\FreshWindows-Reinstall-*\` (auto-nettoyé, hors cache supprimé).
+4. Seule la saisie exacte **OUI** confirme ; toute autre réponse **annule** sans effet.
 
 ## Méthode CLI (script du dépôt)
 
