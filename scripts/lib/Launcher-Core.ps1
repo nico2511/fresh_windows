@@ -359,10 +359,6 @@ function Import-FreshMaintenanceModules {
             Sync-GameModeLocalScripts -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $Ref -IconUrl $IconUrl | Out-Null
         }
     }
-    $known = @{}
-    foreach ($cmd in @(Get-Command -CommandType Function -ErrorAction SilentlyContinue)) {
-        $known[$cmd.Name] = $true
-    }
     foreach ($rel in @(
             'FreshAgent-MaintenanceConfig.ps1',
             'FreshAgent-Health.ps1',
@@ -371,11 +367,15 @@ function Import-FreshMaintenanceModules {
         )) {
         $p = Join-Path $FreshAppData "lib\$rel"
         if (-not (Test-Path -LiteralPath $p)) { continue }
+        $before = @{}
+        foreach ($cmd in @(Get-Command -CommandType Function -ErrorAction SilentlyContinue)) {
+            if ($cmd.ModuleName) { continue }
+            $before[$cmd.Name] = $cmd.ScriptBlock.ToString()
+        }
         . $p
         foreach ($cmd in @(Get-Command -CommandType Function -ErrorAction SilentlyContinue)) {
-            if ($known.ContainsKey($cmd.Name)) { continue }
-            $known[$cmd.Name] = $true
             if ($cmd.ModuleName) { continue }
+            if ($before.ContainsKey($cmd.Name) -and $before[$cmd.Name] -eq $cmd.ScriptBlock.ToString()) { continue }
             $dest = "Function:\Global:$($cmd.Name)"
             Set-Item -LiteralPath $dest -Value $cmd.ScriptBlock -Force
         }
@@ -383,19 +383,21 @@ function Import-FreshMaintenanceModules {
     return [bool](Get-Command Invoke-FreshAgentCleanup -ErrorAction SilentlyContinue)
 }
 
+function Test-FreshWindowsWingetBusyForMaintenance {
+    foreach ($n in @('winget', 'WindowsPackageManager', 'AppInstaller')) {
+        if (Get-Process -Name $n -ErrorAction SilentlyContinue) { return $true }
+    }
+    return $false
+}
+
 function Wait-FreshWindowsWingetIdleForMaintenance {
     param(
         [int]$MaxWaitSeconds = 900,
         [int]$PollSeconds = 15
     )
-    $names = @('winget', 'WindowsPackageManager', 'AppInstaller')
     $deadline = (Get-Date).AddSeconds($MaxWaitSeconds)
     while ((Get-Date) -lt $deadline) {
-        $busy = $false
-        foreach ($n in $names) {
-            if (Get-Process -Name $n -ErrorAction SilentlyContinue) { $busy = $true; break }
-        }
-        if (-not $busy) { return $true }
+        if (-not (Test-FreshWindowsWingetBusyForMaintenance)) { return $true }
         Start-Sleep -Seconds $PollSeconds
     }
     return $false
@@ -449,9 +451,28 @@ function Start-FreshWindowsUnelevated {
     if (-not (Test-Path -LiteralPath $cmdPath)) {
         throw "Start-WatchAgent.cmd introuvable (sync menu 11 d'abord)."
     }
-    Start-Process -FilePath "$env:SystemRoot\System32\runas.exe" `
-        -ArgumentList "/trustlevel:0x20000 `"$cmdPath`"" `
-        -WorkingDirectory $WorkingDirectory
+    try {
+        Start-Process -FilePath "$env:SystemRoot\System32\runas.exe" `
+            -ArgumentList "/trustlevel:0x20000 `"$cmdPath`"" `
+            -WorkingDirectory $WorkingDirectory `
+            -ErrorAction Stop
+    }
+    catch {
+        Write-Warning ("Agent maintenance : echec runas : {0}" -f $_.Exception.Message)
+        return $false
+    }
+    Start-Sleep -Seconds 2
+    $alive = $false
+    try {
+        $alive = [bool](Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -and $_.CommandLine -match 'Launch-GameModeWatch|GameMode-WatchAgent|Start-WatchAgent' })
+    }
+    catch { }
+    if (-not $alive) {
+        Write-Host 'Agent maintenance : demarrage immediat non confirme (tache AtLogOn au prochain logon si installee).' -ForegroundColor Yellow
+        return $false
+    }
+    return $true
 }
 
 function Register-FreshWindowsWatchAgentLogon {

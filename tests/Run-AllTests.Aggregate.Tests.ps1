@@ -1,17 +1,9 @@
 #Requires -Version 5.1
 
-Describe 'Run-AllTests aggregate' {
+Describe 'Run-AllTests aggregate (code partage)' {
     BeforeAll {
-        function script:Test-FreshWindowsPesterSuiteFailed {
-            param($Result)
-            $badCount = 0
-            try { $badCount = [int]$Result.FailedCount } catch { $badCount = 1 }
-            $resultName = ''
-            try { $resultName = [string]$Result.Result } catch { $resultName = 'Failed' }
-            if ($badCount -gt 0) { return $true }
-            if ($resultName -eq 'Failed') { return $true }
-            return $false
-        }
+        $root = Split-Path $PSCommandPath -Parent
+        . (Join-Path $root 'lib/FreshWindows-RunAggregate.ps1')
     }
     It 'echoue si Result Failed meme avec FailedCount 0' {
         $r = [pscustomobject]@{ FailedCount = 0; Result = 'Failed' }

@@ -840,6 +840,19 @@ function Invoke-WatchTempCleanupMenu {
         Show-Balloon -Title 'Nettoyage' -Text 'Module optimise indisponible.' -Icon Warning
         return
     }
+    $wingetBusy = $false
+    if (Get-Command Test-FreshWindowsWingetBusyForMaintenance -ErrorAction SilentlyContinue) {
+        $wingetBusy = [bool](Test-FreshWindowsWingetBusyForMaintenance)
+    }
+    else {
+        foreach ($n in @('winget', 'WindowsPackageManager', 'AppInstaller')) {
+            if (Get-Process -Name $n -ErrorAction SilentlyContinue) { $wingetBusy = $true; break }
+        }
+    }
+    if ($wingetBusy) {
+        Show-Balloon -Title 'Nettoyage' -Text 'Differe : winget actif (reessayez plus tard).' -Icon Warning
+        return
+    }
     try {
         $r = Invoke-FreshAgentCleanup -Temp
         $msg = if ($r -and $r.message) { [string]$r.message } else { 'Nettoyage temporaires termine.' }

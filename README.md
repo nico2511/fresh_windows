@@ -159,7 +159,15 @@ Config : `configs/game-mode-kill.json` (domaines, protections, familles de launc
 Scripts locaux : `%LOCALAPPDATA%\FreshWindows\` + marqueurs `scripts.ref` / `scripts.stamp` (epoch aligné sur `FreshWindowsLibEpoch`).
 
 - Nettoyage apps préinstallées (générique, dry-run d’abord) : [guides/appx-bloatware.md](guides/appx-bloatware.md)
-- Sync : `scripts/Sync-FreshWindowsAgent.ps1` ou tâche `FreshWindows-SyncLocalScripts` (supprime les anciens artefacts agent/IA sous AppData).
+- Sync : `scripts/Sync-FreshWindowsAgent.ps1` ou tâche `FreshWindows-SyncLocalScripts` (supprime les anciens artefacts agent/IA/voix sous AppData).
+
+### Agent maintenance (systray)
+
+Un seul mutex `Global\FreshWindowsWatchAgent` : une seconde instance quitte immédiatement. Les anciens noms de mutex (ex. `Global\FreshAgentWatchAgent`, `…-FreshWindows`) sont détectés pour éviter deux icônes lors de la migration.
+
+**Ordre au démarrage :** contrôle STA (relance en `-STA` si besoin, puis `exit` du processus parent) → mono-instance (pairs WMI, puis mutex) → dot-source `lib\Launcher-Core.ps1` (arrêt voix/ancien watch) → icône. La migration depuis un ancien agent IA repose surtout sur la préparation lancée depuis le **menu 11 → 3** (`Start-FreshWindowsUnelevated`) ou un redémarrage de session (tâche AtLogOn).
+
+**Nettoyage systray :** si `winget` / `WindowsPackageManager` / `AppInstaller` tourne, le menu affiche « Différé » sans attendre ni vider `%TEMP%` (le menu 11 et la maintenance hebdo attendent jusqu’à 15 min puis diffèrent si besoin).
 
 ---
 

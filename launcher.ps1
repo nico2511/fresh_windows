@@ -1395,8 +1395,10 @@ function Install-GameModeShortcuts {
                 }
             }
             try {
-                Start-FreshWindowsUnelevated -FilePath $watchStub -WorkingDirectory $FreshAppData
-                Write-Host "Agent lance (systray Fresh Maintenance)." -ForegroundColor DarkCyan
+                $started = Start-FreshWindowsUnelevated -FilePath $watchStub -WorkingDirectory $FreshAppData
+                if ($started) {
+                    Write-Host "Agent lance (systray Fresh Maintenance)." -ForegroundColor DarkCyan
+                }
             }
             catch {
                 Write-Host "Lancement immediat echoue : $($_.Exception.Message)" -ForegroundColor DarkYellow
