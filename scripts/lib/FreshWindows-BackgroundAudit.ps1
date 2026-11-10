@@ -16,12 +16,7 @@ function Test-FreshWindowsBackgroundAuditOnWindows {
 }
 
 function Get-FreshWindowsBackgroundJournalPath {
-    param([string]$FreshAppData = $(if (Get-Command Get-FreshAgentAppDataRoot -ErrorAction SilentlyContinue) {
-            Get-FreshAgentAppDataRoot
-        }
-        else {
-            Join-Path $env:LOCALAPPDATA 'FreshWindows'
-        }))
+    param([string]$FreshAppData = $(Join-Path $env:LOCALAPPDATA 'FreshWindows'))
     return (Join-Path $FreshAppData 'background-audit-journal.jsonl')
 }
 
@@ -29,7 +24,6 @@ function Get-FreshWindowsBackgroundCatalog {
     <#
       Metadonnees issues du depot (voir guides/background-audit.md).
     #>
-    $startupName = 'Fresh Windows Surveillance.lnk'
     return @(
         @{
             Id              = 'scheduled-task-winget'
@@ -69,175 +63,6 @@ function Get-FreshWindowsBackgroundCatalog {
             DisablePs       = "Disable-ScheduledTask -TaskName 'FreshWindows-SyncLocalScripts'"
             EnablePs        = "Enable-ScheduledTask -TaskName 'FreshWindows-SyncLocalScripts'"
             ApplySupported  = $true
-        },
-        @{
-            Id              = 'scheduled-task-watch-agent'
-            Name            = 'FreshWindows-WatchAgent'
-            Type            = 'ScheduledTask'
-            Frequency       = 'A la connexion (delai 45 s)'
-            Account         = 'Utilisateur courant (Limited)'
-            Impact          = 'Eleve (demarre l agent systray a chaque session)'
-            Source          = 'launcher.ps1 (Register-FreshWindowsWatchAgentLogon)'
-            VerifyPs        = "Get-ScheduledTask -TaskName 'FreshWindows-WatchAgent' -ErrorAction SilentlyContinue | Format-List TaskName,State,Actions"
-            DisablePs       = "Disable-ScheduledTask -TaskName 'FreshWindows-WatchAgent'"
-            EnablePs        = "Enable-ScheduledTask -TaskName 'FreshWindows-WatchAgent'"
-            ApplySupported  = $true
-        },
-        @{
-            Id              = 'startup-watch-agent-lnk'
-            Name            = $startupName
-            Type            = 'StartupFolder'
-            Frequency       = 'A chaque connexion (fallback si tache absente)'
-            Account         = 'Utilisateur courant'
-            Impact          = 'Eleve (double agent si tache + Startup)'
-            Source          = 'launcher.ps1 (Install-GameModeShortcuts fallback)'
-            VerifyPs        = '$p = Join-Path ([Environment]::GetFolderPath(''Startup'')) ''Fresh Windows Surveillance.lnk''; Test-Path -LiteralPath $p'
-            DisablePs       = '# Deplace vers backup FreshWindows (via -Apply du script audit)'
-            EnablePs        = '# Restaure depuis journal (-Restore)'
-            ApplySupported  = $true
-        },
-        @{
-            Id              = 'prefs-monitor-off'
-            Name            = 'watch-agent-user.json :: monitorEnabled'
-            Type            = 'UserPrefs'
-            Frequency       = 'Effet immediat (agent deja lance)'
-            Account         = 'N/A'
-            Impact          = 'Moyen (arrete scan CPU/RAM/disque toutes les ~12 s)'
-            Source          = 'scripts/GameMode-WatchAgent.ps1'
-            VerifyPs        = '$p = Join-Path $env:LOCALAPPDATA ''FreshWindows\watch-agent-user.json''; if (Test-Path $p) { Get-Content $p -Raw } else { ''defaut monitorEnabled=true'' }'
-            DisablePs       = '# Met monitorEnabled=false via -Apply'
-            EnablePs        = '# Restaure valeur precedente via -Restore'
-            ApplySupported  = $true
-        },
-        @{
-            Id              = 'prefs-ai-off'
-            Name            = 'agent-ai.user.json :: enabled'
-            Type            = 'UserPrefs'
-            Frequency       = 'Au prochain cycle IA'
-            Account         = 'N/A'
-            Impact          = 'Eleve (evite demarrage Ollama auto)'
-            Source          = 'scripts/lib/FreshAgent-AiLifecycle.ps1'
-            VerifyPs        = '$p = Join-Path $env:LOCALAPPDATA ''FreshWindows\agent-ai.user.json''; if (Test-Path $p) { (Get-Content $p -Raw | ConvertFrom-Json).enabled } else { ''defaut repo: false'' }'
-            DisablePs       = '# Met enabled=false via -Apply'
-            EnablePs        = '# Restaure via -Restore'
-            ApplySupported  = $true
-        },
-        @{
-            Id              = 'prefs-voice-off'
-            Name            = 'agent-ai.user.json :: voice.enabled'
-            Type            = 'UserPrefs'
-            Frequency       = 'Au prochain toggle voix'
-            Account         = 'N/A'
-            Impact          = 'Eleve (arrete timers STT / voice_worker)'
-            Source          = 'configs/agent-ai.json + scripts/ai/FreshAgent-VoiceWorker.ps1'
-            VerifyPs        = '$p = Join-Path $env:LOCALAPPDATA ''FreshWindows\agent-ai.user.json''; if (Test-Path $p) { $j = Get-Content $p -Raw | ConvertFrom-Json; $j.voice.enabled } else { ''defaut repo: false'' }'
-            DisablePs       = '# Met voice.enabled=false via -Apply'
-            EnablePs        = '# Restaure via -Restore'
-            ApplySupported  = $true
-        },
-        @{
-            Id              = 'process-watch-agent'
-            Name            = 'GameMode-WatchAgent.ps1 (powershell -STA)'
-            Type            = 'ResidentProcess'
-            Frequency       = 'Permanent tant que systray actif'
-            Account         = 'Utilisateur courant'
-            Impact          = 'Moyen a eleve (timers UI, scan processus si surveillance ON)'
-            Source          = 'scripts/GameMode-WatchAgent.ps1'
-            VerifyPs        = 'Get-CimInstance Win32_Process -Filter "Name=''powershell.exe''" | Where-Object { $_.CommandLine -match ''GameMode-WatchAgent|Launch-GameModeWatch'' } | Select-Object ProcessId,CommandLine'
-            DisablePs       = 'Arreter via menu systray Quitter (pas de kill auto -Apply)'
-            EnablePs        = 'Start-WatchAgent.cmd ou tache FreshWindows-WatchAgent'
-            ApplySupported  = $false
-        },
-        @{
-            Id              = 'process-voice-worker'
-            Name            = 'voice_worker.exe'
-            Type            = 'ResidentProcess'
-            Frequency       = 'Quand ecoute vocale active'
-            Account         = 'Utilisateur courant'
-            Impact          = 'Eleve (faster-whisper / STT, CPU+RAM)'
-            Source          = 'scripts/ai/FreshAgent-VoiceWorker.ps1'
-            VerifyPs        = 'Get-Process -Name voice_worker -ErrorAction SilentlyContinue | Select-Object Id,CPU,WS'
-            DisablePs       = 'Ecoute OFF dans le tray ou prefs-voice-off (-Apply)'
-            EnablePs        = 'Ecoute ON dans le tray'
-            ApplySupported  = $false
-        },
-        @{
-            Id              = 'process-ollama'
-            Name            = 'ollama / ollama app.exe'
-            Type            = 'ResidentProcess'
-            Frequency       = 'Si IA activee (autoStart)'
-            Account         = 'Utilisateur courant'
-            Impact          = 'Eleve (modele en RAM, CPU inference)'
-            Source          = 'scripts/ai/Ollama-Manager.ps1'
-            VerifyPs        = 'Get-Process -Name ollama,''ollama app'' -ErrorAction SilentlyContinue; Test-OllamaApi'
-            DisablePs       = 'prefs-ai-off (-Apply) ou quitter Ollama tray'
-            EnablePs        = 'Activer IA dans le tray'
-            ApplySupported  = $false
-        },
-        @{
-            Id              = 'timer-watch-poll'
-            Name            = 'WatchPollTimer'
-            Type            = 'WinFormsTimer'
-            Frequency       = 'max(5 s, pollIntervalSeconds) — defaut 12 s'
-            Account         = 'N/A'
-            Impact          = 'Moyen (Get-Process + suivi CPU si surveillance ON)'
-            Source          = 'scripts/GameMode-WatchAgent.ps1 + configs/game-mode-watch.json'
-            VerifyPs        = '# Actif dans le process WatchAgent; prefs-monitor-off pour couper le scan'
-            DisablePs       = 'prefs-monitor-off ou Surveillance OFF (menu tray)'
-            EnablePs        = 'Surveillance ON'
-            ApplySupported  = $false
-        },
-        @{
-            Id              = 'timer-ptt-hotkey'
-            Name            = 'FaPttTimer'
-            Type            = 'WinFormsTimer'
-            Frequency       = '100 ms si PTT actif (ecoute vocale)'
-            Account         = 'N/A'
-            Impact          = 'Faible a moyen'
-            Source          = 'scripts/ai/FreshAgent-VoiceWorker.ps1'
-            VerifyPs        = '# Present seulement si ecoute + push-to-talk'
-            DisablePs       = 'prefs-voice-off'
-            EnablePs        = 'N/A'
-            ApplySupported  = $false
-        },
-        @{
-            Id              = 'timer-stt-poll'
-            Name            = 'FaSttPollTimer'
-            Type            = 'WinFormsTimer'
-            Frequency       = '400 ms pendant ecoute'
-            Account         = 'N/A'
-            Impact          = 'Moyen'
-            Source          = 'scripts/GameMode-WatchAgent.ps1'
-            VerifyPs        = '# Present pendant session STT'
-            DisablePs       = 'prefs-voice-off'
-            EnablePs        = 'N/A'
-            ApplySupported  = $false
-        },
-        @{
-            Id              = 'maintenance-weekly-report'
-            Name            = 'Rapport sante hebdomadaire'
-            Type            = 'Maintenance'
-            Frequency       = 'Toutes les 7 j (tick agent)'
-            Account         = 'N/A'
-            Impact          = 'Faible (snapshot CIM + fichier texte)'
-            Source          = 'scripts/lib/FreshAgent-Optimize.ps1'
-            VerifyPs        = 'Get-Item ''$env:LOCALAPPDATA\FreshWindows\weekly-health-last.json'' -ErrorAction SilentlyContinue'
-            DisablePs       = 'N/A (informatif)'
-            EnablePs        = 'N/A'
-            ApplySupported  = $false
-        },
-        @{
-            Id              = 'bg-worker-ollama'
-            Name            = 'FreshAgent-BackgroundWorker.ps1'
-            Type            = 'ChildProcess'
-            Frequency       = 'A la demande (EnsureModel, RAG, StartOllama)'
-            Account         = 'Utilisateur courant'
-            Impact          = 'Eleve pendant pull / index RAG'
-            Source          = 'scripts/ai/FreshAgent-BackgroundWorker.ps1'
-            VerifyPs        = 'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match ''FreshAgent-BackgroundWorker'' }'
-            DisablePs       = 'Attendre fin ou desactiver IA'
-            EnablePs        = 'N/A'
-            ApplySupported  = $false
         }
     )
 }
@@ -246,8 +71,7 @@ function Get-FreshWindowsBackgroundTaskNames {
     return @(
         'FreshWindows-WingetUpgrade',
         'FreshWindows-WinUtilReapply',
-        'FreshWindows-SyncLocalScripts',
-        'FreshWindows-WatchAgent'
+        'FreshWindows-SyncLocalScripts'
     )
 }
 
@@ -258,11 +82,11 @@ function Test-FreshWindowsScheduledTaskIsFresh {
 
 function Get-FreshWindowsBackgroundScheduledTaskState {
     param([Parameter(Mandatory)][string]$TaskName)
-    if (-not (Test-FreshWindowsBackgroundAuditOnWindows)) {
-        return @{ present = $false; state = 'N/A'; lastRun = $null; nextRun = $null }
-    }
     if (-not (Test-FreshWindowsScheduledTaskIsFresh -TaskName $TaskName)) {
         throw "Tache hors perimetre Fresh Windows : $TaskName"
+    }
+    if (-not (Test-FreshWindowsBackgroundAuditOnWindows)) {
+        return @{ present = $false; state = 'N/A'; lastRun = $null; nextRun = $null }
     }
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if (-not $task) {
@@ -511,29 +335,14 @@ function Resolve-FreshWindowsKnownProcessRole {
     $cl = [string]$CommandLine
     if ([string]::IsNullOrWhiteSpace($cl)) { return $null }
 
-    if ($cl -match '(?i)GameMode-WatchAgent|Launch-GameModeWatch|Start-WatchAgent\.cmd') {
-        return 'agent systray'
-    }
-    if ($cl -match 'FreshAgent-BackgroundWorker') { return 'worker' }
-    if ($cl -match 'FreshAgent-VoiceWorker|FreshAgent-VoiceHost|voice_worker') { return 'voix' }
-    if ($cl -match '(?i)idle-ai-run\.ps1') { return 'worker' }
-
     if (-not [string]::IsNullOrWhiteSpace($FreshAppData)) {
         $freshNorm = $FreshAppData.TrimEnd('\')
         if ($cl -like "*$freshNorm*") {
-            if ($cl -match '(?i)Invoke-FreshWindowsBackgroundAudit|Sync-FreshWindowsAgent\.ps1|Launch-FreshWindows\.ps1|Register-WatchAgentTask|Launch-GameModeKill') {
-                return $null
+            if ($cl -match '(?i)Invoke-FreshWindowsBackgroundAudit|Sync-FreshWindowsAgent\.ps1|Launch-FreshWindows\.ps1|Launch-GameModeKill|Invoke-GameModeKill') {
+                return 'maintenance'
             }
-            if ($cl -match '(?i)FreshAgent-BackgroundWorker') { return 'worker' }
-            if ($cl -match '(?i)FreshAgent-VoiceWorker|FreshAgent-VoiceHost') { return 'voix' }
-            if ($cl -match '(?i)GameMode-WatchAgent|Launch-GameModeWatch') { return 'agent systray' }
         }
     }
-
-    $pn = ([string]$ProcessName).ToLowerInvariant()
-    if ($pn -eq 'voice_worker.exe') { return 'voix' }
-    if ($pn -eq 'ollama.exe' -or $pn -eq 'ollama app.exe') { return 'ollama' }
-    if ($cl -match '(?i)ollama') { return 'ollama' }
     return $null
 }
 
@@ -592,39 +401,6 @@ function Get-FreshWindowsFreshProcesses {
     }
     catch { }
 
-    foreach ($vw in @(Get-Process -Name 'voice_worker' -ErrorAction SilentlyContinue)) {
-        if ($vw.Id -eq $PID) { continue }
-        if ($seenPids.ContainsKey($vw.Id)) { continue }
-        $path = ''
-        try { $path = $vw.MainModule.FileName } catch { }
-        $found += [ordered]@{
-            role    = 'voix'
-            pid     = $vw.Id
-            name    = $vw.ProcessName
-            cpu     = $vw.CPU
-            wsMb    = [math]::Round($vw.WorkingSet64 / 1MB, 1)
-            cmdLine = if ($path) { $path } else { 'voice_worker.exe' }
-        }
-        $seenPids[$vw.Id] = $true
-    }
-
-    foreach ($ollamaName in @('ollama', 'ollama app')) {
-        foreach ($op in @(Get-Process -Name $ollamaName -ErrorAction SilentlyContinue)) {
-            if ($op.Id -eq $PID) { continue }
-            if ($seenPids.ContainsKey($op.Id)) { continue }
-            $path = ''
-            try { $path = $op.MainModule.FileName } catch { }
-            $found += [ordered]@{
-                role    = 'ollama'
-                pid     = $op.Id
-                name    = $op.ProcessName
-                cpu     = $op.CPU
-                wsMb    = [math]::Round($op.WorkingSet64 / 1MB, 1)
-                cmdLine = if ($path) { $path } else { $ollamaName }
-            }
-            $seenPids[$op.Id] = $true
-        }
-    }
     return @($found)
 }
 
@@ -636,43 +412,11 @@ function Get-FreshWindowsBackgroundMachineState {
         $tasks[$tn] = Get-FreshWindowsBackgroundScheduledTaskState -TaskName $tn
     }
 
-    $startupPath = Get-FreshWindowsBackgroundStartupLnkPath
-    $watchUserPath = Join-Path $FreshAppData 'watch-agent-user.json'
-    $aiUserPath = Join-Path $FreshAppData 'agent-ai.user.json'
-    $watchUser = Read-FreshWindowsJsonFile -Path $watchUserPath
-    $aiUser = Read-FreshWindowsJsonFile -Path $aiUserPath
-    $memorySnapshot = $null
-    try {
-        $memorySnapshot = Get-FreshWindowsAgentMemorySnapshot -FreshAppData $FreshAppData
-    }
-    catch { }
-
-    $monitorEnabled = $true
-    if ($watchUser -and $null -ne $watchUser.monitorEnabled) { $monitorEnabled = [bool]$watchUser.monitorEnabled }
-    $aiEnabled = $null
-    $voiceEnabled = $null
-    if ($aiUser) {
-        if ($null -ne $aiUser.enabled) { $aiEnabled = [bool]$aiUser.enabled }
-        if ($aiUser.voice -and $null -ne $aiUser.voice.enabled) { $voiceEnabled = [bool]$aiUser.voice.enabled }
-    }
-
     return [ordered]@{
-        at              = (Get-Date).ToString('o')
-        freshAppData    = $FreshAppData
-        scheduledTasks  = $tasks
-        startupLnk      = @{
-            path    = $startupPath
-            present = (Test-Path -LiteralPath $startupPath)
-        }
-        prefs           = @{
-            monitorEnabled = $monitorEnabled
-            aiEnabled      = $aiEnabled
-            voiceEnabled   = $voiceEnabled
-            watchUserPath  = $watchUserPath
-            aiUserPath     = $aiUserPath
-        }
-        freshProcesses  = @(Get-FreshWindowsFreshProcesses -FreshAppData $FreshAppData)
-        agentMemory     = $memorySnapshot
+        at             = (Get-Date).ToString('o')
+        freshAppData   = $FreshAppData
+        scheduledTasks = $tasks
+        freshProcesses = @(Get-FreshWindowsFreshProcesses -FreshAppData $FreshAppData)
     }
 }
 
@@ -692,14 +436,6 @@ function Format-FreshWindowsBackgroundAuditText {
         [void]$lines.Add(('  {0} : {1} (derniere={2}, prochaine={3})' -f $tn, $st.state, $st.lastRun, $st.nextRun))
     }
     [void]$lines.Add('')
-    [void]$lines.Add('--- Startup ---')
-    [void]$lines.Add(('  {0} : {1}' -f $MachineState.startupLnk.path, $(if ($MachineState.startupLnk.present) { 'present' } else { 'absent' })))
-    [void]$lines.Add('')
-    [void]$lines.Add('--- Preferences utilisateur ---')
-    [void]$lines.Add(('  monitorEnabled : {0}' -f $MachineState.prefs.monitorEnabled))
-    [void]$lines.Add(('  ai.enabled     : {0}' -f $(if ($null -eq $MachineState.prefs.aiEnabled) { '(defaut repo)' } else { $MachineState.prefs.aiEnabled })))
-    [void]$lines.Add(('  voice.enabled  : {0}' -f $(if ($null -eq $MachineState.prefs.voiceEnabled) { '(defaut repo)' } else { $MachineState.prefs.voiceEnabled })))
-    [void]$lines.Add('')
     [void]$lines.Add('--- Processus Fresh (CPU temps user, WS Mo) ---')
     if ($MachineState.freshProcesses.Count -eq 0) {
         [void]$lines.Add('  (aucun detecte)')
@@ -709,8 +445,6 @@ function Format-FreshWindowsBackgroundAuditText {
             [void]$lines.Add(('  [{0}] PID {1} {2} CPU={3} WS={4} Mo' -f $fp.role, $fp.pid, $fp.name, $fp.cpu, $fp.wsMb))
         }
     }
-    [void]$lines.Add('')
-    [void]$lines.Add((Format-FreshWindowsAgentMemorySection -MemorySnapshot $MachineState.agentMemory))
     [void]$lines.Add('')
     [void]$lines.Add('--- Catalogue (impact decroissant, extrait) ---')
     foreach ($c in ($Catalog | Sort-Object { switch ($_.Impact) { 'Eleve' { 0 } 'Moyen a eleve' { 1 } 'Moyen' { 2 } default { 3 } } })) {
@@ -791,52 +525,6 @@ function Invoke-FreshWindowsBackgroundCatalogApply {
             $entry = Add-FreshWindowsBackgroundJournalEntry -Action 'disable-task' -TargetId $TargetId `
                 -Before $before -After $after -FreshAppData $FreshAppData
             return @{ ok = $true; message = "Tache desactivee : $taskName"; entry = $entry }
-        }
-        '^startup-watch-agent-lnk$' {
-            $lnk = Get-FreshWindowsBackgroundStartupLnkPath
-            $before = @{ present = (Test-Path -LiteralPath $lnk); path = $lnk }
-            if (-not $before.present) {
-                return @{ ok = $false; message = 'Raccourci Startup deja absent.'; entry = $null }
-            }
-            $backupDir = Join-Path $FreshAppData 'background-audit-backup'
-            New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
-            $backup = Join-Path $backupDir 'Fresh Windows Surveillance.lnk'
-            Move-Item -LiteralPath $lnk -Destination $backup -Force
-            $after = @{ present = $false; backup = $backup }
-            $entry = Add-FreshWindowsBackgroundJournalEntry -Action 'move-startup-lnk' -TargetId $TargetId `
-                -Before $before -After $after -FreshAppData $FreshAppData
-            return @{ ok = $true; message = "Startup deplace vers $backup"; entry = $entry }
-        }
-        '^prefs-monitor-off$' {
-            $path = Join-Path $FreshAppData 'watch-agent-user.json'
-            $beforeObj = Read-FreshWindowsJsonFile -Path $path
-            $before = @{ path = $path; monitorEnabled = $(if ($beforeObj -and $null -ne $beforeObj.monitorEnabled) { [bool]$beforeObj.monitorEnabled } else { $true }) }
-            $patch = @{ monitorEnabled = $false }
-            $merged = Merge-FreshWindowsJsonPatch -Existing $beforeObj -Patch $patch
-            Write-FreshWindowsJsonFile -Path $path -Object $merged
-            $entry = Add-FreshWindowsBackgroundJournalEntry -Action 'set-pref' -TargetId $TargetId -Before $before `
-                -After @{ monitorEnabled = $false } -FreshAppData $FreshAppData
-            return @{ ok = $true; message = 'monitorEnabled=false'; entry = $entry }
-        }
-        '^prefs-ai-off$' {
-            $path = Join-Path $FreshAppData 'agent-ai.user.json'
-            $beforeObj = Read-FreshWindowsJsonFile -Path $path
-            $beforeVal = if ($beforeObj -and $null -ne $beforeObj.enabled) { [bool]$beforeObj.enabled } else { $null }
-            $merged = Merge-FreshWindowsJsonPatch -Existing $beforeObj -Patch @{ enabled = $false }
-            Write-FreshWindowsJsonFile -Path $path -Object $merged
-            $entry = Add-FreshWindowsBackgroundJournalEntry -Action 'set-pref' -TargetId $TargetId `
-                -Before @{ enabled = $beforeVal } -After @{ enabled = $false } -FreshAppData $FreshAppData
-            return @{ ok = $true; message = 'IA enabled=false'; entry = $entry }
-        }
-        '^prefs-voice-off$' {
-            $path = Join-Path $FreshAppData 'agent-ai.user.json'
-            $beforeObj = Read-FreshWindowsJsonFile -Path $path
-            $beforeVal = if ($beforeObj -and $beforeObj.voice -and $null -ne $beforeObj.voice.enabled) { [bool]$beforeObj.voice.enabled } else { $null }
-            $merged = Merge-FreshWindowsJsonPatch -Existing $beforeObj -Patch @{ voice = @{ enabled = $false } }
-            Write-FreshWindowsJsonFile -Path $path -Object $merged
-            $entry = Add-FreshWindowsBackgroundJournalEntry -Action 'set-pref' -TargetId $TargetId `
-                -Before @{ voice = @{ enabled = $beforeVal } } -After @{ voice = @{ enabled = $false } } -FreshAppData $FreshAppData
-            return @{ ok = $true; message = 'voice.enabled=false'; entry = $entry }
         }
         default {
             throw "Apply non implemente pour $TargetId"
@@ -1027,7 +715,7 @@ function Open-FreshWindowsBackgroundAuditMenu {
         Write-Host "Lecture seule par defaut. Voir guides/background-audit.md" -ForegroundColor DarkGray
         Write-Host ""
         Write-Host "1. Rapport (console + fichier)" -ForegroundColor Green
-        Write-Host "2. Desactiver elements lourds (tache agent + surveillance + IA/voix)" -ForegroundColor Yellow
+        Write-Host "2. Desactiver taches Fresh lourdes (WinUtil + sync)" -ForegroundColor Yellow
         Write-Host "3. Restaurer depuis le journal" -ForegroundColor Magenta
         Write-Host "4. Retour" -ForegroundColor DarkGray
         Write-Host ""
@@ -1039,10 +727,8 @@ function Open-FreshWindowsBackgroundAuditMenu {
             }
             '2' {
                 $targets = @(
-                    'scheduled-task-watch-agent',
-                    'prefs-monitor-off',
-                    'prefs-voice-off',
-                    'prefs-ai-off'
+                    'scheduled-task-winutil',
+                    'scheduled-task-sync-scripts'
                 )
                 Invoke-FreshWindowsBackgroundAudit -Apply -TargetIds $targets -FreshAppData $FreshAppData | Out-Null
                 Wait-ForUser

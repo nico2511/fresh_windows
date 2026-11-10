@@ -28,7 +28,7 @@ Au premier lancement réussi, le launcher pose `RemoteSigned` pour **CurrentUser
 | 1 | **5** | Full setup — apps standard + gaming + dev |
 | 2 | **8** | Tweaks one-click (WinUtil + AppX + perfs) |
 | 3 | **9** | Tâches planifiées (winget, maintenance, sync) |
-| 4 | **11** | Mode jeu (lancer / raccourci / agent) |
+| 4 | **11** | Mode jeu (kill list + raccourci Bureau) |
 | 5 | **6** | Extensions navigateurs + profil Brave (si besoin) |
 
 ---
@@ -47,8 +47,8 @@ Au premier lancement réussi, le launcher pose `RemoteSigned` pour **CurrentUser
 | 8 | Tweaks | One-click, ShutUp10, presets WinUtil |
 | 9 | Tâches | MAJ quotidienne + maintenance hebdo + sync scripts |
 | 10 | GPU / Chipset | AMD Adrenalin / Ryzen Master, NVIDIA / NVCleanstall, chipset Intel DSA / AMD |
-| 11 | Mode jeu | Kill list, raccourci Bureau, agent systray |
-| 12 | Désinstallation | Retire agent / tâches / cache local ; option relance `main` |
+| 11 | Mode jeu | Kill list + raccourci Bureau « Mode Jeu » |
+| 12 | Désinstallation | Retire tâches Fresh / cache local ; option relance `main` |
 | 0 | Quitter | — |
 
 ---
@@ -118,7 +118,7 @@ Modes utiles : `standard` | `gaming` | `dev` | `custom` | `custom:mon-paquet` | 
 | `appx-bloatware` / `appx-bloatware-apply` | Apps préinstallées : **simulation par défaut**, puis apply + confirmation ([guide](guides/appx-bloatware.md)) |
 | `brave-optimize` / `betterzen` | Policies Brave / Betterfox Zen |
 | `tasks` | Enregistre les tâches planifiées |
-| `game-mode` / `game-mode-shortcuts` / `game-mode-watch` | Mode jeu |
+| `game-mode` / `game-mode-shortcuts` | Mode jeu |
 | `winget-upgrade` | `winget upgrade --all` |
 | `powertoys-profile` / `shutup10` | Profils dédiés |
 
@@ -137,7 +137,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm `"https://raw.github
 |--------|------|
 | `launcher.ps1` | Point d’entrée (`irm \| iex`), menu, installs |
 | `scripts/lib/` | Modules (Core, WinUtil, Tasks, GPU) |
-| `scripts/GameMode-*.ps1` | Mode jeu + agent systray |
+| `scripts/GameMode-*.ps1` | Mode jeu (kill list, sync local) |
 | `configs/*.json` | Listes apps, tweaks, extensions, GPU |
 | `configs/apps-custom/` | Paquets utilisateur (auto-listés) |
 | `guides/` | Guides NVIDIA / AMD / ShutUp10 / chipset |
@@ -152,18 +152,12 @@ Lancement distant : cache sous `%LOCALAPPDATA%\FreshWindows` (epoch `FreshWindow
 
 Ferme les processus hors session jeu (dev, IA locale, sync, tray sécurité, messagerie hors Discord/Legcord…). **Ne tue jamais** la famille de launcher d’une session active. Sans session claire → aucun launcher tué. Active **Ultimate Performance** au lancement.
 
-Config : `configs/game-mode-kill.json` (domaines, protections, familles de launchers) et `configs/game-mode-watch.json` (seuils agent).
+Config : `configs/game-mode-kill.json` (domaines, protections, familles de launchers).
 
-Scripts locaux : `%LOCALAPPDATA%\FreshWindows\` + marqueur `scripts.ref`. Agent au logon via la tâche `FreshWindows-WatchAgent`.
+Scripts locaux : `%LOCALAPPDATA%\FreshWindows\` + marqueurs `scripts.ref` / `scripts.stamp` (epoch aligné sur `FreshWindowsLibEpoch`).
 
-### Fresh Agent (systray)
-
-Core **sans IA obligatoire** : skills, session jeu, monitoring. Couche IA optionnelle (Ollama, tool calling sur le registry skills), STT **Windows Speech**, TTS Windows/Piper, RAG guides.
-
-- Doc : [guides/fresh-agent.md](guides/fresh-agent.md)
 - Nettoyage apps préinstallées (générique, dry-run d’abord) : [guides/appx-bloatware.md](guides/appx-bloatware.md)
-- Sync complet : `scripts/Sync-FreshWindowsAgent.ps1` ou menu systray / tâche `FreshWindows-SyncLocalScripts`
-- Overrides user : `agent-ai.user.json`, `skills-apps.user.json`, `inventory.json` (non écrasés)
+- Sync : `scripts/Sync-FreshWindowsAgent.ps1` ou tâche `FreshWindows-SyncLocalScripts` (supprime les anciens artefacts agent/IA sous AppData).
 
 ---
 
@@ -173,7 +167,7 @@ Core **sans IA obligatoire** : skills, session jeu, monitoring. Couche IA option
 |-------|-------|--------|
 | `FreshWindows-WingetUpgrade` | Quotidien 12:00 | `winget upgrade --all` |
 | `FreshWindows-WinUtilReapply` | Dimanche 12:00 | Mode `maintenance` |
-| `FreshWindows-SyncLocalScripts` | Dimanche 12:30 | Resync agent (mode jeu + Fresh Agent + skills) |
+| `FreshWindows-SyncLocalScripts` | Dimanche 12:30 | Resync scripts locaux (mode jeu + maintenance) |
 
 La ref `FRESH_WIN_REF` est figée dans la tâche à l’enregistrement. Logs : `%LOCALAPPDATA%\FreshWindows\logs\`.
 

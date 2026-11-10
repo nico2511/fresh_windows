@@ -135,8 +135,7 @@
     "ai_runtime": [
       "ollama",
       "Ollama",
-      "CyberScribe",
-      "FreshWindowsWatch"
+      "CyberScribe"
     ]
   }
 }

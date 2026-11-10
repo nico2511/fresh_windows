@@ -31,7 +31,6 @@ $requiredJson = @(
     'extensions-firefox-based.json',
     'extensions-chrome-based.json',
     'game-mode-kill.json',
-    'game-mode-watch.json',
     'gpu.json',
     'powertoys-profile.json',
     'winutil-appx.json',
@@ -208,7 +207,7 @@ if (Test-Path -LiteralPath $killPath) {
                 Fail 'game-mode-kill.json : Bitwarden manquant dans domains'
             }
             elseif (-not $kill.protect.ai_runtime) {
-                Fail 'game-mode-kill.json : protect.ai_runtime manquant (Ollama / STT)'
+                Fail 'game-mode-kill.json : protect.ai_runtime manquant'
             }
             else {
                 $aiProt = @($kill.protect.ai_runtime | Where-Object { $_ })
@@ -307,60 +306,6 @@ if (Test-Path -LiteralPath $gpuPath) {
             Ok 'gpu.json cles amd/nvidia/chipset presentes'
         }
     }
-}
-
-$agentAiPath = Join-Path $configs 'agent-ai.json'
-if (Test-Path -LiteralPath $agentAiPath) {
-    $ai = Get-Content -LiteralPath $agentAiPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($null -eq $ai.enabled) {
-        Fail 'agent-ai.json : enabled manquant'
-    }
-    elseif (-not $ai.ollama -or -not $ai.ollama.defaultModel) {
-        Fail 'agent-ai.json : ollama.defaultModel manquant'
-    }
-    elseif ($ai.stt.provider -ne 'windows' -and $ai.stt.provider -ne 'cyberScribe' -and $ai.stt.provider -ne 'voiceWorker' -and $ai.stt.provider -ne 'off') {
-        Fail 'agent-ai.json : stt.provider doit etre voiceWorker, windows, cyberScribe ou off'
-    }
-    elseif ($ai.tts.provider -ne 'off' -and $ai.tts.provider -ne 'edge' -and $ai.tts.provider -ne 'windows' -and $ai.tts.provider -ne 'piper') {
-        Fail 'agent-ai.json : tts.provider doit etre off, edge, windows ou piper'
-    }
-    elseif ($ai.stt.provider -eq 'windows' -and $null -eq $ai.stt.listenSeconds) {
-        Fail 'agent-ai.json : stt.listenSeconds manquant (windows)'
-    }
-    else {
-        Ok ("agent-ai.json (enabled=$($ai.enabled), model=$($ai.ollama.defaultModel), stt=$($ai.stt.provider))")
-    }
-}
-else {
-    Fail 'agent-ai.json manquant'
-}
-
-$skillsReg = Join-Path $configs 'skills\registry.json'
-if (Test-Path -LiteralPath $skillsReg) {
-    $reg = Get-Content -LiteralPath $skillsReg -Raw -Encoding UTF8 | ConvertFrom-Json
-    if (-not $reg.skills -or @($reg.skills).Count -lt 1) {
-        Fail 'skills/registry.json : liste skills vide'
-    }
-    else {
-        Ok ("skills/registry.json ({0} skills)" -f @($reg.skills).Count)
-    }
-}
-else {
-    Fail 'skills/registry.json manquant'
-}
-
-$profilesPath = Join-Path $configs 'agent-profiles.json'
-if (Test-Path -LiteralPath $profilesPath) {
-    $prof = Get-Content -LiteralPath $profilesPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    if (-not $prof.profiles) { Fail 'agent-profiles.json : profiles manquant' }
-    else { Ok 'agent-profiles.json' }
-}
-
-$svcPath = Join-Path $configs 'services-allowlist.json'
-if (Test-Path -LiteralPath $svcPath) {
-    $svc = Get-Content -LiteralPath $svcPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    if (-not $svc.services -or @($svc.services).Count -lt 1) { Fail 'services-allowlist.json vide' }
-    else { Ok 'services-allowlist.json' }
 }
 
 Write-Host ""

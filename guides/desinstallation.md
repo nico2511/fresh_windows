@@ -4,7 +4,7 @@ Ce guide décrit comment retirer Fresh Windows de la machine **sans** désinstal
 
 ## Ce qui est supprimé
 
-- L’**agent** (systray) et les processus Fresh ciblés par chemin `%LOCALAPPDATA%\FreshWindows\` (Watch Agent, VoiceHost, stubs jeu, `voice_worker` sous `bin\` uniquement) — **pas** les apps tierces type CyberScribe installées ailleurs.
+- Les processus Fresh ciblés par chemin `%LOCALAPPDATA%\FreshWindows\` (y compris reliquats d’anciennes versions : Watch Agent, VoiceHost, `voice_worker` sous `bin\` uniquement) — **pas** les apps tierces type CyberScribe installées ailleurs.
 - Les **tâches planifiées** dont le nom commence par `FreshWindows-*`, notamment :
   - `FreshWindows-SyncLocalScripts`
   - `FreshWindows-WatchAgent`

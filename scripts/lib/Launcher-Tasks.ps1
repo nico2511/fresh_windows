@@ -59,7 +59,7 @@ function Set-FreshWindowsScheduledTaskTriggerLocalTime {
 }
 
 function Get-SyncLocalScriptsPowerShellCommand {
-    # Resync agent complet via scripts/Sync-FreshWindowsAgent.ps1 (ref figee a l'enregistrement)
+    # Resync scripts locaux via scripts/Sync-FreshWindowsAgent.ps1 (ref figee a l'enregistrement)
     return @"
 `$ErrorActionPreference='Stop'; try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}; `$ref='$RepoRef'; `$fresh=Join-Path `$env:LOCALAPPDATA 'FreshWindows'; New-Item -ItemType Directory -Path `$fresh -Force | Out-Null; `$raw='https://raw.githubusercontent.com/nico2511/fresh_windows/'+`$ref; `$sync=Join-Path `$fresh 'Sync-FreshWindowsAgent.ps1'; Invoke-WebRequest -Uri (`$raw+'/scripts/Sync-FreshWindowsAgent.ps1') -OutFile `$sync -UseBasicParsing; & `"$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe`" -NoProfile -ExecutionPolicy Bypass -File `$sync -RepoRef `$ref
 "@
@@ -214,7 +214,7 @@ function Open-ScheduledTasksMenu {
         Write-Host "1. Activer toutes les tâches" -ForegroundColor Green
         Write-Host "2. Lancer la maintenance maintenant (WinUtil + ShutUp10)" -ForegroundColor Yellow
         Write-Host "3. Supprimer toutes les tâches" -ForegroundColor Red
-        Write-Host "4. Audit arrière-plan Fresh (CPU / agent / tâches)" -ForegroundColor Cyan
+        Write-Host "4. Audit arriere-plan Fresh (taches planifiees)" -ForegroundColor Cyan
         Write-Host "5. Retour" -ForegroundColor Gray
         Write-Host ""
         $c = Read-Host "Choix"

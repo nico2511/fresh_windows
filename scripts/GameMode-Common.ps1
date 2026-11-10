@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
   Logique partagee mode jeu (kill list + protection comm/gaming).
-  Charge par Invoke-GameModeKill.ps1 et GameMode-WatchAgent.ps1.
+  Charge par Invoke-GameModeKill.ps1 et Launch-GameModeKill.ps1.
 #>
 param(
     [string]$RepoRef = $(if ($env:FRESH_WIN_REF) { $env:FRESH_WIN_REF.Trim() } else { 'main' })

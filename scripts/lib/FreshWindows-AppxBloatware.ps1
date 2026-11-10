@@ -572,7 +572,7 @@ function Invoke-SkillRemovePreinstalledApps {
         $Apply = $false,
         $DisableSilentInstall = $true,
         [string]$RepoRef = 'main',
-        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
+        [string]$FreshAppData = $(Join-Path $env:LOCALAPPDATA 'FreshWindows')
     )
     $asBool = {
         param($Value, [bool]$Default)

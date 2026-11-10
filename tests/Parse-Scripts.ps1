@@ -2,38 +2,12 @@ $files = @(
     'launcher.ps1',
     'scripts\GameMode-Common.ps1',
     'scripts\Invoke-GameModeKill.ps1',
-    'scripts\GameMode-WatchAgent.ps1',
     'scripts\Sync-FreshWindowsAgent.ps1',
-    'scripts\Start-FreshAgentDev.ps1',
-    'scripts\Stop-FreshAgentDev.ps1',
     'scripts\lib\Launcher-WinUtil.ps1',
     'scripts\lib\Launcher-GpuMenus.ps1',
     'scripts\lib\Launcher-Tasks.ps1',
     'scripts\lib\Launcher-Core.ps1',
-    'scripts\lib\FreshAgent-Config.ps1',
-    'scripts\lib\FreshAgent-SttSettings.ps1',
-    'scripts\lib\FreshAgent-Log.ps1',
-    'scripts\lib\FreshAgent-SkillsEngine.ps1',
-    'scripts\lib\FreshAgent-SkillHandlers.ps1',
-    'scripts\lib\FreshAgent-GameSession.ps1',
-    'scripts\lib\FreshAgent-Overlay.ps1',
-    'scripts\lib\FreshAgent-VoiceRouter.ps1',
-    'scripts\lib\FreshAgent-IdleSuggest.ps1',
-    'scripts\lib\FreshAgent-AiLifecycle.ps1',
-    'scripts\lib\FreshAgent-Dashboard.ps1',
-    'scripts\lib\FreshAgent-ActionLog.ps1',
-    'scripts\lib\FreshAgent-Confirm.ps1',
-    'scripts\lib\FreshAgent-WindowsActions.ps1',
-    'scripts\lib\FreshAgent-Health.ps1',
-    'scripts\lib\FreshAgent-Optimize.ps1',
     'scripts\lib\FreshWindows-AppxBloatware.ps1',
-    'scripts\ai\Ollama-Manager.ps1',
-    'scripts\ai\Windows-Stt.ps1',
-    'scripts\ai\FreshAgent-OllamaBridge.ps1',
-    'scripts\ai\FreshAgent-Tts.ps1',
-    'scripts\ai\FreshAgent-VoiceWorker.ps1',
-    'scripts\ai\FreshAgent-VoiceHost.ps1',
-    'scripts\ai\FreshAgent-BackgroundWorker.ps1',
     'scripts\lib\FreshWindows-BackgroundAudit.ps1',
     'scripts\Invoke-FreshWindowsBackgroundAudit.ps1',
     'scripts\Uninstall-FreshWindows.ps1',
@@ -81,18 +55,27 @@ Get-ChildItem -LiteralPath $repoRoot -Filter '*.ps1' -Recurse -File -ErrorAction
         }
     }
 
-foreach ($f in $files) {
-    $errs = $null
-    $path = Join-Path $PSScriptRoot $f
-    if (-not (Test-Path $path)) { $path = Join-Path (Get-Location) $f }
-    $null = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$errs)
-    if ($errs -and $errs.Count -gt 0) {
-        Write-Host "FAIL $f"
-        $errs | ForEach-Object { Write-Host $_.Message }
+Write-Host ""
+Write-Host "=== Parser PS (AST) ==="
+foreach ($rel in $files) {
+    $path = Join-Path $repoRoot $rel
+    if (-not (Test-Path -LiteralPath $path)) {
+        Write-Host "FAIL missing $rel"
+        $bad++
+        continue
+    }
+    $errors = $null
+    $null = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$errors)
+    if ($errors -and $errors.Count -gt 0) {
+        Write-Host "FAIL parse $rel"
+        $errors | ForEach-Object { Write-Host "  $($_.Message)" }
         $bad++
     }
     else {
-        Write-Host "OK $f"
+        Write-Host "OK parse $rel"
     }
 }
-exit $bad
+
+if ($bad -gt 0) { exit 1 }
+Write-Host "Parse-Scripts OK." -ForegroundColor Green
+exit 0

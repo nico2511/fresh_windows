@@ -59,7 +59,7 @@ Invoke-FreshWindowsAppxBloatwareCleanup -RevertSilentInstall
    - `remove.exact` / `prefixes` (Microsoft, partenaires, jeux)
    - `remove.oem` (bloc **OEM / constructeur** : preloads AppX editeur machine)
    - `confirmLater` pour reserver des paquets a revue manuelle (liste vide par defaut)
-2. Pousser sur GitHub ; bumper `FreshWindowsLibEpoch` / `agent-content.json` epoch si besoin.
+2. Pousser sur GitHub ; bumper `FreshWindowsLibEpoch` si les libs changent.
 
 Prefixes : terminer par `.` (ex. `king.com.`). Suffixe systeme : `*_cw5n1h2txyewy` via `protected.suffixes`.
 

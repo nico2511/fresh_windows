@@ -1,7 +1,6 @@
 [
     "Anysphere.Cursor",
     "VSCodium.VSCodium",
-    "Ollama.Ollama",
     "Git.Git",
     "OpenJS.NodeJS.LTS",
     "Python.Python.3.12",

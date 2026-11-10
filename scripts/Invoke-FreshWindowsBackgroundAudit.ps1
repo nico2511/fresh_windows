@@ -5,7 +5,7 @@
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-FreshWindowsBackgroundAudit.ps1
 .EXAMPLE
-  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-FreshWindowsBackgroundAudit.ps1 -Apply -TargetIds scheduled-task-watch-agent,prefs-monitor-off
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-FreshWindowsBackgroundAudit.ps1 -Apply -TargetIds scheduled-task-winutil
 #>
 param(
     [switch]$Apply,
