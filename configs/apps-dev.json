@@ -7,5 +7,6 @@
     "astral-sh.uv",
     "GitHub.cli",
     "Microsoft.PowerShell",
-    "PuTTY.PuTTY"
+    "PuTTY.PuTTY",
+    "Ollama.Ollama"
   ]

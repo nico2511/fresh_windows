@@ -7,15 +7,15 @@ Outil **generique** pour tout PC Windows 10/11 : fonctionnalite **separee** du d
 - **Protected** gagne toujours sur **Remove**.
 - Paquet **inconnu** : jamais supprime (ignore).
 - **Dry-run par defaut** : liste uniquement, sans modification.
-- Suppression reelle : `-Apply` / mode `appx-bloatware-apply` + **confirmation** (agent ou launcher).
+- Suppression reelle : `-Apply` / mode `appx-bloatware-apply` + **confirmation** (launcher menu Tweaks).
 - **Point de restauration** avant toute suppression reelle (echec ou limite 24h Windows gere proprement).
 - Journal : `%LOCALAPPDATA%\FreshWindows\logs\appx-bloatware-*.log` (paquet | action | resultat).
 
 ## Procedure recommandee
 
-1. **Simulation** : lancer `appx-bloatware` (ou le bouton / skill agent) et lire les listes **a retirer** et **candidats a ajouter**.
+1. **Simulation** : lancer `appx-bloatware` (ou menu Tweaks) et lire les listes **a retirer** et **candidats a ajouter**.
 2. **Verifier** : comparer avec `configs/appx-bloatware.json` ; deplacer les candidats vers `remove` / `remove.oem` ou `protected` selon le besoin.
-3. **Apply** : seulement si la liste convient — `appx-bloatware-apply` ou skill avec `Apply=true` (confirmation + admin).
+3. **Apply** : seulement si la liste convient — `appx-bloatware-apply` (confirmation + admin).
 
 Rien n est supprime tant que vous n avez pas explicitement confirme l etape Apply.
 
@@ -34,11 +34,6 @@ $env:FRESH_WIN_MODE='appx-bloatware-apply'; irm .../launcher.ps1 | iex
 Menu **Tweaks Windows** → option **5. Apps preinstallees**.
 
 Apres un **Full setup** interactif, une etape optionnelle propose un apercu (refuse par defaut).
-
-### Fresh Agent
-
-- Panneau **Sante** → **Apps preinstallees** (simulation).
-- Voix : « liste les apps preinstallees », « supprime le bloatware » (confirmation + admin).
 
 ## Desactiver les installations silencieuses
 

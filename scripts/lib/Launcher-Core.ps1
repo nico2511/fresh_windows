@@ -3,7 +3,7 @@
   Fonctions partagées Fresh Windows (launcher irm, clone local, tâches planifiées).
   Dot-sourcé depuis launcher.ps1 - utilise $RepoRef, $RepoRawRoot, $LauncherUrl, $FreshAppData du parent.
 #>
-if (-not $script:FreshWindowsLibEpoch) { $script:FreshWindowsLibEpoch = 60 }
+if (-not $script:FreshWindowsLibEpoch) { $script:FreshWindowsLibEpoch = 61 }
 
 function Wait-ForUser {
     if ($Host.Name -eq 'ConsoleHost') {
@@ -94,83 +94,174 @@ function Write-FreshWindowsScriptsStamp {
     return $true
 }
 
+function Test-FreshWindowsPathUnderFreshRoot {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$FreshRoot
+    )
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($FreshRoot)) { return $false }
+    try {
+        $full = [System.IO.Path]::GetFullPath($Path)
+        $root = [System.IO.Path]::GetFullPath($FreshRoot.TrimEnd('\', '/'))
+        return ($full.StartsWith($root, [StringComparison]::OrdinalIgnoreCase))
+    }
+    catch { return $false }
+}
+
+function Resolve-FreshWindowsExpectedLocalRoot {
+    param([string]$FreshAppData = $(Join-Path $env:LOCALAPPDATA 'FreshWindows'))
+    return [System.IO.Path]::GetFullPath($FreshAppData)
+}
+
+function Stop-FreshWindowsLegacyVoiceProcesses {
+    <#
+      Arrete voice_worker et hotes voix/IA legacy sous FreshAppData.
+      Ne tue pas l'agent maintenance (GameMode-WatchAgent / Launch-GameModeWatch).
+    #>
+    param(
+        [Parameter(Mandatory)][string]$FreshRoot,
+        [int[]]$ImmuneProcessIds = @()
+    )
+    $immune = [System.Collections.Generic.HashSet[int]]::new()
+    foreach ($id in $ImmuneProcessIds) { [void]$immune.Add([int]$id) }
+    [void]$immune.Add([int]$PID)
+
+    $legacyPattern = 'FreshAgent-VoiceHost|FreshAgent-VoiceWorker|FreshAgent-BackgroundWorker|voice_worker|scribe-voice'
+    $maintenancePattern = 'GameMode-WatchAgent\.ps1|Launch-GameModeWatch\.ps1'
+
+    foreach ($n in @('powershell', 'pwsh')) {
+        $procs = @(Get-Process -Name $n -ErrorAction SilentlyContinue)
+        foreach ($p in $procs) {
+            if ($immune.Contains($p.Id)) { continue }
+            $cmd = ''
+            try {
+                $cmd = (Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $p.Id) -ErrorAction Stop).CommandLine
+            }
+            catch { continue }
+            if ([string]::IsNullOrWhiteSpace($cmd)) { continue }
+            if ($cmd -match $maintenancePattern) { continue }
+            if (-not (Test-FreshWindowsPathUnderFreshRoot -Path $cmd -FreshRoot $FreshRoot)) { continue }
+            if ($cmd -match $legacyPattern) {
+                try { Stop-Process -Id $p.Id -Force -ErrorAction Stop } catch { }
+            }
+        }
+    }
+
+    foreach ($p in @(Get-Process -Name 'voice_worker' -ErrorAction SilentlyContinue)) {
+        if ($immune.Contains($p.Id)) { continue }
+        $path = ''
+        try { $path = $p.Path } catch { }
+        if (-not $path) {
+            try {
+                $path = (Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $p.Id) -ErrorAction Stop).ExecutablePath
+            }
+            catch { continue }
+        }
+        if (-not (Test-FreshWindowsPathUnderFreshRoot -Path $path -FreshRoot (Join-Path $FreshRoot 'bin'))) { continue }
+        try { Stop-Process -Id $p.Id -Force -ErrorAction Stop } catch { }
+    }
+}
+
 function Remove-FreshWindowsObsoleteLocalAssets {
     <#
-      Nettoie sous FreshAppData uniquement les artefacts agent/IA/voix obsoletes.
-      Ne touche pas aux installs tierces (CyberScribe, Ollama) hors ce dossier.
+      Nettoie sous FreshAppData uniquement les artefacts IA/voix obsoletes.
+      Conserve l'agent maintenance systray (scripts, prefs watch, rapport hebdo).
     #>
     param([Parameter(Mandatory)][string]$FreshAppData)
 
-    if (-not (Test-Path -LiteralPath $FreshAppData)) { return $true }
+    $errors = [System.Collections.ArrayList]@()
+    $expectedRoot = Resolve-FreshWindowsExpectedLocalRoot -FreshAppData $FreshAppData
+  if (-not (Test-FreshWindowsPathUnderFreshRoot -Path $expectedRoot -FreshRoot (Join-Path $env:LOCALAPPDATA 'FreshWindows'))) {
+        [void]$errors.Add('FreshAppData hors LOCALAPPDATA\FreshWindows')
+        return @{ ok = $false; errors = @($errors) }
+    }
+    if (-not (Test-Path -LiteralPath $FreshAppData)) {
+        return @{ ok = $true; errors = @() }
+    }
+
+    $freshNorm = [System.IO.Path]::GetFullPath($FreshAppData)
+    if ($freshNorm -ne $expectedRoot) {
+        [void]$errors.Add("Chemin FreshAppData inattendu : $freshNorm")
+        return @{ ok = $false; errors = @($errors) }
+    }
+
+    $immune = @(Get-FreshWindowsUninstallImmuneProcessIds)
+    try { Stop-FreshWindowsLegacyVoiceProcesses -FreshRoot $freshNorm -ImmuneProcessIds $immune } catch {
+        [void]$errors.Add("Stop legacy voix/IA : $($_.Exception.Message)")
+    }
 
     $relFiles = @(
-        'GameMode-WatchAgent.ps1',
-        'Stop-FreshWatchAgent.ps1',
-        'Launch-GameModeWatch.ps1',
-        'Start-WatchAgent.cmd',
-        'Register-WatchAgentTask.ps1',
-        'Register-WatchAgentTask.cmd',
-        'watch-agent-user.json',
-        'watch-agent.log',
         'agent-ai.user.json',
         'skills-apps.user.json',
         'skills-web.user.json',
         'inventory.json',
-        'game-session.state.json',
         'ai-history.jsonl',
         'ai-prompt.pending.txt',
-        'weekly-health-last.json',
         'repo.root'
     )
     foreach ($rel in $relFiles) {
         $p = Join-Path $FreshAppData $rel
+        if (-not (Test-FreshWindowsPathUnderFreshRoot -Path $p -FreshRoot $freshNorm)) { continue }
         if (Test-Path -LiteralPath $p) {
-            try { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop } catch { }
+            try { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop }
+            catch { [void]$errors.Add("Suppression $rel : $($_.Exception.Message)") }
         }
     }
 
-    $relDirs = @('ai', 'bin', 'configs\skills')
-    foreach ($rel in $relDirs) {
-        $p = Join-Path $FreshAppData $rel
+    foreach ($relDir in @('ai', 'bin', 'configs\skills')) {
+        $p = Join-Path $FreshAppData $relDir
+        if (-not (Test-FreshWindowsPathUnderFreshRoot -Path $p -FreshRoot $freshNorm)) { continue }
         if (Test-Path -LiteralPath $p) {
-            try { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop } catch { }
+            try { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop }
+            catch { [void]$errors.Add("Suppression dossier $relDir : $($_.Exception.Message)") }
         }
     }
 
+    $keepLibs = @(
+        'FreshAgent-MaintenanceConfig.ps1',
+        'FreshAgent-Log.ps1',
+        'FreshAgent-GameSession.ps1',
+        'FreshAgent-Optimize.ps1',
+        'FreshAgent-Health.ps1'
+    )
     $libDir = Join-Path $FreshAppData 'lib'
     if (Test-Path -LiteralPath $libDir) {
         Get-ChildItem -LiteralPath $libDir -Filter 'FreshAgent-*.ps1' -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notin $keepLibs } |
             ForEach-Object {
-                try { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop } catch { }
+                if (-not (Test-FreshWindowsPathUnderFreshRoot -Path $_.FullName -FreshRoot $freshNorm)) { return }
+                try { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop }
+                catch { [void]$errors.Add("Suppression lib $($_.Name) : $($_.Exception.Message)") }
             }
+        foreach ($legacy in @('Launcher-Core.ps1', 'Launcher-Core.ps1.ref')) {
+            $lp = Join-Path $libDir $legacy
+            if (Test-Path -LiteralPath $lp) {
+                try { Remove-Item -LiteralPath $lp -Force -ErrorAction Stop } catch { }
+            }
+        }
     }
 
     $cfgDir = Join-Path $FreshAppData 'configs'
     if (Test-Path -LiteralPath $cfgDir) {
+        $keepConfigs = @('game-mode-watch.json', 'maintenance-content.json')
         foreach ($pattern in @('agent-*.json', 'skills-*.json', 'services-allowlist.json')) {
             Get-ChildItem -LiteralPath $cfgDir -Filter $pattern -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -notin $keepConfigs } |
                 ForEach-Object {
-                    try { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop } catch { }
+                    if (-not (Test-FreshWindowsPathUnderFreshRoot -Path $_.FullName -FreshRoot $freshNorm)) { return }
+                    try { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop }
+                    catch { [void]$errors.Add("Suppression config $($_.Name) : $($_.Exception.Message)") }
                 }
         }
-    }
-
-    try {
-        if (Get-Command Unregister-ScheduledTask -ErrorAction SilentlyContinue) {
-            Unregister-ScheduledTask -TaskName 'FreshWindows-WatchAgent' -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
-        }
-        else {
-            & "$env:SystemRoot\System32\schtasks.exe" /Delete /TN 'FreshWindows-WatchAgent' /F 2>&1 | Out-Null
+        foreach ($obsolete in @('agent-content.json')) {
+            $op = Join-Path $cfgDir $obsolete
+            if (Test-Path -LiteralPath $op) {
+                try { Remove-Item -LiteralPath $op -Force -ErrorAction Stop } catch { }
+            }
         }
     }
-    catch { }
 
-    $startupLnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'Fresh Windows Surveillance.lnk'
-    if (Test-Path -LiteralPath $startupLnk) {
-        try { Remove-Item -LiteralPath $startupLnk -Force -ErrorAction SilentlyContinue } catch { }
-    }
-
-    return $true
+    return @{ ok = ($errors.Count -eq 0); errors = @($errors) }
 }
 
 function Test-FreshWindowsIsElevated {
@@ -180,6 +271,132 @@ function Test-FreshWindowsIsElevated {
         return $pr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     }
     catch { return $false }
+}
+
+function Start-FreshWindowsUnelevated {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [string]$WorkingDirectory = ''
+    )
+    if ([string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+        $WorkingDirectory = Split-Path -Parent $FilePath
+    }
+    $cmdPath = Join-Path $WorkingDirectory 'Start-WatchAgent.cmd'
+    if (-not (Test-Path -LiteralPath $cmdPath)) {
+        throw "Start-WatchAgent.cmd introuvable (sync menu 11 d'abord)."
+    }
+    Start-Process -FilePath "$env:SystemRoot\System32\runas.exe" `
+        -ArgumentList "/trustlevel:0x20000 `"$cmdPath`"" `
+        -WorkingDirectory $WorkingDirectory
+    Start-Sleep -Seconds 1
+    $alive = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match 'Launch-GameModeWatch|GameMode-WatchAgent|Start-WatchAgent' }
+    if (-not $alive) {
+        Start-Process -FilePath "$env:SystemRoot\explorer.exe" -ArgumentList "`"$cmdPath`""
+    }
+}
+
+function Register-FreshWindowsWatchAgentLogon {
+    param([Parameter(Mandatory)][string]$FreshAppData)
+    $taskName = 'FreshWindows-WatchAgent'
+    $cmdPath = Join-Path $FreshAppData 'Start-WatchAgent.cmd'
+    if (-not (Test-Path -LiteralPath $cmdPath)) {
+        throw 'Start-WatchAgent.cmd introuvable.'
+    }
+    $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($existing) {
+        foreach ($a in @($existing.Actions)) {
+            $exe = [string]$a.Execute
+            if ($exe -and ($exe -eq $cmdPath -or $exe -like '*Start-WatchAgent.cmd*')) {
+                return $taskName
+            }
+        }
+    }
+    $helperPs1 = Join-Path $FreshAppData 'Register-WatchAgentTask.ps1'
+    $helperCmd = Join-Path $FreshAppData 'Register-WatchAgentTask.cmd'
+    @"
+#Requires -Version 5.1
+`$ErrorActionPreference = 'Stop'
+`$taskName = 'FreshWindows-WatchAgent'
+`$dir = if (`$PSScriptRoot) { `$PSScriptRoot } else { Split-Path -Parent `$MyInvocation.MyCommand.Path }
+`$cmdPath = Join-Path `$dir 'Start-WatchAgent.cmd'
+Unregister-ScheduledTask -TaskName `$taskName -Confirm:`$false -ErrorAction SilentlyContinue
+`$action = New-ScheduledTaskAction -Execute `$cmdPath -WorkingDirectory `$dir
+`$trigger = New-ScheduledTaskTrigger -AtLogOn -User `$env:USERNAME
+`$trigger.Delay = 'PT45S'
+`$principal = New-ScheduledTaskPrincipal -UserId `$env:USERNAME -LogonType Interactive -RunLevel Limited
+`$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -DontStopOnIdleEnd
+Register-ScheduledTask -TaskName `$taskName -Action `$action -Trigger `$trigger -Principal `$principal -Settings `$settings -Description 'Fresh Windows agent maintenance (Limited).' -Force | Out-Null
+"@ | Set-Content -LiteralPath $helperPs1 -Encoding UTF8
+    @"
+@echo off
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%~dp0Register-WatchAgentTask.ps1"
+"@ | Set-Content -LiteralPath $helperCmd -Encoding ASCII
+    if (-not (Test-FreshWindowsIsElevated)) {
+        & $helperPs1
+        return $taskName
+    }
+    Start-Process -FilePath "$env:SystemRoot\System32\runas.exe" `
+        -ArgumentList "/trustlevel:0x20000 `"$helperCmd`"" `
+        -Wait -WindowStyle Hidden | Out-Null
+    Start-Sleep -Milliseconds 800
+    if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
+        return $taskName
+    }
+    throw 'Acces refuse pour la tache Limited (fallback Startup possible).'
+}
+
+function Publish-FreshGameModeWatchStubs {
+    param(
+        [Parameter(Mandatory)][string]$FreshAppData,
+        [string]$RepoRef = 'main'
+    )
+    New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null
+    $watchStub = Join-Path $FreshAppData 'Launch-GameModeWatch.ps1'
+    @"
+#Requires -Version 5.1
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction SilentlyContinue
+`$ErrorActionPreference = 'Continue'
+`$dir = if (`$PSScriptRoot) { `$PSScriptRoot } else { Split-Path -Parent `$MyInvocation.MyCommand.Path }
+`$log = Join-Path `$dir 'watch-agent.log'
+function Write-WatchBootLog([string]`$Message) {
+    try { Add-Content -LiteralPath `$log -Value ((Get-Date -Format o) + ' ' + `$Message) -Encoding UTF8 } catch { }
+}
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+`$refFile = Join-Path `$dir 'scripts.ref'
+`$ref = if (`$env:FRESH_WIN_REF) { `$env:FRESH_WIN_REF.Trim() } elseif (Test-Path -LiteralPath `$refFile) { (Get-Content -LiteralPath `$refFile -Raw).Trim() } else { 'main' }
+`$env:FRESH_WIN_REF = `$ref
+`$stampFile = Join-Path `$dir 'scripts.stamp'
+`$localEpoch = ''
+if (Test-Path -LiteralPath `$stampFile) { `$localEpoch = (Get-Content -LiteralPath `$stampFile -Raw -Encoding UTF8).Trim() }
+`$remoteEpoch = `$localEpoch
+`$devMode = (`$ref -eq 'local-dev') -or (Test-Path -LiteralPath (Join-Path `$dir 'repo.root'))
+if (-not `$devMode) {
+    try {
+        `$meta = Invoke-RestMethod -Uri ("https://raw.githubusercontent.com/nico2511/fresh_windows/`$ref/configs/maintenance-content.json") -UseBasicParsing -TimeoutSec 5
+        if (`$meta -and `$null -ne `$meta.epoch) { `$remoteEpoch = [string]`$meta.epoch }
+    }
+    catch { }
+}
+`$stale = (-not `$devMode) -and (`$remoteEpoch -ne `$localEpoch)
+`$need = @('GameMode-Common.ps1', 'GameMode-WatchAgent.ps1')
+foreach (`$n in `$need) {
+    `$p = Join-Path `$dir `$n
+    if (`$stale -or -not (Test-Path -LiteralPath `$p) -or ((Get-Item -LiteralPath `$p).Length -lt 80)) {
+        Invoke-WebRequest -Uri ("https://raw.githubusercontent.com/nico2511/fresh_windows/`$ref/scripts/`$n") -OutFile `$p -UseBasicParsing
+    }
+}
+& (Join-Path `$dir 'GameMode-WatchAgent.ps1')
+"@ | Set-Content -LiteralPath $watchStub -Encoding UTF8
+    $cmdPath = Join-Path $FreshAppData 'Start-WatchAgent.cmd'
+    @"
+@echo off
+cd /d "%~dp0"
+if not exist "%~dp0Launch-GameModeWatch.ps1" exit /b 1
+start "FreshWindowsWatch" /MIN "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0Launch-GameModeWatch.ps1"
+exit /b 0
+"@ | Set-Content -LiteralPath $cmdPath -Encoding ASCII
+    return $true
 }
 
 function Sync-GameModeLocalScripts {
@@ -199,9 +416,21 @@ function Sync-GameModeLocalScripts {
         }
     }
 
-    Remove-FreshWindowsObsoleteLocalAssets -FreshAppData $FreshAppData | Out-Null
+    $clean = Remove-FreshWindowsObsoleteLocalAssets -FreshAppData $FreshAppData
+    if ($clean -and $clean.errors -and $clean.errors.Count -gt 0) {
+        foreach ($e in $clean.errors) {
+            Write-Host "!! Nettoyage obsoletes : $e" -ForegroundColor Yellow
+        }
+    }
 
-    foreach ($scriptName in @('GameMode-Common.ps1', 'Invoke-GameModeKill.ps1', 'Sync-FreshWindowsAgent.ps1', 'Invoke-FreshWindowsBackgroundAudit.ps1')) {
+    foreach ($scriptName in @(
+            'GameMode-Common.ps1',
+            'Invoke-GameModeKill.ps1',
+            'GameMode-WatchAgent.ps1',
+            'Stop-FreshWatchAgent.ps1',
+            'Sync-FreshWindowsAgent.ps1',
+            'Invoke-FreshWindowsBackgroundAudit.ps1'
+        )) {
         $dest = Join-Path $FreshAppData $scriptName
         $url  = "$RepoRawRoot/scripts/$scriptName"
         Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
@@ -226,18 +455,47 @@ function Sync-GameModeLocalScripts {
         Write-Host "-> $scriptName" -ForegroundColor DarkGray
     }
 
-    $bloatLib = Join-Path $FreshAppData 'lib\FreshWindows-AppxBloatware.ps1'
-    $libDir = Split-Path $bloatLib -Parent
+    $libDir = Join-Path $FreshAppData 'lib'
     if (-not (Test-Path -LiteralPath $libDir)) { New-Item -ItemType Directory -Path $libDir -Force | Out-Null }
-    try {
-        Invoke-WebRequest -Uri "$RepoRawRoot/scripts/lib/FreshWindows-AppxBloatware.ps1" -OutFile $bloatLib -UseBasicParsing
+    foreach ($rel in @(
+            'lib/FreshAgent-MaintenanceConfig.ps1',
+            'lib/FreshAgent-Log.ps1',
+            'lib/FreshAgent-GameSession.ps1',
+            'lib/FreshAgent-Optimize.ps1',
+            'lib/FreshAgent-Health.ps1',
+            'lib/FreshWindows-AppxBloatware.ps1',
+            'lib/FreshWindows-BackgroundAudit.ps1',
+            'lib/Launcher-Core.ps1'
+        )) {
+        $leaf = $rel -replace '/', '\'
+        $dest = Join-Path $FreshAppData $leaf
+        $parent = Split-Path $dest -Parent
+        if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+        try {
+            Invoke-WebRequest -Uri "$RepoRawRoot/scripts/$rel" -OutFile $dest -UseBasicParsing
+            if (Get-Command Set-FreshScriptUtf8Bom -ErrorAction SilentlyContinue) {
+                Set-FreshScriptUtf8Bom -Path $dest
+            }
+        }
+        catch {
+            Write-Host "!! $rel : $($_.Exception.Message)" -ForegroundColor Yellow
+        }
     }
-    catch { }
+
+    $cfgDir = Join-Path $FreshAppData 'configs'
+    New-Item -ItemType Directory -Path $cfgDir -Force | Out-Null
+    foreach ($cfg in @('game-mode-watch.json', 'maintenance-content.json')) {
+        try {
+            Invoke-WebRequest -Uri "$RepoRawRoot/configs/$cfg" -OutFile (Join-Path $cfgDir $cfg) -UseBasicParsing
+        }
+        catch { }
+    }
 
     Set-Content -LiteralPath (Join-Path $FreshAppData 'scripts.ref') -Value $Ref -Encoding UTF8 -NoNewline
     Write-FreshWindowsScriptsStamp -FreshAppData $FreshAppData | Out-Null
 
     Publish-FreshGameModeKillStub -FreshAppData $FreshAppData | Out-Null
+    Publish-FreshGameModeWatchStubs -FreshAppData $FreshAppData -RepoRef $Ref | Out-Null
     return $true
 }
 

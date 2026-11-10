@@ -35,6 +35,7 @@ if ($pesterMod) {
         'Launcher-Core.Tests.ps1',
         'Appx-Bloatware.Tests.ps1',
         'FreshWindows-BackgroundAudit.Tests.ps1',
+        'Remove-FreshWindowsObsoleteLocalAssets.Tests.ps1',
         'Uninstall-FreshWindows.Tests.ps1'
     )
     foreach ($pesterFile in $pesterFiles) {

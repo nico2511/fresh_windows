@@ -3,6 +3,8 @@ $ErrorActionPreference = 'Stop'
 
 Describe 'Appx bloatware classification' {
     BeforeAll {
+        function global:Remove-AppxPackage { param($Package) throw 'Remove-AppxPackage doit etre mocke dans les tests' }
+        function global:Remove-AppxProvisionedPackage { param($Online, $PackageName) throw 'Remove-AppxProvisionedPackage doit etre mocke' }
         if (-not $env:LOCALAPPDATA) { $env:LOCALAPPDATA = if ($env:TEMP) { $env:TEMP } else { '/tmp' } }
         $root = Split-Path (Split-Path $PSCommandPath -Parent) -Parent
         if ([string]::IsNullOrWhiteSpace($root) -or -not (Test-Path -LiteralPath (Join-Path $root 'scripts'))) {
@@ -65,6 +67,19 @@ Describe 'Appx bloatware classification' {
     }
 
     It 'Apply never removes unknown packages' {
+        $script:AppxRemoved = [System.Collections.ArrayList]@()
+        function global:Remove-AppxPackage {
+            param($Package)
+            [void]$script:AppxRemoved.Add([string]$Package)
+            return $true
+        }
+        function global:Get-AppxPackage {
+            param([string]$Name)
+            if ($Name -eq 'Microsoft.BingNews') {
+                return [pscustomobject]@{ PackageFullName = 'Microsoft.BingNews_8wekyb3d8bbwe' }
+            }
+            return $null
+        }
         $result = Invoke-FreshWindowsAppxBloatwareCleanup -Apply -RepoRoot $script:RepoRoot -PackageIdentities @(
             'Contoso.UnknownApp',
             'Microsoft.BingNews'
@@ -72,6 +87,7 @@ Describe 'Appx bloatware classification' {
         $result.dryRun | Should -Be $false
         $result.removed | Should -Not -Contain 'Contoso.UnknownApp'
         @($result.addCandidates) | Should -Contain 'Contoso.UnknownApp'
+        $script:AppxRemoved | Should -Not -Contain '*Contoso*'
     }
 
     It 'prefix rules match king.com family' {

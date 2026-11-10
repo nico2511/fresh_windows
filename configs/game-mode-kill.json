@@ -1,5 +1,5 @@
 {
-  "comment": "Noms de process Windows (Gestionnaire des taches). Indépendant des listes winget d'installation.",
+  "comment": "Process Windows. Mode jeu ferme ollama/Ollama (domaine ai_local), jamais dans protect.ai_runtime.",
   "domains": {
     "dev": [
       "Cursor",
@@ -133,8 +133,6 @@
       "Zoom"
     ],
     "ai_runtime": [
-      "ollama",
-      "Ollama",
       "CyberScribe"
     ]
   }

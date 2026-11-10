@@ -72,7 +72,7 @@ $FreshAppData = Join-Path $env:LOCALAPPDATA "FreshWindows"
 $CustomAppsLocalDir = Join-Path $FreshAppData "apps-custom"
 $script:FreshBrand = "Fresh Windows"
 # Incrementer quand les libs changent alors que FRESH_WIN_REF reste "main" (sinon cache perime)
-$script:FreshWindowsLibEpoch = 60
+$script:FreshWindowsLibEpoch = 61
 
 function Ensure-FreshWindowsExecutionPolicy {
     <#
@@ -1244,7 +1244,7 @@ function Show-Menu {
     Write-Host " 9  Taches planifiees (MAJ + maintenance + sync scripts)" -ForegroundColor DarkCyan
     Write-Host "10  GPU / Chipset (AMD, NVIDIA, Intel DSA)" -ForegroundColor DarkYellow
     Write-Host "--- Mode jeu ---" -ForegroundColor DarkCyan
-    Write-Host "11  Mode jeu (lancer / raccourci Bureau)" -ForegroundColor Red
+    Write-Host "11  Mode jeu (lancer / raccourci / agent maintenance)" -ForegroundColor Red
     Write-Host "--- Maintenance ---" -ForegroundColor DarkCyan
     Write-Host "12  Desinstallation (taches, cache local)" -ForegroundColor DarkYellow
     Write-Host " 0  Quitter" -ForegroundColor DarkGray
@@ -1302,13 +1302,28 @@ function Invoke-GameModeKill {
         $idle.Kept | ForEach-Object { Write-Host "  - $_" -ForegroundColor DarkGray }
     }
 
-    Write-Host "`nAstuce : menu 11 -> raccourci Bureau Mode Jeu (sans admin)." -ForegroundColor DarkCyan
+    Write-Host "`nAstuce : menu 11 -> raccourci Bureau / agent barre des taches." -ForegroundColor DarkCyan
     if (-not $NoPause) { Wait-ForUser }
     return ($result.Skipped.Count -eq 0)
 }
 
+function Test-WatchAgentAlreadyInstalled {
+    param([string]$FreshAppData)
+    $cmdPath = Join-Path $FreshAppData 'Start-WatchAgent.cmd'
+    if (-not (Test-Path -LiteralPath $cmdPath)) { return $false }
+    $task = Get-ScheduledTask -TaskName 'FreshWindows-WatchAgent' -ErrorAction SilentlyContinue
+    if (-not $task) { return $false }
+    foreach ($a in @($task.Actions)) {
+        $exe = [string]$a.Execute
+        if ($exe -and ($exe -eq $cmdPath -or $exe -like '*Start-WatchAgent.cmd*')) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Install-GameModeShortcuts {
-    param([switch]$NoPause)
+    param([switch]$NoPause, [switch]$IncludeWatchAgent)
 
     New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null
 
@@ -1328,6 +1343,7 @@ function Install-GameModeShortcuts {
     }
 
     $killStub = Join-Path $FreshAppData "Launch-GameModeKill.ps1"
+    $watchStub = Join-Path $FreshAppData "Launch-GameModeWatch.ps1"
 
     $wsh = New-Object -ComObject WScript.Shell
     $desktop = [Environment]::GetFolderPath('Desktop')
@@ -1342,6 +1358,46 @@ function Install-GameModeShortcuts {
     $k.Save()
     Write-Host "-> Raccourci Bureau : Mode Jeu.lnk (sans admin)" -ForegroundColor Green
 
+    if ($IncludeWatchAgent) {
+        if (-not (Get-Command Register-FreshWindowsWatchAgentLogon -ErrorAction SilentlyContinue)) {
+            Write-Host "Launcher-Core incomplet : impossible d'enregistrer l'agent." -ForegroundColor Red
+        }
+        else {
+            $startup = [Environment]::GetFolderPath('Startup')
+            $lnkWatch = Join-Path $startup "Fresh Windows Surveillance.lnk"
+            if (Test-Path -LiteralPath $lnkWatch) {
+                Remove-Item -LiteralPath $lnkWatch -Force -ErrorAction SilentlyContinue
+            }
+            if (Test-WatchAgentAlreadyInstalled -FreshAppData $FreshAppData) {
+                Write-Host "-> Agent deja installe (tache FreshWindows-WatchAgent)." -ForegroundColor Green
+            }
+            else {
+                try {
+                    $taskName = Register-FreshWindowsWatchAgentLogon -FreshAppData $FreshAppData
+                    Write-Host "-> Tache : $taskName (AtLogOn Limited, delai 45s)" -ForegroundColor Green
+                }
+                catch {
+                    Write-Host "Tache non creee : $($_.Exception.Message)" -ForegroundColor DarkYellow
+                    $w = $wsh.CreateShortcut($lnkWatch)
+                    $w.TargetPath = Join-Path $FreshAppData 'Start-WatchAgent.cmd'
+                    $w.WorkingDirectory = $FreshAppData
+                    $w.WindowStyle = 7
+                    $w.Description = 'Agent maintenance Fresh Windows (fallback Startup)'
+                    if (Test-Path -LiteralPath $iconPath) { $w.IconLocation = "$iconPath,0" }
+                    $w.Save()
+                    Write-Host "-> Fallback Startup : Fresh Windows Surveillance.lnk" -ForegroundColor Yellow
+                }
+            }
+            try {
+                Start-FreshWindowsUnelevated -FilePath $watchStub -WorkingDirectory $FreshAppData
+                Write-Host "Agent lance (systray Fresh Maintenance)." -ForegroundColor DarkCyan
+            }
+            catch {
+                Write-Host "Lancement immediat echoue : $($_.Exception.Message)" -ForegroundColor DarkYellow
+            }
+        }
+    }
+
     if (-not $NoPause) { Wait-ForUser }
     return $true
 }
@@ -1349,24 +1405,72 @@ function Install-GameModeShortcuts {
 function Open-GameModeSetupMenu {
     do {
         Clear-Host
-        Write-Host "=== MODE JEU ===" -ForegroundColor Red
+        Write-Host "=== MODE JEU & MAINTENANCE ===" -ForegroundColor Red
         Write-Host "Scripts dans %LOCALAPPDATA%\FreshWindows (ref $RepoRef)." -ForegroundColor DarkGray
         Write-Host ""
         Write-Host "1. Lancer le mode jeu maintenant" -ForegroundColor Red
         Write-Host "2. Raccourci Bureau Mode Jeu" -ForegroundColor Green
-        Write-Host "3. Retour" -ForegroundColor DarkGray
+        Write-Host "3. Agent maintenance au demarrage (+ lancer maintenant)" -ForegroundColor Cyan
+        Write-Host "4. Nettoyage fichiers temporaires (menu maintenance)" -ForegroundColor Yellow
+        Write-Host "5. Rapport sante hebdomadaire" -ForegroundColor Yellow
+        Write-Host "6. Retour" -ForegroundColor DarkGray
         Write-Host ""
         $sub = Read-Host "Choix"
         switch ($sub) {
             "1" { Invoke-GameModeKill | Out-Null }
             "2" { Install-GameModeShortcuts | Out-Null }
-            "3" { return }
+            "3" { Install-GameModeShortcuts -IncludeWatchAgent | Out-Null }
+            "4" { Invoke-FreshMaintenanceTempCleanup -NoPause | Out-Null }
+            "5" { Invoke-FreshMaintenanceWeeklyReport -NoPause | Out-Null }
+            "6" { return }
             default {
                 Write-Host "Choix invalide" -ForegroundColor Red
                 Start-Sleep 1
             }
         }
     } while ($true)
+}
+
+function Invoke-FreshMaintenanceLibs {
+    $maintCfg = Join-Path $FreshAppData 'lib\FreshAgent-MaintenanceConfig.ps1'
+    if (-not (Test-Path -LiteralPath $maintCfg)) {
+        try {
+            Sync-GameModeLocalScripts -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl | Out-Null
+        }
+        catch { }
+    }
+    foreach ($rel in @('FreshAgent-MaintenanceConfig.ps1', 'FreshAgent-Health.ps1', 'FreshAgent-Optimize.ps1')) {
+        $p = Join-Path $FreshAppData "lib\$rel"
+        if (Test-Path -LiteralPath $p) { . $p }
+    }
+}
+
+function Invoke-FreshMaintenanceTempCleanup {
+    param([switch]$NoPause)
+    Invoke-FreshMaintenanceLibs
+    if (-not (Get-Command Invoke-FreshAgentCleanup -ErrorAction SilentlyContinue)) {
+        Write-Host "Modules maintenance absents (sync menu 11 d'abord)." -ForegroundColor Red
+        if (-not $NoPause) { Wait-ForUser }
+        return $false
+    }
+    $r = Invoke-FreshAgentCleanup -Temp
+    Write-Host $r.message -ForegroundColor $(if ($r.ok) { 'Green' } else { 'Yellow' })
+    if (-not $NoPause) { Wait-ForUser }
+    return [bool]$r.ok
+}
+
+function Invoke-FreshMaintenanceWeeklyReport {
+    param([switch]$NoPause)
+    Invoke-FreshMaintenanceLibs
+    if (-not (Get-Command New-FreshAgentWeeklyHealthReport -ErrorAction SilentlyContinue)) {
+        Write-Host "Modules maintenance absents (sync menu 11 d'abord)." -ForegroundColor Red
+        if (-not $NoPause) { Wait-ForUser }
+        return $false
+    }
+    $r = New-FreshAgentWeeklyHealthReport -FreshAppData $FreshAppData
+    Write-Host $r.message -ForegroundColor Green
+    if (-not $NoPause) { Wait-ForUser }
+    return [bool]$r.ok
 }
 
 function Invoke-SilentMode {

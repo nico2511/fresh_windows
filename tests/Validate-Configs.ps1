@@ -210,13 +210,16 @@ if (Test-Path -LiteralPath $killPath) {
                 Fail 'game-mode-kill.json : protect.ai_runtime manquant'
             }
             else {
+                $aiLocal = @()
+                if ($kill.domains.ai_local) { $aiLocal = @($kill.domains.ai_local) }
+                $hasOllamaKill = ($aiLocal | Where-Object { $_ -match '^(?i)ollama$' }).Count -gt 0
                 $aiProt = @($kill.protect.ai_runtime | Where-Object { $_ })
-                $hasOllama = $false
-                foreach ($n in $aiProt) {
-                    if ($n -match 'ollama') { $hasOllama = $true }
+                $ollamaProtected = ($aiProt | Where-Object { $_ -match 'ollama' }).Count -gt 0
+                if (-not $hasOllamaKill) {
+                    Fail 'game-mode-kill.json : ollama manquant dans domains.ai_local (ferme en mode jeu)'
                 }
-                if (-not $hasOllama) {
-                    Fail 'game-mode-kill.json : ollama manquant dans protect.ai_runtime'
+                if ($ollamaProtected) {
+                    Fail 'game-mode-kill.json : ollama ne doit pas etre dans protect.ai_runtime (incoherent avec mode jeu)'
                 }
                 Ok ("game-mode-kill.json ({0} kill, {1} protect entries, {2} launcher names)" -f $names.Count, $prot, $launcherCount)
             }

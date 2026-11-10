@@ -27,8 +27,8 @@ Describe 'FreshWindows background audit' {
 
     It 'catalog lists only known Fresh scheduled task names' {
         $names = @(Get-FreshWindowsBackgroundTaskNames)
-        $names.Count | Should -Be 3
-        $names | Should -Not -Contain 'FreshWindows-WatchAgent'
+        $names.Count | Should -Be 4
+        $names | Should -Contain 'FreshWindows-WatchAgent'
         Test-FreshWindowsScheduledTaskIsFresh -TaskName 'FreshWindows-WingetUpgrade' | Should -Be $true
         Test-FreshWindowsScheduledTaskIsFresh -TaskName 'MicrosoftEdgeUpdateTaskMachineCore' | Should -Be $false
         { Get-FreshWindowsBackgroundScheduledTaskState -TaskName 'MicrosoftEdgeUpdateTaskMachineCore' } |
@@ -45,16 +45,33 @@ Describe 'FreshWindows background audit' {
     }
 
     It 'apply and restore are symmetric for scheduled tasks (mocked)' {
-        $disable = { param($tn) }
-        $enable = { param($tn) }
-        $targets = @('scheduled-task-winutil')
-        $r1 = Invoke-FreshWindowsBackgroundAudit -Apply -NoConfirm -TargetIds $targets `
+        $script:DisableCalls = [System.Collections.ArrayList]@()
+        $script:EnableCalls = [System.Collections.ArrayList]@()
+        $disable = {
+            param($tn)
+            [void]$script:DisableCalls.Add([string]$tn)
+        }
+        $enable = {
+            param($tn)
+            [void]$script:EnableCalls.Add([string]$tn)
+        }
+        $script:MockTaskState = @{ present = $true; state = 'Ready'; lastRun = $null; nextRun = $null }
+        function Get-FreshWindowsBackgroundScheduledTaskState {
+            param([Parameter(Mandatory)][string]$TaskName)
+            if (-not (Test-FreshWindowsScheduledTaskIsFresh -TaskName $TaskName)) {
+                throw "Tache hors perimetre Fresh Windows : $TaskName"
+            }
+            return $script:MockTaskState
+        }
+
+        $r1 = Invoke-FreshWindowsBackgroundCatalogApply -TargetId 'scheduled-task-winutil' `
             -FreshAppData $script:Tmp -ScheduledTaskDisable $disable -ScheduledTaskEnable $enable
-        $r1.mode | Should -Be 'apply'
-        ($r1.results | Where-Object { $_.ok }).Count | Should -BeGreaterOrEqual 0
+        $r1.ok | Should -Be $true
+        $script:DisableCalls | Should -Contain 'FreshWindows-WinUtilReapply'
 
         $rr = Restore-FreshWindowsBackgroundFromJournal -FreshAppData $script:Tmp -ScheduledTaskEnable $enable
-        $rr.ok | Should -BeIn @($true, $false)
+        $rr.ok | Should -Be $true
+        $script:EnableCalls | Should -Contain 'FreshWindows-WinUtilReapply'
     }
 
     It 'rejects scheduled task names outside Fresh catalog' {

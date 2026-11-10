@@ -52,11 +52,14 @@ function Set-FreshScriptUtf8Bom {
     [System.IO.File]::WriteAllText($Path, $text, $utf8Bom)
 }
 
-$coreLib = Join-Path $FreshAppData 'Launcher-Core.ps1'
+$libDir = Join-Path $FreshAppData 'lib'
+New-Item -ItemType Directory -Path $libDir -Force | Out-Null
+$coreLib = Join-Path $libDir 'Launcher-Core.ps1'
 $coreUrl = "$RepoRawRoot/scripts/lib/Launcher-Core.ps1"
 try {
     Invoke-WebRequest -Uri $coreUrl -OutFile $coreLib -UseBasicParsing
     Set-FreshScriptUtf8Bom -Path $coreLib
+    Set-Content -LiteralPath (Join-Path $libDir 'Launcher-Core.ps1.ref') -Value $RepoRef -Encoding UTF8 -NoNewline
     . $coreLib
     Sync-GameModeLocalScripts -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef | Out-Null
 }

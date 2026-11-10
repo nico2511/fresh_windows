@@ -8,7 +8,8 @@ Outil de **lecture seule** par défaut pour lister les tâches planifiées Fresh
 |--------|----------|
 | **Élevé** | `FreshWindows-WinUtilReapply` (WinUtil + ShutUp10, fenêtre visible) |
 | **Moyen** | `FreshWindows-WingetUpgrade` (pic winget) |
-| **Faible** | `FreshWindows-SyncLocalScripts` (téléchargement scripts, nettoyage artefacts obsolètes) |
+| **Moyen** | `FreshWindows-WatchAgent` (systray maintenance CPU/RAM/disque, Limited) |
+| **Faible** | `FreshWindows-SyncLocalScripts` (téléchargement scripts, nettoyage artefacts IA/voix obsolètes) |
 
 ## Tâches planifiées Fresh
 
@@ -17,8 +18,7 @@ Outil de **lecture seule** par défaut pour lister les tâches planifiées Fresh
 | `FreshWindows-WingetUpgrade` | Quotidien 12:00 | `Launcher-Tasks.ps1` |
 | `FreshWindows-WinUtilReapply` | Dimanche 12:00 | `Launcher-Tasks.ps1` |
 | `FreshWindows-SyncLocalScripts` | Dimanche 12:30 | `Launcher-Tasks.ps1` |
-
-La tâche historique `FreshWindows-WatchAgent` (agent systray) n’est plus créée par Fresh ; le sync hebdomadaire tente de la supprimer si elle subsiste d’une ancienne install.
+| `FreshWindows-WatchAgent` | À la connexion (+45 s) | `Launcher-Core.ps1` (menu 11) |
 
 ## Lancer l’audit
 
