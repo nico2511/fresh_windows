@@ -48,6 +48,7 @@ Au premier lancement réussi, le launcher pose `RemoteSigned` pour **CurrentUser
 | 9 | Tâches | MAJ quotidienne + maintenance hebdo + sync scripts |
 | 10 | GPU / Chipset | AMD Adrenalin / Ryzen Master, NVIDIA / NVCleanstall, chipset Intel DSA / AMD |
 | 11 | Mode jeu | Kill list, raccourci Bureau, agent systray |
+| 12 | Désinstallation | Retire agent / tâches / cache local ; option relance `main` |
 | 0 | Quitter | — |
 
 ---
@@ -212,6 +213,12 @@ Fresh Windows orchestre des outils externes ; ils restent la propriété de leur
 | **NVIDIA** | [drivers](https://www.nvidia.com/Download/index.aspx) | Pilotes GeForce / Studio |
 
 Respecte les licences et conditions de chaque projet. Fresh Windows ne redistribue pas leurs binaires : téléchargement à l’exécution (winget, `irm`, URL constructeur).
+
+---
+
+## Désinstallation
+
+Menu **12 — Désinstallation** : simulation DryRun, désinstallation complète, ou désinstaller puis relancer le launcher `main`. Les apps winget, WinUtil / ShutUp10 et CyberScribe ne sont pas retirés. Détails : [guides/desinstallation.md](guides/desinstallation.md).
 
 ---
 

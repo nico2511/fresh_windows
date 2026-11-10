@@ -1,5 +1,8 @@
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($env:TEMP)) {
+    $env:TEMP = [System.IO.Path]::GetTempPath()
+}
 $root = Split-Path (Split-Path $PSCommandPath -Parent) -Parent
 . (Join-Path $root 'scripts\lib\FreshAgent-Config.ps1')
 . (Join-Path $root 'scripts\lib\FreshAgent-VoiceRouter.ps1')
