@@ -46,6 +46,81 @@ Describe 'Get-FreshUninstallScheduledTaskSnapshot' {
     }
 }
 
+Describe 'Enumeration processus (I1)' {
+    BeforeEach {
+        $script:FreshUninstallVerificationErrors = [System.Collections.ArrayList]@()
+    }
+
+    It 'absence normale (NoProcessFoundForGivenName) ne marque pas indisponible' {
+        Mock Get-Process {
+            $ex = New-Object System.Management.Automation.ItemNotFoundException 'pwsh'
+            $err = [System.Management.Automation.ErrorRecord]::new(
+                $ex,
+                'NoProcessFoundForGivenName,Microsoft.PowerShell.Commands.GetProcessCommand',
+                [System.Management.Automation.ErrorCategory]::ObjectNotFound,
+                'pwsh'
+            )
+            $PSCmdlet.WriteError($err)
+        } -ParameterFilter { $Name -eq 'pwsh' -and $ErrorAction -eq 'SilentlyContinue' }
+        Mock Get-Process { return @() } -ParameterFilter { $Name -ne 'pwsh' }
+
+        $null = Get-FreshUninstallProcessListByName -Name 'pwsh'
+        $script:FreshUninstallVerificationErrors.Count | Should -Be 0
+    }
+
+    It 'vraie erreur enumeration ajoute VerificationErrors' {
+        Mock Get-Process {
+            $ex = New-Object System.UnauthorizedAccessException 'access denied'
+            $err = [System.Management.Automation.ErrorRecord]::new(
+                $ex,
+                'AccessDenied,Microsoft.PowerShell.Commands.GetProcessCommand',
+                [System.Management.Automation.ErrorCategory]::PermissionDenied,
+                'pwsh'
+            )
+            $PSCmdlet.WriteError($err)
+        } -ParameterFilter { $Name -eq 'pwsh' -and $ErrorAction -eq 'SilentlyContinue' }
+
+        $null = Get-FreshUninstallProcessListByName -Name 'pwsh'
+        $script:FreshUninstallVerificationErrors.Count | Should -BeGreaterThan 0
+        ($script:FreshUninstallVerificationErrors[0] | Out-String) | Should -Match 'enumeration processus pwsh'
+    }
+}
+
+Describe 'Raccourcis Fresh (I2)' {
+    It 'cible sous FreshRoot et Arguments vide reconnue' {
+        $sandbox = Join-Path ([System.IO.Path]::GetTempPath()) ("fw-lnk-{0}" -f [guid]::NewGuid().ToString('N'))
+        $fresh = Join-Path $sandbox 'FreshWindows'
+        New-Item -ItemType Directory -Path $fresh -Force | Out-Null
+        $target = Join-Path $fresh 'Launch-FreshWindows.ps1'
+        try {
+            Resolve-FreshUninstallShortcutOwnership -LnkPath (Join-Path $fresh 'FreshWindows.lnk') -FreshRoot $fresh -Target $target -Arguments '' | Should -Be 'owned'
+        }
+        finally {
+            Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'cible vide reste unknown' {
+        $fresh = Join-Path ([System.IO.Path]::GetTempPath()) 'FreshWindows'
+        Resolve-FreshUninstallShortcutOwnership -LnkPath 'C:\Users\Public\Desktop\FreshWindows.lnk' -FreshRoot $fresh -Target '' -Arguments '' | Should -Be 'unknown'
+    }
+
+    It 'homonyme tiers hors FreshRoot conserve foreign' {
+        $sandbox = Join-Path ([System.IO.Path]::GetTempPath()) ("fw-lnk-{0}" -f [guid]::NewGuid().ToString('N'))
+        $fresh = Join-Path $sandbox 'FreshWindows'
+        New-Item -ItemType Directory -Path $fresh -Force | Out-Null
+        $other = Join-Path $sandbox 'OtherVendor\Launch-FreshWindows.ps1'
+        New-Item -ItemType Directory -Path (Split-Path $other -Parent) -Force | Out-Null
+        New-Item -ItemType File -Path $other -Force | Out-Null
+        try {
+            Resolve-FreshUninstallShortcutOwnership -LnkPath (Join-Path $fresh 'FreshWindows.lnk') -FreshRoot $fresh -Target $other -Arguments '' | Should -Be 'foreign'
+        }
+        finally {
+            Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 Describe 'Contrats collections et PID CSV' {
     It 'return [object[]] vide => Count 0 (regression ,@)' {
         function Get-FreshWrappedTargetsSample {
@@ -132,6 +207,15 @@ Describe 'Uninstall-FreshWindows helpers' {
         finally {
             Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
         }
+    }
+}
+
+Describe 'Staging menu DryRun' {
+    It 'Remove-FreshWindowsUninstallRunStaging verifie la suppression' {
+        $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("FreshWindows-UninstallRun-{0}" -f [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $stage -Force | Out-Null
+        Remove-FreshWindowsUninstallRunStaging -StageDir $stage | Should -Be $true
+        Test-Path -LiteralPath $stage | Should -Be $false
     }
 }
 

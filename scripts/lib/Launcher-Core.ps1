@@ -385,29 +385,35 @@ function New-FreshWindowsUninstallRunStaging {
     if ([string]::IsNullOrWhiteSpace($tempRoot)) { throw 'TEMP indisponible' }
     $stage = Join-Path $tempRoot ("FreshWindows-UninstallRun-{0}" -f $SessionId)
     $libDir = Join-Path $stage 'lib'
-    New-Item -ItemType Directory -Path $libDir -Force -ErrorAction Stop | Out-Null
     $runScript = Join-Path $stage 'Uninstall-FreshWindows.ps1'
     $libScript = Join-Path $libDir 'FreshWindows-Uninstall.ps1'
-    if (-not [string]::IsNullOrWhiteSpace($LocalRepoRoot)) {
-        $wrapperSrc = Join-Path $LocalRepoRoot 'scripts/Uninstall-FreshWindows.ps1'
-        $libSrc = Join-Path $LocalRepoRoot 'scripts/lib/FreshWindows-Uninstall.ps1'
-        if (-not (Test-Path -LiteralPath $wrapperSrc) -or -not (Test-Path -LiteralPath $libSrc)) {
-            throw 'Fichiers desinstallation locaux introuvables.'
+    New-Item -ItemType Directory -Path $libDir -Force -ErrorAction Stop | Out-Null
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($LocalRepoRoot)) {
+            $wrapperSrc = Join-Path $LocalRepoRoot 'scripts/Uninstall-FreshWindows.ps1'
+            $libSrc = Join-Path $LocalRepoRoot 'scripts/lib/FreshWindows-Uninstall.ps1'
+            if (-not (Test-Path -LiteralPath $wrapperSrc) -or -not (Test-Path -LiteralPath $libSrc)) {
+                throw 'Fichiers desinstallation locaux introuvables.'
+            }
+            Copy-Item -LiteralPath $wrapperSrc -Destination $runScript -Force -ErrorAction Stop
+            Copy-Item -LiteralPath $libSrc -Destination $libScript -Force -ErrorAction Stop
         }
-        Copy-Item -LiteralPath $wrapperSrc -Destination $runScript -Force -ErrorAction Stop
-        Copy-Item -LiteralPath $libSrc -Destination $libScript -Force -ErrorAction Stop
+        else {
+            try {
+                [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+            }
+            catch { }
+            $wrapperUrl = "$RepoRawRoot/scripts/Uninstall-FreshWindows.ps1"
+            $libUrl = "$RepoRawRoot/scripts/lib/FreshWindows-Uninstall.ps1"
+            Invoke-WebRequest -Uri $wrapperUrl -OutFile $runScript -UseBasicParsing -ErrorAction Stop
+            Invoke-WebRequest -Uri $libUrl -OutFile $libScript -UseBasicParsing -ErrorAction Stop
+            try { Unblock-File -LiteralPath $runScript -ErrorAction SilentlyContinue } catch { }
+            try { Unblock-File -LiteralPath $libScript -ErrorAction SilentlyContinue } catch { }
+        }
     }
-    else {
-        try {
-            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-        }
-        catch { }
-        $wrapperUrl = "$RepoRawRoot/scripts/Uninstall-FreshWindows.ps1"
-        $libUrl = "$RepoRawRoot/scripts/lib/FreshWindows-Uninstall.ps1"
-        Invoke-WebRequest -Uri $wrapperUrl -OutFile $runScript -UseBasicParsing -ErrorAction Stop
-        Invoke-WebRequest -Uri $libUrl -OutFile $libScript -UseBasicParsing -ErrorAction Stop
-        try { Unblock-File -LiteralPath $runScript -ErrorAction SilentlyContinue } catch { }
-        try { Unblock-File -LiteralPath $libScript -ErrorAction SilentlyContinue } catch { }
+    catch {
+        Remove-FreshWindowsUninstallRunStaging -StageDir $stage
+        throw
     }
     return [pscustomobject]@{
         SessionId = $SessionId
@@ -428,10 +434,20 @@ function Invoke-FreshWindowsUninstallLibDryRun {
 
 function Remove-FreshWindowsUninstallRunStaging {
     param([string]$StageDir = '')
-    if ([string]::IsNullOrWhiteSpace($StageDir)) { return }
-    if (Test-Path -LiteralPath $StageDir) {
-        Remove-Item -LiteralPath $StageDir -Recurse -Force -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrWhiteSpace($StageDir)) { return $true }
+    if (-not (Test-Path -LiteralPath $StageDir)) { return $true }
+    try {
+        Remove-Item -LiteralPath $StageDir -Recurse -Force -ErrorAction Stop
     }
+    catch {
+        Write-Host ("Nettoyage staging impossible : {0}" -f $_.Exception.Message) -ForegroundColor Red
+        return $false
+    }
+    if (Test-Path -LiteralPath $StageDir) {
+        Write-Host "Staging partiel encore present apres suppression : $StageDir" -ForegroundColor Red
+        return $false
+    }
+    return $true
 }
 
 function Invoke-FreshWindowsUninstallFromMenu {
@@ -451,6 +467,7 @@ function Invoke-FreshWindowsUninstallFromMenu {
         }
     }
     $sessionId = [guid]::NewGuid().ToString('N')
+    $staging = $null
     try {
         $staging = New-FreshWindowsUninstallRunStaging -RepoRawRoot $RepoRawRoot -LocalRepoRoot $LocalRepoRoot -SessionId $sessionId
     }
@@ -461,6 +478,7 @@ function Invoke-FreshWindowsUninstallFromMenu {
     if ($DryRun) {
         Write-Host "Simulation : staging GUID $($staging.StageDir) (supprime apres run)." -ForegroundColor DarkCyan
     }
+    $menuExit = 0
     try {
         $argList = @(
             '-NoProfile',
@@ -476,13 +494,17 @@ function Invoke-FreshWindowsUninstallFromMenu {
         if ($ReinstallAfter) { $argList += '-ReinstallAfter' }
         if (-not $DryRun) { $argList += '-Confirmed' }
         & powershell.exe @argList
-        return $LASTEXITCODE
+        $menuExit = $LASTEXITCODE
     }
     finally {
-        if ($DryRun) {
-            Remove-FreshWindowsUninstallRunStaging -StageDir $staging.StageDir
+        if ($DryRun -and $staging) {
+            if (-not (Remove-FreshWindowsUninstallRunStaging -StageDir $staging.StageDir)) {
+                Write-Host 'DryRun : staging non supprime proprement (code 1).' -ForegroundColor Red
+                $menuExit = 1
+            }
         }
     }
+    return $menuExit
 }
 
 function Open-FreshWindowsUninstallMenu {

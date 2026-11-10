@@ -130,9 +130,20 @@ function Add-FreshUninstallInspectionFailure {
 function Test-FreshUninstallIsBenignProcessEnumerationError {
     param([System.Management.Automation.ErrorRecord]$ErrorRecord)
     if (-not $ErrorRecord) { return $false }
-    $msg = $ErrorRecord.Exception.Message
-    if ($msg -match '(?i)Cannot find a process|NoProcessFoundForGivenName|process .* not found') { return $true }
+    $fqid = [string]$ErrorRecord.FullyQualifiedErrorId
+    if ($fqid -like 'NoProcessFoundForGivenName*') { return $true }
     return $false
+}
+
+function Get-FreshUninstallProcessListByName {
+    param([Parameter(Mandatory)][string]$Name)
+    $nameErrors = $null
+    $procList = @(Get-Process -Name $Name -ErrorAction SilentlyContinue -ErrorVariable nameErrors)
+    foreach ($e in @($nameErrors)) {
+        if (Test-FreshUninstallIsBenignProcessEnumerationError -ErrorRecord $e) { continue }
+        Add-FreshUninstallInspectionFailure -Message ("enumeration processus {0} indisponible ({1})" -f $Name, $e.FullyQualifiedErrorId)
+    }
+    return $procList
 }
 
 function Get-FreshUninstallTargetProcesses {
@@ -146,7 +157,7 @@ function Get-FreshUninstallTargetProcesses {
     $launchPattern = 'Launch-GameModeKill\.ps1'
 
     foreach ($n in @('powershell', 'pwsh')) {
-        $procList = @(Get-Process -Name $n -ErrorAction SilentlyContinue)
+        $procList = @(Get-FreshUninstallProcessListByName -Name $n)
         if ($procList.Count -eq 0) { continue }
         foreach ($p in $procList) {
             $cmd = ''
@@ -165,7 +176,7 @@ function Get-FreshUninstallTargetProcesses {
         }
     }
 
-    $voiceList = @(Get-Process -Name 'voice_worker' -ErrorAction SilentlyContinue)
+    $voiceList = @(Get-FreshUninstallProcessListByName -Name 'voice_worker')
     foreach ($p in $voiceList) {
         $path = ''
         try { $path = $p.Path } catch { }
@@ -217,9 +228,10 @@ function Test-FreshUninstallShortcutPointsToFreshInstall {
     param(
         [Parameter(Mandatory)][string]$LnkPath,
         [Parameter(Mandatory)][string]$FreshRoot,
-        [Parameter(Mandatory)][string]$Target,
-        [Parameter(Mandatory)][string]$Arguments
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Target,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Arguments
     )
+    if ([string]::IsNullOrWhiteSpace($Target)) { return $false }
     $name = [System.IO.Path]::GetFileName($LnkPath)
     if (Test-FreshUninstallPathUnderRoot -Path $Target -Root $FreshRoot) { return $true }
     try { $targetFull = [System.IO.Path]::GetFullPath($Target) } catch { $targetFull = $Target }
@@ -245,6 +257,20 @@ function Test-FreshUninstallShortcutPointsToFreshInstall {
     return $false
 }
 
+function Resolve-FreshUninstallShortcutOwnership {
+    param(
+        [Parameter(Mandatory)][string]$LnkPath,
+        [Parameter(Mandatory)][string]$FreshRoot,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Target,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Arguments
+    )
+    if ([string]::IsNullOrWhiteSpace($Target)) { return 'unknown' }
+    if (Test-FreshUninstallShortcutPointsToFreshInstall -LnkPath $LnkPath -FreshRoot $FreshRoot -Target $Target -Arguments $Arguments) {
+        return 'owned'
+    }
+    return 'foreign'
+}
+
 function Get-FreshUninstallShortcutOwnership {
     param(
         [Parameter(Mandatory)][string]$LnkPath,
@@ -255,10 +281,7 @@ function Get-FreshUninstallShortcutOwnership {
         $s = $wsh.CreateShortcut($LnkPath)
         $target = [string]$s.TargetPath
         $args = [string]$s.Arguments
-        if (Test-FreshUninstallShortcutPointsToFreshInstall -LnkPath $LnkPath -FreshRoot $FreshRoot -Target $target -Arguments $args) {
-            return 'owned'
-        }
-        return 'foreign'
+        return (Resolve-FreshUninstallShortcutOwnership -LnkPath $LnkPath -FreshRoot $FreshRoot -Target $target -Arguments $args)
     }
     catch {
         return 'unknown'
@@ -401,8 +424,20 @@ function Get-FreshUninstallReinstallStubContent {
 while ((Test-Path -LiteralPath `$fresh) -and (Get-Date) -lt `$deadline) {
     Start-Sleep -Seconds 2
 }
+function Remove-FreshUninstallReinstallStubStage {
+    param([string]`$SelfPath)
+    if ([string]::IsNullOrWhiteSpace(`$SelfPath)) { return }
+    if (Test-Path -LiteralPath `$SelfPath) {
+        try { Remove-Item -LiteralPath `$SelfPath -Force -ErrorAction Stop } catch {}
+    }
+    `$stageDir = Split-Path -Parent `$SelfPath
+    if (`$stageDir -and (Test-Path -LiteralPath `$stageDir)) {
+        try { Remove-Item -LiteralPath `$stageDir -Recurse -Force -ErrorAction Stop } catch {}
+    }
+}
 if (Test-Path -LiteralPath `$fresh) {
     Write-Host ('Arret : dossier Fresh toujours present, relance annulee : ' + `$fresh) -ForegroundColor Red
+    Remove-FreshUninstallReinstallStubStage -SelfPath `$self
     exit 3
 }
 try {
@@ -423,13 +458,7 @@ catch {
     exit 3
 }
 finally {
-    if (`$self -and (Test-Path -LiteralPath `$self)) {
-        try { Remove-Item -LiteralPath `$self -Force -ErrorAction Stop } catch {}
-    }
-    `$stage = Split-Path -Parent `$self
-    if (`$stage -and (Test-Path -LiteralPath `$stage)) {
-        try { Remove-Item -LiteralPath `$stage -Recurse -Force -ErrorAction Stop } catch {}
-    }
+    Remove-FreshUninstallReinstallStubStage -SelfPath `$self
 }
 "@
 }
@@ -637,8 +666,11 @@ function Invoke-FreshWindowsUninstall {
             Write-Host 'Stub relance invalide (parse) : reinstall annulee.' -ForegroundColor Red
             return 3
         }
-        if (-not (Start-FreshUninstallReinstallLauncher -StubPath $stub)) { return 3 }
         if (-not (Clear-FreshUninstallOwnedRunStagingOnly)) { return 1 }
+        if (-not (Start-FreshUninstallReinstallLauncher -StubPath $stub)) {
+            if (-not (Clear-FreshUninstallOwnedStagingArtifacts)) { return 1 }
+            return 3
+        }
         return 5
     }
 

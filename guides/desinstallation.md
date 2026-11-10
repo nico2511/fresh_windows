@@ -25,9 +25,9 @@ Ce guide décrit comment retirer Fresh Windows de la machine **sans** désinstal
 1. Lancer le **launcher** en PowerShell **administrateur** (one-liner README ou raccourci Bureau).
 2. Choisir **12 — Désinstallation**.
 3. Options :
-   - **3 — Simulation (DryRun)** : aucune suppression agent/tâches/cache ; depuis un clone local, exécution **en mémoire** ; sinon staging temporaire sous `%TEMP%` (annoncé) supprimé après la simulation.
+   - **3 — Simulation (DryRun)** : aucune suppression agent/tâches/cache ; depuis un clone local, exécution **en mémoire** ; sinon staging temporaire sous `%TEMP%\FreshWindows-UninstallRun-{session}\` (annoncé). Le staging est supprimé à la fin du DryRun **et** le menu renvoie le code **1** si la suppression échoue (même si la simulation elle-même a réussi). Échec de préparation du staging : dossier partiel nettoyé si possible, code **1**.
    - **2 — Désinstallation complète** : confirmation **OUI** requise ; supprime l’installation locale Fresh puis quitte le launcher.
-   - **1 — Désinstaller puis réinstaller** : taper exactement **OUI** ; nettoyage vérifié puis relance du launcher **`main`** via un stub temporaire sous `%TEMP%\FreshWindows-Reinstall-*\` (auto-nettoyé, hors cache supprimé).
+   - **1 — Désinstaller puis réinstaller** : taper exactement **OUI** ; nettoyage vérifié puis **suppression du staging UninstallRun** avant d’ouvrir la fenêtre de relance. Stub sous `%TEMP%\FreshWindows-Reinstall-*\` (nettoyé en `finally` ou si le délai de 8 minutes expire avec cache encore présent, code **3**). Code **5** = fenêtre de relance démarrée uniquement, pas succès `irm` garanti ; code **1** si le staging Run ne peut pas être supprimé avant relance.
 4. Seule la saisie exacte **OUI** confirme ; toute autre réponse **annule** sans effet.
 
 ## Méthode CLI (script du dépôt)
@@ -65,7 +65,7 @@ Suppression réelle (PowerShell **admin**) :
 & (Join-Path $dir 'Uninstall-FreshWindows.ps1') -Confirmed
 ```
 
-Réinstallation après nettoyage : ajouter `-Confirmed -ReinstallAfter` (code sortie **5** = relance démarrée, succès `irm` non garanti).
+Réinstallation après nettoyage : `-Confirmed -ReinstallAfter`. Le staging `FreshWindows-UninstallRun-{session}` doit être supprimé **avant** `Start-Process` du stub ; sinon code **1** sans relance. Code **5** = fenêtre démarrée ; succès `irm` / `main` non garanti. Vérification finale : échec d’énumération processus (autre qu’absence normale d’un nom) bloque le succès et la relance.
 
 ### Vérification non destructive (Windows PS 5.1)
 
