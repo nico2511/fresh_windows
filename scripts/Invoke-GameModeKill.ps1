@@ -30,6 +30,7 @@ else {
 Write-Host "`n=== MODE JEU - fermeture processus lourds ===" -ForegroundColor Red
 Write-Host "(Liste generique : dev / outils locaux / sync / Bitwarden - Discord/Legcord proteges)" -ForegroundColor DarkGray
 Write-Host "Launchers : familles (EA/Steam/...) - session active jamais tuee." -ForegroundColor DarkGray
+Write-Host "Ollama (ollama/Ollama) : ferme par mode jeu (domaine ai_local), pas protege." -ForegroundColor DarkGray
 
 Ensure-UltimatePerformanceActive | Out-Null
 

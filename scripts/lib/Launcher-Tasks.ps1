@@ -85,8 +85,8 @@ function Register-AllScheduledTasks {
         $wingetCmd = Get-WingetUpgradePowerShellCommand
         $wingetArg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$wingetCmd`""
         $wingetAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $wingetArg
-        $wingetTrigger = New-ScheduledTaskTrigger -Daily -At "12:00"
-        $wingetTrigger = Set-FreshWindowsScheduledTaskTriggerLocalTime -Trigger $wingetTrigger -At '12:00'
+        $wingetTrigger = New-ScheduledTaskTrigger -Daily -At "11:00"
+        $wingetTrigger = Set-FreshWindowsScheduledTaskTriggerLocalTime -Trigger $wingetTrigger -At '11:00'
 
         Register-ScheduledTask `
             -TaskName $script:WingetUpgradeTaskName `
@@ -97,7 +97,7 @@ function Register-AllScheduledTasks {
             -Description "Fresh Windows: winget source update + upgrade --all (StartWhenAvailable)." `
             -Force -ErrorAction Stop | Out-Null
 
-        Write-Host "  [OK] $script:WingetUpgradeTaskName - tous les jours 12:00 (+ rattrapage)" -ForegroundColor Green
+        Write-Host "  [OK] $script:WingetUpgradeTaskName - tous les jours 11:00 (+ rattrapage, avant maintenance dimanche 12:00)" -ForegroundColor Green
     }
     catch {
         Write-Host "  [KO] Winget : $($_.Exception.Message)" -ForegroundColor Red
@@ -207,7 +207,7 @@ function Open-ScheduledTasksMenu {
             Write-Host "⚠️  Pas en admin - l'activation échouera (Accès refusé)." -ForegroundColor Red
             Write-Host ""
         }
-        Show-NamedTaskStatus -TaskName $script:WingetUpgradeTaskName -Label "Winget (quotidien 12:00)"
+        Show-NamedTaskStatus -TaskName $script:WingetUpgradeTaskName -Label "Winget (quotidien 11:00)"
         Show-NamedTaskStatus -TaskName $script:WinUtilReapplyTaskName -Label "WinUtil+ShutUp10 (dimanche 12:00)"
         Show-NamedTaskStatus -TaskName $script:SyncLocalScriptsTaskName -Label "Sync scripts locaux (dimanche 12:30)"
         Write-Host ""

@@ -110,7 +110,30 @@ function Test-FreshWindowsPathUnderFreshRoot {
 
 function Resolve-FreshWindowsExpectedLocalRoot {
     param([string]$FreshAppData = $(Join-Path $env:LOCALAPPDATA 'FreshWindows'))
-    return [System.IO.Path]::GetFullPath($FreshAppData)
+    return [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'FreshWindows'))
+}
+
+function Test-FreshWindowsCanonicalFreshAppData {
+    param([Parameter(Mandatory)][string]$FreshAppData)
+    if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) { return $false }
+    try {
+        $given = [System.IO.Path]::GetFullPath($FreshAppData.Trim())
+        $expected = Resolve-FreshWindowsExpectedLocalRoot
+        return ($given -ceq $expected)
+    }
+    catch { return $false }
+}
+
+function Get-FreshWindowsScriptPathFromCommandLine {
+    param([string]$CommandLine)
+    if ([string]::IsNullOrWhiteSpace($CommandLine)) { return $null }
+    $m = [regex]::Match($CommandLine, '(?i)-File\s+"([^"]+)"')
+    if ($m.Success) { return $m.Groups[1].Value }
+    $m = [regex]::Match($CommandLine, "(?i)-File\s+(\S+)")
+    if (-not $m.Success) { return $null }
+    $p = $m.Groups[1].Value.Trim().Trim('"')
+    if ($p.Length -lt 2) { return $null }
+    return $p
 }
 
 function Stop-FreshWindowsLegacyVoiceProcesses {
@@ -126,8 +149,7 @@ function Stop-FreshWindowsLegacyVoiceProcesses {
     foreach ($id in $ImmuneProcessIds) { [void]$immune.Add([int]$id) }
     [void]$immune.Add([int]$PID)
 
-    $legacyPattern = 'FreshAgent-VoiceHost|FreshAgent-VoiceWorker|FreshAgent-BackgroundWorker|voice_worker|scribe-voice'
-    $maintenancePattern = 'GameMode-WatchAgent\.ps1|Launch-GameModeWatch\.ps1'
+    $legacyScriptPattern = '(?i)\\ai\\|\\FreshAgent-(VoiceHost|VoiceWorker|BackgroundWorker)|\\scribe-voice|FreshAgent-Dashboard'
 
     foreach ($n in @('powershell', 'pwsh')) {
         $procs = @(Get-Process -Name $n -ErrorAction SilentlyContinue)
@@ -139,9 +161,10 @@ function Stop-FreshWindowsLegacyVoiceProcesses {
             }
             catch { continue }
             if ([string]::IsNullOrWhiteSpace($cmd)) { continue }
-            if ($cmd -match $maintenancePattern) { continue }
-            if (-not (Test-FreshWindowsPathUnderFreshRoot -Path $cmd -FreshRoot $FreshRoot)) { continue }
-            if ($cmd -match $legacyPattern) {
+            $scriptPath = Get-FreshWindowsScriptPathFromCommandLine -CommandLine $cmd
+            if (-not $scriptPath) { continue }
+            if (-not (Test-FreshWindowsPathUnderFreshRoot -Path $scriptPath -FreshRoot $FreshRoot)) { continue }
+            if ($scriptPath -match $legacyScriptPattern -or $cmd -match '(?i)FreshAgent-VoiceHost|FreshAgent-VoiceWorker|FreshAgent-BackgroundWorker') {
                 try { Stop-Process -Id $p.Id -Force -ErrorAction Stop } catch { }
             }
         }
@@ -170,9 +193,8 @@ function Remove-FreshWindowsObsoleteLocalAssets {
     param([Parameter(Mandatory)][string]$FreshAppData)
 
     $errors = [System.Collections.ArrayList]@()
-    $expectedRoot = Resolve-FreshWindowsExpectedLocalRoot -FreshAppData $FreshAppData
-  if (-not (Test-FreshWindowsPathUnderFreshRoot -Path $expectedRoot -FreshRoot (Join-Path $env:LOCALAPPDATA 'FreshWindows'))) {
-        [void]$errors.Add('FreshAppData hors LOCALAPPDATA\FreshWindows')
+    if (-not (Test-FreshWindowsCanonicalFreshAppData -FreshAppData $FreshAppData)) {
+        [void]$errors.Add('FreshAppData doit etre exactement %LOCALAPPDATA%\FreshWindows')
         return @{ ok = $false; errors = @($errors) }
     }
     if (-not (Test-Path -LiteralPath $FreshAppData)) {
@@ -180,10 +202,6 @@ function Remove-FreshWindowsObsoleteLocalAssets {
     }
 
     $freshNorm = [System.IO.Path]::GetFullPath($FreshAppData)
-    if ($freshNorm -ne $expectedRoot) {
-        [void]$errors.Add("Chemin FreshAppData inattendu : $freshNorm")
-        return @{ ok = $false; errors = @($errors) }
-    }
 
     $immune = @(Get-FreshWindowsUninstallImmuneProcessIds)
     try { Stop-FreshWindowsLegacyVoiceProcesses -FreshRoot $freshNorm -ImmuneProcessIds $immune } catch {
@@ -233,12 +251,16 @@ function Remove-FreshWindowsObsoleteLocalAssets {
                 try { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop }
                 catch { [void]$errors.Add("Suppression lib $($_.Name) : $($_.Exception.Message)") }
             }
-        foreach ($legacy in @('Launcher-Core.ps1', 'Launcher-Core.ps1.ref')) {
-            $lp = Join-Path $libDir $legacy
-            if (Test-Path -LiteralPath $lp) {
-                try { Remove-Item -LiteralPath $lp -Force -ErrorAction Stop } catch { }
+    }
+
+    $binDir = Join-Path $FreshAppData 'bin'
+    if (Test-Path -LiteralPath $binDir) {
+        Get-ChildItem -LiteralPath $binDir -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '(?i)^voice_worker' } |
+            ForEach-Object {
+                try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop }
+                catch { [void]$errors.Add("voice_worker cache: $($_.Exception.Message)") }
             }
-        }
     }
 
     $cfgDir = Join-Path $FreshAppData 'configs'
@@ -273,6 +295,142 @@ function Test-FreshWindowsIsElevated {
     catch { return $false }
 }
 
+function Stop-FreshWindowsMaintenanceLaunchPrep {
+    param(
+        [Parameter(Mandatory)][string]$FreshAppData,
+        [int[]]$ImmuneProcessIds = @()
+    )
+    if (-not (Test-FreshWindowsCanonicalFreshAppData -FreshAppData $FreshAppData)) { return }
+    $freshNorm = [System.IO.Path]::GetFullPath($FreshAppData)
+    if ($ImmuneProcessIds.Count -eq 0 -and (Get-Command Get-FreshWindowsUninstallImmuneProcessIds -ErrorAction SilentlyContinue)) {
+        $ImmuneProcessIds = @(Get-FreshWindowsUninstallImmuneProcessIds)
+    }
+    Stop-FreshWindowsLegacyVoiceProcesses -FreshRoot $freshNorm -ImmuneProcessIds $ImmuneProcessIds | Out-Null
+    $watchScriptPattern = '(?i)GameMode-WatchAgent\.ps1|Launch-GameModeWatch\.ps1'
+    foreach ($n in @('powershell', 'pwsh')) {
+        foreach ($p in @(Get-Process -Name $n -ErrorAction SilentlyContinue)) {
+            if ($ImmuneProcessIds -contains $p.Id) { continue }
+            $cmd = ''
+            try { $cmd = (Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $p.Id) -ErrorAction Stop).CommandLine } catch { continue }
+            $scriptPath = Get-FreshWindowsScriptPathFromCommandLine -CommandLine $cmd
+            if (-not $scriptPath) { continue }
+            if (-not (Test-FreshWindowsPathUnderFreshRoot -Path $scriptPath -FreshRoot $freshNorm)) { continue }
+            if ($scriptPath -match $watchScriptPattern) {
+                try { Stop-Process -Id $p.Id -Force -ErrorAction Stop } catch { }
+            }
+        }
+    }
+    $startupLnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'Fresh Windows Surveillance.lnk'
+    if (Test-FreshWindowsWatchAgentScheduledTaskPresent -FreshAppData $freshNorm) {
+        if (Test-Path -LiteralPath $startupLnk) {
+            try { Remove-Item -LiteralPath $startupLnk -Force -ErrorAction SilentlyContinue } catch { }
+        }
+    }
+}
+
+function Test-FreshWindowsWatchAgentScheduledTaskPresent {
+    param([Parameter(Mandatory)][string]$FreshAppData)
+    $cmdPath = Join-Path $FreshAppData 'Start-WatchAgent.cmd'
+    $task = Get-ScheduledTask -TaskName 'FreshWindows-WatchAgent' -ErrorAction SilentlyContinue
+    if (-not $task) { return $false }
+    foreach ($a in @($task.Actions)) {
+        $exe = [string]$a.Execute
+        if ($exe -and ($exe -eq $cmdPath -or $exe -like '*Start-WatchAgent.cmd*')) { return $true }
+    }
+    return $false
+}
+
+function Import-FreshMaintenanceModules {
+    param(
+        [Parameter(Mandatory)][string]$FreshAppData,
+        [string]$RepoRawRoot = '',
+        [string]$Ref = 'main',
+        [string]$IconUrl = ''
+    )
+    if (-not (Test-FreshWindowsCanonicalFreshAppData -FreshAppData $FreshAppData)) {
+        return $false
+    }
+    $cfg = Join-Path $FreshAppData 'lib\FreshAgent-MaintenanceConfig.ps1'
+    if (-not (Test-Path -LiteralPath $cfg)) {
+        if ($RepoRawRoot -and (Get-Command Sync-GameModeLocalScripts -ErrorAction SilentlyContinue)) {
+            Sync-GameModeLocalScripts -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $Ref -IconUrl $IconUrl | Out-Null
+        }
+    }
+    $known = @{}
+    foreach ($cmd in @(Get-Command -CommandType Function -ErrorAction SilentlyContinue)) {
+        $known[$cmd.Name] = $true
+    }
+    foreach ($rel in @(
+            'FreshAgent-MaintenanceConfig.ps1',
+            'FreshAgent-Health.ps1',
+            'FreshAgent-Optimize.ps1',
+            'FreshAgent-GameSession.ps1'
+        )) {
+        $p = Join-Path $FreshAppData "lib\$rel"
+        if (-not (Test-Path -LiteralPath $p)) { continue }
+        . $p
+        foreach ($cmd in @(Get-Command -CommandType Function -ErrorAction SilentlyContinue)) {
+            if ($known.ContainsKey($cmd.Name)) { continue }
+            $known[$cmd.Name] = $true
+            if ($cmd.ModuleName) { continue }
+            $dest = "Function:\Global:$($cmd.Name)"
+            if (-not (Test-Path -LiteralPath $dest)) {
+                Set-Item -LiteralPath $dest -Value $cmd.ScriptBlock
+            }
+        }
+    }
+    return [bool](Get-Command Invoke-FreshAgentCleanup -ErrorAction SilentlyContinue)
+}
+
+function Wait-FreshWindowsWingetIdleForMaintenance {
+    param(
+        [int]$MaxWaitSeconds = 900,
+        [int]$PollSeconds = 15
+    )
+    $names = @('winget', 'WindowsPackageManager', 'AppInstaller')
+    $deadline = (Get-Date).AddSeconds($MaxWaitSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $busy = $false
+        foreach ($n in $names) {
+            if (Get-Process -Name $n -ErrorAction SilentlyContinue) { $busy = $true; break }
+        }
+        if (-not $busy) { return $true }
+        Start-Sleep -Seconds $PollSeconds
+    }
+    return $false
+}
+
+function Invoke-FreshMaintenanceTempCleanup {
+    param(
+        [Parameter(Mandatory)][string]$FreshAppData,
+        [string]$RepoRawRoot = '',
+        [string]$Ref = 'main',
+        [string]$IconUrl = '',
+        [switch]$NoPause
+    )
+    if (-not (Import-FreshMaintenanceModules -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $Ref -IconUrl $IconUrl)) {
+        return @{ ok = $false; message = 'Modules maintenance absents (sync menu 11).' }
+    }
+    Wait-FreshWindowsWingetIdleForMaintenance | Out-Null
+    return Invoke-FreshAgentCleanup -Temp
+}
+
+function Invoke-FreshMaintenanceWeeklyReport {
+    param(
+        [Parameter(Mandatory)][string]$FreshAppData,
+        [string]$RepoRawRoot = '',
+        [string]$Ref = 'main',
+        [string]$IconUrl = ''
+    )
+    if (-not (Import-FreshMaintenanceModules -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $Ref -IconUrl $IconUrl)) {
+        return @{ ok = $false; message = 'Modules maintenance absents (sync menu 11).' }
+    }
+    if (Get-Command New-FreshAgentWeeklyHealthReport -ErrorAction SilentlyContinue) {
+        return New-FreshAgentWeeklyHealthReport -FreshAppData $FreshAppData
+    }
+    return @{ ok = $false; message = 'Rapport indisponible.' }
+}
+
 function Start-FreshWindowsUnelevated {
     param(
         [Parameter(Mandatory)][string]$FilePath,
@@ -280,6 +438,9 @@ function Start-FreshWindowsUnelevated {
     )
     if ([string]::IsNullOrWhiteSpace($WorkingDirectory)) {
         $WorkingDirectory = Split-Path -Parent $FilePath
+    }
+    if (Get-Command Stop-FreshWindowsMaintenanceLaunchPrep -ErrorAction SilentlyContinue) {
+        Stop-FreshWindowsMaintenanceLaunchPrep -FreshAppData $WorkingDirectory | Out-Null
     }
     $cmdPath = Join-Path $WorkingDirectory 'Start-WatchAgent.cmd'
     if (-not (Test-Path -LiteralPath $cmdPath)) {
@@ -464,8 +625,7 @@ function Sync-GameModeLocalScripts {
             'lib/FreshAgent-Optimize.ps1',
             'lib/FreshAgent-Health.ps1',
             'lib/FreshWindows-AppxBloatware.ps1',
-            'lib/FreshWindows-BackgroundAudit.ps1',
-            'lib/Launcher-Core.ps1'
+            'lib/FreshWindows-BackgroundAudit.ps1'
         )) {
         $leaf = $rel -replace '/', '\'
         $dest = Join-Path $FreshAppData $leaf
@@ -533,7 +693,7 @@ function Confirm-FreshWindowsUninstallAction {
     )
     Write-Host ''
     Write-Host $Summary -ForegroundColor Yellow
-    Write-Host 'Conserve : apps winget, tweaks WinUtil/ShutUp10, CyberScribe et modeles externes.' -ForegroundColor DarkGray
+    Write-Host 'Conserve : apps winget, tweaks WinUtil/ShutUp10, CyberScribe.' -ForegroundColor DarkGray
     Write-Host $Prompt -ForegroundColor Yellow
     $line = Read-Host
     if ($null -eq $line) { return $false }
@@ -704,7 +864,7 @@ function Open-FreshWindowsUninstallMenu {
         Clear-Host
         Write-Host '=== DESINSTALLATION FRESH WINDOWS ===' -ForegroundColor Cyan
         Write-Host 'Retire taches FreshWindows-*, cache %LOCALAPPDATA%\FreshWindows, raccourcis Fresh.' -ForegroundColor DarkGray
-        Write-Host 'Ne retire pas les apps winget, CyberScribe, ni les modeles vocaux externes.' -ForegroundColor DarkGray
+        Write-Host 'Ne retire pas les apps winget ni CyberScribe (install winget / dossiers externes).' -ForegroundColor DarkGray
         Write-Host ''
         Write-Host '1. Desinstaller puis reinstaller (launcher main GitHub)' -ForegroundColor Cyan
         Write-Host '2. Desinstallation complete' -ForegroundColor Yellow

@@ -143,6 +143,19 @@ function Request-WatchAgentShutdown {
 }
 
 Write-WatchLog 'WatchAgent start (maintenance)'
+$coreCached = Join-Path $FreshAppData 'lib\Launcher-Core.ps1'
+if (Test-Path -LiteralPath $coreCached) {
+    try {
+        . $coreCached
+        if (Get-Command Stop-FreshWindowsMaintenanceLaunchPrep -ErrorAction SilentlyContinue) {
+            Stop-FreshWindowsMaintenanceLaunchPrep -FreshAppData $FreshAppData -ImmuneProcessIds @($PID) | Out-Null
+            Write-WatchLog 'Prep lancement: anciens agents IA/voix/watch arretes'
+        }
+    }
+    catch {
+        Write-WatchLog ("Prep lancement: {0}" -f $_.Exception.Message)
+    }
+}
 $script:WatchAgentSessionState = $ExecutionContext.SessionState
 
 $selfScript = $PSCommandPath
@@ -173,37 +186,41 @@ function Get-FreshWatchAgentPeerProcesses {
 }
 
 function Enter-FreshWatchAgentSingleInstance {
-    $mutexName = 'Global\FreshWindowsWatchAgent'
+    $mutexCandidates = @(
+        'Global\FreshWindowsWatchAgent',
+        ('Global\FreshWindows-WatchAgent-{0}' -f $env:USERNAME),
+        'Global\FreshWindows-WatchAgent',
+        'Global\FreshAgentWatchAgent'
+    )
     $script:WatchMutex = $null
     $acquired = $false
-    try {
-        $script:WatchMutex = New-Object System.Threading.Mutex($false, $mutexName)
-        try { $acquired = $script:WatchMutex.WaitOne(0, $false) }
-        catch [System.Threading.AbandonedMutexException] {
-            $acquired = $true
-            Write-WatchLog 'Mutex abandonne (crash precedent) — reprise'
-        }
-        if (-not $acquired) {
-            $peers = @(Get-FreshWatchAgentPeerProcesses)
-            if ($peers.Count -eq 0) {
-                Write-WatchLog 'Mutex bloque sans processus agent — reset'
-                try { $script:WatchMutex.Dispose() } catch { }
-                $script:WatchMutex = $null
-                $created = $false
-                $script:WatchMutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$created)
+  foreach ($mutexName in $mutexCandidates) {
+        try {
+            $script:WatchMutex = New-Object System.Threading.Mutex($false, $mutexName)
+            try { $acquired = $script:WatchMutex.WaitOne(0, $false) }
+            catch [System.Threading.AbandonedMutexException] {
                 $acquired = $true
+                Write-WatchLog ('Mutex abandonne ({0}) — reprise' -f $mutexName)
             }
-            else {
-                $pids = ($peers | ForEach-Object { [string]$_.ProcessId }) -join ','
-                Write-WatchLog ("Autre instance active (PID {0}) — exit" -f $pids)
-                exit 0
+            if ($acquired) {
+                Write-WatchLog ("Mutex acquis ({0}) PID $PID" -f $mutexName)
+                return
             }
+            try { $script:WatchMutex.Dispose() } catch { }
+            $script:WatchMutex = $null
         }
-        if ($acquired) { Write-WatchLog ("Mutex acquis PID $PID") }
+        catch {
+            Write-WatchLog ("Mutex {0}: {1}" -f $mutexName, $_.Exception.Message)
+        }
     }
-    catch {
-        Write-WatchLog ("Mutex: {0}" -f $_.Exception.Message)
+    $peers = @(Get-FreshWatchAgentPeerProcesses)
+    if ($peers.Count -gt 0) {
+        $pids = ($peers | ForEach-Object { [string]$_.ProcessId }) -join ','
+        Write-WatchLog ("Autre instance active (PID {0}) — exit" -f $pids)
+        exit 0
     }
+    Write-WatchLog 'Aucun mutex acquis — exit (evite double systray)'
+    exit 0
 }
 
 function Exit-FreshWatchAgentSingleInstance {

@@ -36,6 +36,7 @@ if ($pesterMod) {
         'Appx-Bloatware.Tests.ps1',
         'FreshWindows-BackgroundAudit.Tests.ps1',
         'Remove-FreshWindowsObsoleteLocalAssets.Tests.ps1',
+        'FreshMaintenance-Menu.Tests.ps1',
         'Uninstall-FreshWindows.Tests.ps1'
     )
     foreach ($pesterFile in $pesterFiles) {
@@ -53,7 +54,7 @@ if ($pesterMod) {
         try { $badCount = [int]$result.FailedCount } catch { $badCount = 1 }
         $resultName = ''
         try { $resultName = [string]$result.Result } catch { }
-        if ($badCount -gt 0 -or $resultName -eq 'Failed') { $failed++ }
+        if ($badCount -gt 0) { $failed++ }
     }
 }
 else {

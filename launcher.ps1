@@ -1370,11 +1370,17 @@ function Install-GameModeShortcuts {
             }
             if (Test-WatchAgentAlreadyInstalled -FreshAppData $FreshAppData) {
                 Write-Host "-> Agent deja installe (tache FreshWindows-WatchAgent)." -ForegroundColor Green
+                if (Test-Path -LiteralPath $lnkWatch) {
+                    Remove-Item -LiteralPath $lnkWatch -Force -ErrorAction SilentlyContinue
+                }
             }
             else {
                 try {
                     $taskName = Register-FreshWindowsWatchAgentLogon -FreshAppData $FreshAppData
                     Write-Host "-> Tache : $taskName (AtLogOn Limited, delai 45s)" -ForegroundColor Green
+                    if (Test-Path -LiteralPath $lnkWatch) {
+                        Remove-Item -LiteralPath $lnkWatch -Force -ErrorAction SilentlyContinue
+                    }
                 }
                 catch {
                     Write-Host "Tache non creee : $($_.Exception.Message)" -ForegroundColor DarkYellow
@@ -1420,8 +1426,15 @@ function Open-GameModeSetupMenu {
             "1" { Invoke-GameModeKill | Out-Null }
             "2" { Install-GameModeShortcuts | Out-Null }
             "3" { Install-GameModeShortcuts -IncludeWatchAgent | Out-Null }
-            "4" { Invoke-FreshMaintenanceTempCleanup -NoPause | Out-Null }
-            "5" { Invoke-FreshMaintenanceWeeklyReport -NoPause | Out-Null }
+            "4" {
+                $r = Invoke-FreshMaintenanceTempCleanup -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl -NoPause
+                Write-Host $r.message -ForegroundColor $(if ($r.ok) { 'Green' } else { 'Yellow' })
+            }
+            "5" {
+                $r = Invoke-FreshMaintenanceWeeklyReport -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl
+                Write-Host $r.message -ForegroundColor $(if ($r.ok) { 'Green' } else { 'Yellow' })
+                Wait-ForUser
+            }
             "6" { return }
             default {
                 Write-Host "Choix invalide" -ForegroundColor Red
@@ -1429,48 +1442,6 @@ function Open-GameModeSetupMenu {
             }
         }
     } while ($true)
-}
-
-function Invoke-FreshMaintenanceLibs {
-    $maintCfg = Join-Path $FreshAppData 'lib\FreshAgent-MaintenanceConfig.ps1'
-    if (-not (Test-Path -LiteralPath $maintCfg)) {
-        try {
-            Sync-GameModeLocalScripts -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl | Out-Null
-        }
-        catch { }
-    }
-    foreach ($rel in @('FreshAgent-MaintenanceConfig.ps1', 'FreshAgent-Health.ps1', 'FreshAgent-Optimize.ps1')) {
-        $p = Join-Path $FreshAppData "lib\$rel"
-        if (Test-Path -LiteralPath $p) { . $p }
-    }
-}
-
-function Invoke-FreshMaintenanceTempCleanup {
-    param([switch]$NoPause)
-    Invoke-FreshMaintenanceLibs
-    if (-not (Get-Command Invoke-FreshAgentCleanup -ErrorAction SilentlyContinue)) {
-        Write-Host "Modules maintenance absents (sync menu 11 d'abord)." -ForegroundColor Red
-        if (-not $NoPause) { Wait-ForUser }
-        return $false
-    }
-    $r = Invoke-FreshAgentCleanup -Temp
-    Write-Host $r.message -ForegroundColor $(if ($r.ok) { 'Green' } else { 'Yellow' })
-    if (-not $NoPause) { Wait-ForUser }
-    return [bool]$r.ok
-}
-
-function Invoke-FreshMaintenanceWeeklyReport {
-    param([switch]$NoPause)
-    Invoke-FreshMaintenanceLibs
-    if (-not (Get-Command New-FreshAgentWeeklyHealthReport -ErrorAction SilentlyContinue)) {
-        Write-Host "Modules maintenance absents (sync menu 11 d'abord)." -ForegroundColor Red
-        if (-not $NoPause) { Wait-ForUser }
-        return $false
-    }
-    $r = New-FreshAgentWeeklyHealthReport -FreshAppData $FreshAppData
-    Write-Host $r.message -ForegroundColor Green
-    if (-not $NoPause) { Wait-ForUser }
-    return [bool]$r.ok
 }
 
 function Invoke-SilentMode {

@@ -29,7 +29,7 @@ function Get-FreshWindowsBackgroundCatalog {
             Id              = 'scheduled-task-winget'
             Name            = 'FreshWindows-WingetUpgrade'
             Type            = 'ScheduledTask'
-            Frequency       = 'Quotidien 12:00 (StartWhenAvailable)'
+            Frequency       = 'Quotidien 11:00 (StartWhenAvailable)'
             Account         = 'Utilisateur courant (Highest)'
             Impact          = 'Moyen (pic court : winget upgrade --all)'
             Source          = 'scripts/lib/Launcher-Tasks.ps1'
@@ -486,8 +486,6 @@ function Invoke-FreshWindowsBackgroundAudit {
         [switch]$NoConfirm,
         [string]$FreshAppData = $(Join-Path $env:LOCALAPPDATA 'FreshWindows'),
         [string]$ReportPath = '',
-        [int]$SampleMinutes = 0,
-        [int]$SampleIntervalSeconds = 60,
         [scriptblock]$ScheduledTaskDisable = $null,
         [scriptblock]$ScheduledTaskEnable = $null
     )

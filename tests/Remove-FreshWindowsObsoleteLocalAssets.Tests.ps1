@@ -24,9 +24,14 @@ Describe 'Remove-FreshWindowsObsoleteLocalAssets' {
     }
 
     AfterAll {
+        $env:LOCALAPPDATA = $script:OrigLocalAppData
         if ($script:GuidRoot -and (Test-Path -LiteralPath $script:GuidRoot)) {
             Remove-Item -LiteralPath $script:GuidRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
+    }
+
+    It 'restaure LOCALAPPDATA apres le describe' {
+        $env:LOCALAPPDATA | Should -Be $script:GuidRoot
     }
 
     It 'refuse un chemin hors LOCALAPPDATA\FreshWindows' {
@@ -35,6 +40,13 @@ Describe 'Remove-FreshWindowsObsoleteLocalAssets' {
         $r = Remove-FreshWindowsObsoleteLocalAssets -FreshAppData $bogus
         $r.ok | Should -Be $false
         $r.errors | Should -Not -BeNullOrEmpty
+    }
+
+    It 'refuse FreshWindowsOld (derive du nom canonique)' {
+        $old = Join-Path $script:GuidRoot 'FreshWindowsOld'
+        New-Item -ItemType Directory -Path $old -Force | Out-Null
+        $r = Remove-FreshWindowsObsoleteLocalAssets -FreshAppData $old
+        $r.ok | Should -Be $false
     }
 
     It 'supprime IA/voix mais garde maintenance systray' {

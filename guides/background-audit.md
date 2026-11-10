@@ -15,7 +15,7 @@ Outil de **lecture seule** par défaut pour lister les tâches planifiées Fresh
 
 | Tâche | Fréquence | Source |
 |-------|-----------|--------|
-| `FreshWindows-WingetUpgrade` | Quotidien 12:00 | `Launcher-Tasks.ps1` |
+| `FreshWindows-WingetUpgrade` | Quotidien 11:00 | `Launcher-Tasks.ps1` |
 | `FreshWindows-WinUtilReapply` | Dimanche 12:00 | `Launcher-Tasks.ps1` |
 | `FreshWindows-SyncLocalScripts` | Dimanche 12:30 | `Launcher-Tasks.ps1` |
 | `FreshWindows-WatchAgent` | À la connexion (+45 s) | `Launcher-Core.ps1` (menu 11) |

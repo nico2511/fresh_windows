@@ -198,29 +198,27 @@ function Invoke-MaintenanceReapply {
     }
     if ($syncOk) { Write-FreshStep -Title '[3/5] Sync scripts - OK' -Color Green }
 
-  if (Get-Command Invoke-FreshAgentCleanup -ErrorAction SilentlyContinue) {
-        $tc = Invoke-FreshAgentCleanup -Temp
+    if (Get-Command Wait-FreshWindowsWingetIdleForMaintenance -ErrorAction SilentlyContinue) {
+        $idle = Wait-FreshWindowsWingetIdleForMaintenance
+        if (-not $idle) {
+            Write-FreshStep -Title '[4/5] Nettoyage temp differe (winget actif)' -Color DarkYellow
+        }
+    }
+    if (Get-Command Invoke-FreshMaintenanceTempCleanup -ErrorAction SilentlyContinue) {
+        $tc = Invoke-FreshMaintenanceTempCleanup -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl -NoPause
         $tempOk = [bool]$tc.ok
         Write-FreshStep -Title ('[4/5] Nettoyage temp - {0}' -f $(if ($tempOk) { 'OK' } else { 'partiel' })) -Color $(if ($tempOk) { 'Green' } else { 'Yellow' })
     }
     else {
-        $maintCfg = Join-Path $FreshAppData 'lib\FreshAgent-MaintenanceConfig.ps1'
-        if (Test-Path -LiteralPath $maintCfg) {
-            . $maintCfg
-            foreach ($rel in @('FreshAgent-Health.ps1', 'FreshAgent-Optimize.ps1')) {
-                $p = Join-Path $FreshAppData "lib\$rel"
-                if (Test-Path -LiteralPath $p) { . $p }
-            }
-            if (Get-Command Invoke-FreshAgentCleanup -ErrorAction SilentlyContinue) {
-                $tc = Invoke-FreshAgentCleanup -Temp
-                $tempOk = [bool]$tc.ok
-            }
-        }
-        Write-FreshStep -Title ('[4/5] Nettoyage temp - {0}' -f $(if ($tempOk) { 'OK' } else { 'skip' })) -Color $(if ($tempOk) { 'Green' } else { 'DarkGray' })
+        Write-FreshStep -Title '[4/5] Nettoyage temp - skip (modules)' -Color DarkGray
+        $tempOk = $false
     }
 
-    if (Get-Command Invoke-FreshAgentWeeklyHealthReportIfDue -ErrorAction SilentlyContinue) {
+    if (Get-Command Invoke-FreshMaintenanceWeeklyReport -ErrorAction SilentlyContinue) {
         $wh = Invoke-FreshAgentWeeklyHealthReportIfDue -FreshAppData $FreshAppData
+        if (-not $wh -and (Import-FreshMaintenanceModules -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl)) {
+            $wh = Invoke-FreshAgentWeeklyHealthReportIfDue -FreshAppData $FreshAppData
+        }
         $healthOk = $true
         if ($wh -and $wh.ok) {
             Write-FreshStep -Title ('[5/5] Rapport sante - {0}' -f $wh.message) -Color Green

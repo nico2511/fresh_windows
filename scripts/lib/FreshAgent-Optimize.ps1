@@ -80,19 +80,26 @@ function Invoke-FreshAgentCleanup {
         [void]$notes.Add($rp.message)
     }
     if ($Temp) {
-        foreach ($dir in @($env:TEMP, (Join-Path $env:WINDIR 'Temp'))) {
+        $tempDirs = @()
+        if (-not [string]::IsNullOrWhiteSpace($env:TEMP)) { $tempDirs += $env:TEMP }
+        if (-not [string]::IsNullOrWhiteSpace($env:WINDIR)) {
+            $tempDirs += (Join-Path $env:WINDIR 'Temp')
+        }
+        foreach ($dir in $tempDirs) {
             if (-not (Test-Path -LiteralPath $dir)) { continue }
-            try {
-                Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue |
-                    Where-Object { $_.Name -notmatch '^FreshWindows' } |
-                    ForEach-Object {
-                        try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue } catch { }
+            $skipped = 0
+            $removed = 0
+            Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    try {
+                        Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop
+                        $removed++
                     }
-                [void]$notes.Add("Temp nettoye: $dir")
-            }
-            catch {
-                [void]$notes.Add("Temp echoue: $dir")
-            }
+                    catch {
+                        $skipped++
+                    }
+                }
+            [void]$notes.Add(("Temp nettoye: {0} ({1} supprimes, {2} verrouilles/ignores)" -f $dir, $removed, $skipped))
         }
     }
     if ($RecycleBin) {

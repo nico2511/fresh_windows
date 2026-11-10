@@ -18,7 +18,6 @@ Ce guide décrit comment retirer Fresh Windows de la machine **sans** désinstal
 
 - Les **applications installées via winget** (ou le menu Fresh Windows) : elles ne sont pas désinstallées.
 - Les **réglages WinUtil** et **ShutUp10++** déjà appliqués : le script ne les annule pas.
-- Les **dossiers de modèles vocaux externes** éventuels (hors `%LOCALAPPDATA%\FreshWindows`), si vous les aviez placés ailleurs pour Piper / STT.
 
 ## Via le menu Fresh Windows (recommandé)
 

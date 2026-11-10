@@ -152,6 +152,8 @@ Lancement distant : cache sous `%LOCALAPPDATA%\FreshWindows` (epoch `FreshWindow
 
 Ferme les processus hors session jeu (dev, IA locale, sync, tray sécurité, messagerie hors Discord/Legcord…). **Ne tue jamais** la famille de launcher d’une session active. Sans session claire → aucun launcher tué. Active **Ultimate Performance** au lancement.
 
+**Ollama** (`ollama.exe` / `Ollama.Ollama`) est dans le domaine `ai_local` : le mode jeu le ferme volontairement. Il n’est pas listé dans `protect.ai_runtime` (décision produit M14).
+
 Config : `configs/game-mode-kill.json` (domaines, protections, familles de launchers).
 
 Scripts locaux : `%LOCALAPPDATA%\FreshWindows\` + marqueurs `scripts.ref` / `scripts.stamp` (epoch aligné sur `FreshWindowsLibEpoch`).
@@ -165,7 +167,7 @@ Scripts locaux : `%LOCALAPPDATA%\FreshWindows\` + marqueurs `scripts.ref` / `scr
 
 | Tâche | Quand | Action |
 |-------|-------|--------|
-| `FreshWindows-WingetUpgrade` | Quotidien 12:00 | `winget upgrade --all` |
+| `FreshWindows-WingetUpgrade` | Quotidien 11:00 | `winget upgrade --all` |
 | `FreshWindows-WinUtilReapply` | Dimanche 12:00 | Mode `maintenance` |
 | `FreshWindows-SyncLocalScripts` | Dimanche 12:30 | Resync scripts locaux (mode jeu + maintenance) |
 
