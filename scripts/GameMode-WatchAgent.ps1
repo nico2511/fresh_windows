@@ -142,21 +142,27 @@ function Request-WatchAgentShutdown {
     [Environment]::Exit(0)
 }
 
-Write-WatchLog 'WatchAgent start (maintenance)'
-$coreCached = Join-Path $FreshAppData 'lib\Launcher-Core.ps1'
-if (Test-Path -LiteralPath $coreCached) {
-    try {
-        . $coreCached
-        if (Get-Command Stop-FreshWindowsMaintenanceLaunchPrep -ErrorAction SilentlyContinue) {
-            Stop-FreshWindowsMaintenanceLaunchPrep -FreshAppData $FreshAppData -ImmuneProcessIds @($PID) | Out-Null
-            Write-WatchLog 'Prep lancement: anciens agents IA/voix/watch arretes'
+function Test-FreshWatchLegacyMaintenanceMutexHeld {
+    $legacyNames = @(
+        'Global\FreshWindows-WatchAgent-FreshWindows',
+        'Global\FreshWindows-WatchAgent',
+        'Global\FreshAgentWatchAgent',
+        ('Global\FreshWindows-WatchAgent-{0}' -f $env:USERNAME)
+    )
+    foreach ($mutexName in $legacyNames) {
+        try {
+            $legacy = [System.Threading.Mutex]::OpenExisting($mutexName)
+            try { $legacy.Dispose() } catch { }
+            return $true
         }
+        catch [System.Threading.WaitHandleCannotBeOpenedException] { }
+        catch [UnauthorizedAccessException] {
+            return $true
+        }
+        catch { }
     }
-    catch {
-        Write-WatchLog ("Prep lancement: {0}" -f $_.Exception.Message)
-    }
+    return $false
 }
-$script:WatchAgentSessionState = $ExecutionContext.SessionState
 
 $selfScript = $PSCommandPath
 if (-not $selfScript) { $selfScript = $MyInvocation.MyCommand.Path }
@@ -186,32 +192,12 @@ function Get-FreshWatchAgentPeerProcesses {
 }
 
 function Enter-FreshWatchAgentSingleInstance {
-    $mutexCandidates = @(
-        'Global\FreshWindowsWatchAgent',
-        ('Global\FreshWindows-WatchAgent-{0}' -f $env:USERNAME),
-        'Global\FreshWindows-WatchAgent',
-        'Global\FreshAgentWatchAgent'
+    param(
+        [string]$PrimaryMutexName = 'Global\FreshWindowsWatchAgent'
     )
-    $script:WatchMutex = $null
-    $acquired = $false
-  foreach ($mutexName in $mutexCandidates) {
-        try {
-            $script:WatchMutex = New-Object System.Threading.Mutex($false, $mutexName)
-            try { $acquired = $script:WatchMutex.WaitOne(0, $false) }
-            catch [System.Threading.AbandonedMutexException] {
-                $acquired = $true
-                Write-WatchLog ('Mutex abandonne ({0}) — reprise' -f $mutexName)
-            }
-            if ($acquired) {
-                Write-WatchLog ("Mutex acquis ({0}) PID $PID" -f $mutexName)
-                return
-            }
-            try { $script:WatchMutex.Dispose() } catch { }
-            $script:WatchMutex = $null
-        }
-        catch {
-            Write-WatchLog ("Mutex {0}: {1}" -f $mutexName, $_.Exception.Message)
-        }
+    if (Test-FreshWatchLegacyMaintenanceMutexHeld) {
+        Write-WatchLog 'Mutex legacy detecte — exit (migration ancien agent)'
+        exit 0
     }
     $peers = @(Get-FreshWatchAgentPeerProcesses)
     if ($peers.Count -gt 0) {
@@ -219,8 +205,27 @@ function Enter-FreshWatchAgentSingleInstance {
         Write-WatchLog ("Autre instance active (PID {0}) — exit" -f $pids)
         exit 0
     }
-    Write-WatchLog 'Aucun mutex acquis — exit (evite double systray)'
-    exit 0
+    $script:WatchMutex = $null
+    $acquired = $false
+    try {
+        $script:WatchMutex = New-Object System.Threading.Mutex($false, $PrimaryMutexName)
+        try { $acquired = $script:WatchMutex.WaitOne(0, $false) }
+        catch [System.Threading.AbandonedMutexException] {
+            $acquired = $true
+            Write-WatchLog ('Mutex abandonne ({0}) — reprise' -f $PrimaryMutexName)
+        }
+        if (-not $acquired) {
+            Write-WatchLog ("Mutex principal occupe ({0}) — exit" -f $PrimaryMutexName)
+            try { $script:WatchMutex.Dispose() } catch { }
+            $script:WatchMutex = $null
+            exit 0
+        }
+        Write-WatchLog ("Mutex acquis ({0}) PID $PID" -f $PrimaryMutexName)
+    }
+    catch {
+        Write-WatchLog ("Mutex {0}: {1}" -f $PrimaryMutexName, $_.Exception.Message)
+        exit 0
+    }
 }
 
 function Exit-FreshWatchAgentSingleInstance {
@@ -236,6 +241,26 @@ function Exit-FreshWatchAgentSingleInstance {
 
 Enter-FreshWatchAgentSingleInstance
 Write-WatchLog 'Post-mutex OK'
+
+Write-WatchLog 'WatchAgent start (maintenance)'
+$corePaths = @(
+    (Join-Path $FreshAppData 'lib\Launcher-Core.ps1'),
+    (Join-Path $FreshAppData 'Launcher-Core.ps1')
+)
+foreach ($coreCached in $corePaths) {
+    if (-not (Test-Path -LiteralPath $coreCached)) { continue }
+    try {
+        . $coreCached
+        if (Get-Command Stop-FreshWindowsMaintenanceLaunchPrep -ErrorAction SilentlyContinue) {
+            Stop-FreshWindowsMaintenanceLaunchPrep -FreshAppData $FreshAppData -ImmuneProcessIds @($PID) | Out-Null
+            Write-WatchLog 'Prep lancement: anciens agents IA/voix/watch arretes'
+        }
+        break
+    }
+    catch {
+        Write-WatchLog ("Prep lancement: {0}" -f $_.Exception.Message)
+    }
+}
 
 function Hide-WatchConsole {
     try {
@@ -344,7 +369,6 @@ else {
 
 foreach ($lib in @(
         'lib/FreshAgent-MaintenanceConfig.ps1',
-        'lib/FreshAgent-Log.ps1',
         'lib/FreshAgent-GameSession.ps1',
         'lib/FreshAgent-Optimize.ps1',
         'lib/FreshAgent-Health.ps1'

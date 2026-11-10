@@ -3,11 +3,20 @@ $ErrorActionPreference = 'Stop'
 
 Describe 'Appx bloatware classification' {
     BeforeAll {
+        $script:GlobalStubNames = @(
+            'Remove-AppxPackage',
+            'Remove-AppxProvisionedPackage',
+            'Checkpoint-Computer',
+            'Enable-ComputerRestore',
+            'Get-AppxPackage',
+            'New-FreshWindowsAppxBloatwareRestorePoint'
+        )
         function global:Remove-AppxPackage { param($Package) throw 'Remove-AppxPackage doit etre mocke dans les tests' }
         function global:Remove-AppxProvisionedPackage { param($Online, $PackageName) throw 'Remove-AppxProvisionedPackage doit etre mocke' }
         function global:Checkpoint-Computer { throw 'Checkpoint-Computer ne doit pas etre appele en test' }
         function global:Enable-ComputerRestore { param($Drive) return $true }
 
+        $script:HadLocalAppData = Test-Path -LiteralPath Env:\LOCALAPPDATA
         $script:OrigLocalAppData = $env:LOCALAPPDATA
         $tempRoot = if ($env:TEMP -and $env:TEMP -notmatch '^:') { $env:TEMP } else { '/tmp' }
         $script:GuidRoot = Join-Path $tempRoot ('fw-appx-{0}' -f [guid]::NewGuid().ToString('N'))
@@ -27,7 +36,15 @@ Describe 'Appx bloatware classification' {
     }
 
     AfterAll {
-        $env:LOCALAPPDATA = $script:OrigLocalAppData
+        if ($null -ne $script:OrigLocalAppData) {
+            $env:LOCALAPPDATA = $script:OrigLocalAppData
+        }
+        elseif ($script:HadLocalAppData -eq $false) {
+            Remove-Item -LiteralPath Env:\LOCALAPPDATA -ErrorAction SilentlyContinue
+        }
+        foreach ($stubName in $script:GlobalStubNames) {
+            Remove-Item -LiteralPath "Function:\Global:$stubName" -ErrorAction SilentlyContinue
+        }
         if ($script:GuidRoot -and (Test-Path -LiteralPath $script:GuidRoot)) {
             Remove-Item -LiteralPath $script:GuidRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
@@ -113,8 +130,10 @@ Describe 'Appx bloatware classification' {
         )
         $result.dryRun | Should -Be $false
         $result.removed | Should -Not -Contain 'Contoso.UnknownApp'
+        $result.removed | Should -Contain 'Microsoft.BingNews'
         @($result.addCandidates) | Should -Contain 'Contoso.UnknownApp'
-        $script:AppxRemoved | Should -Not -BeNullOrEmpty
+        $script:AppxRemoved.Count | Should -BeGreaterThan 0
+        $script:AppxRemoved | Should -Contain 'Microsoft.BingNews_8wekyb3d8bbwe'
         $script:RestorePointCalls | Should -Be 0
     }
 

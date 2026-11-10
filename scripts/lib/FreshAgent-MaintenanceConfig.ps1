@@ -41,8 +41,8 @@ function Get-FreshMaintenanceSyncManifest {
             'Invoke-FreshWindowsBackgroundAudit.ps1'
         )
         Libs = @(
+            'lib/Launcher-Core.ps1',
             'lib/FreshAgent-MaintenanceConfig.ps1',
-            'lib/FreshAgent-Log.ps1',
             'lib/FreshAgent-GameSession.ps1',
             'lib/FreshAgent-Optimize.ps1',
             'lib/FreshAgent-Health.ps1',
@@ -54,47 +54,4 @@ function Get-FreshMaintenanceSyncManifest {
             'configs/maintenance-content.json'
         )
     }
-}
-
-function Sync-FreshMaintenanceLocalAssets {
-    param(
-        [Parameter(Mandatory)][string]$FreshAppData,
-        [Parameter(Mandatory)][string]$RepoRawRoot,
-        [string]$Ref = 'main'
-    )
-
-    New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null
-    $manifest = Get-FreshMaintenanceSyncManifest
-
-    foreach ($rel in $manifest.Scripts) {
-        $dest = Join-Path $FreshAppData (Split-Path $rel -Leaf)
-        if ($rel -match '/') { $dest = Join-Path $FreshAppData $rel }
-        $url = "$RepoRawRoot/scripts/$rel"
-        if ($rel -notmatch '/') { $url = "$RepoRawRoot/scripts/$rel" }
-        else {
-            $url = "$RepoRawRoot/scripts/$($rel -replace '\\','/')"
-        }
-        $dest = Join-Path $FreshAppData ([System.IO.Path]::GetFileName($rel))
-        if ($rel -like 'lib/*') { continue }
-        Invoke-WebRequest -Uri "$RepoRawRoot/scripts/$rel" -OutFile $dest -UseBasicParsing
-        Set-FreshScriptUtf8Bom -Path $dest
-    }
-
-    foreach ($rel in $manifest.Libs) {
-        $dest = Join-Path $FreshAppData $rel
-        $dir = Split-Path $dest -Parent
-        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-        Invoke-WebRequest -Uri "$RepoRawRoot/scripts/$rel" -OutFile $dest -UseBasicParsing
-        Set-FreshScriptUtf8Bom -Path $dest
-    }
-
-    $cfgDir = Join-Path $FreshAppData 'configs'
-    New-Item -ItemType Directory -Path $cfgDir -Force | Out-Null
-    foreach ($rel in $manifest.Configs) {
-        $name = Split-Path $rel -Leaf
-        $dest = Join-Path $cfgDir $name
-        Invoke-WebRequest -Uri "$RepoRawRoot/$rel" -OutFile $dest -UseBasicParsing
-    }
-
-    return $true
 }

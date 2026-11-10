@@ -1427,8 +1427,10 @@ function Open-GameModeSetupMenu {
             "2" { Install-GameModeShortcuts | Out-Null }
             "3" { Install-GameModeShortcuts -IncludeWatchAgent | Out-Null }
             "4" {
+                Write-Host 'Si winget est en cours, attente jusqu a 15 min puis nettoyage ou report.' -ForegroundColor DarkGray
                 $r = Invoke-FreshMaintenanceTempCleanup -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl -NoPause
                 Write-Host $r.message -ForegroundColor $(if ($r.ok) { 'Green' } else { 'Yellow' })
+                Wait-ForUser
             }
             "5" {
                 $r = Invoke-FreshMaintenanceWeeklyReport -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl

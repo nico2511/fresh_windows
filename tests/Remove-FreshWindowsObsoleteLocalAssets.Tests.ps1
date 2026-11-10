@@ -12,6 +12,9 @@ Describe 'Remove-FreshWindowsObsoleteLocalAssets' {
         $script:RepoRoot = $root
         . (Join-Path $root 'scripts/lib/Launcher-Core.ps1')
 
+        $script:HadLocalAppData = Test-Path -LiteralPath Env:\LOCALAPPDATA
+        $script:OrigLocalAppData = $env:LOCALAPPDATA
+
         $tempRoot = $env:TEMP
         if ([string]::IsNullOrWhiteSpace($tempRoot) -or $tempRoot -match '^:') {
             $tempRoot = if ($env:TMP -and $env:TMP -notmatch '^:') { $env:TMP } else { '/tmp' }
@@ -24,14 +27,15 @@ Describe 'Remove-FreshWindowsObsoleteLocalAssets' {
     }
 
     AfterAll {
-        $env:LOCALAPPDATA = $script:OrigLocalAppData
+        if ($null -ne $script:OrigLocalAppData) {
+            $env:LOCALAPPDATA = $script:OrigLocalAppData
+        }
+        elseif ($script:HadLocalAppData -eq $false) {
+            Remove-Item -LiteralPath Env:\LOCALAPPDATA -ErrorAction SilentlyContinue
+        }
         if ($script:GuidRoot -and (Test-Path -LiteralPath $script:GuidRoot)) {
             Remove-Item -LiteralPath $script:GuidRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
-    }
-
-    It 'restaure LOCALAPPDATA apres le describe' {
-        $env:LOCALAPPDATA | Should -Be $script:GuidRoot
     }
 
     It 'refuse un chemin hors LOCALAPPDATA\FreshWindows' {
@@ -70,6 +74,12 @@ Describe 'Remove-FreshWindowsObsoleteLocalAssets' {
         Test-Path -LiteralPath $weekly | Should -Be $true
         Test-Path -LiteralPath $ai | Should -Be $false
         Test-Path -LiteralPath $aiDir | Should -Be $false
+    }
+}
+
+Describe 'Remove-FreshWindowsObsoleteLocalAssets environment' {
+    It 'restaure LOCALAPPDATA a la valeur d origine du describe' {
+        $env:LOCALAPPDATA | Should -Be $script:OrigLocalAppData
     }
 }
 

@@ -235,9 +235,22 @@ function Remove-FreshWindowsObsoleteLocalAssets {
         }
     }
 
+    foreach ($voiceRelic in @(
+            'cache\voice_worker_dl.zip',
+            'cache\voice_worker_extract',
+            'voice-worker-host.log',
+            'fa-models-legacy-notified.txt'
+        )) {
+        $vp = Join-Path $FreshAppData $voiceRelic
+        if (-not (Test-FreshWindowsPathUnderFreshRoot -Path $vp -FreshRoot $freshNorm)) { continue }
+        if (Test-Path -LiteralPath $vp) {
+            try { Remove-Item -LiteralPath $vp -Recurse -Force -ErrorAction Stop }
+            catch { [void]$errors.Add("Suppression relic voix $voiceRelic : $($_.Exception.Message)") }
+        }
+    }
+
     $keepLibs = @(
         'FreshAgent-MaintenanceConfig.ps1',
-        'FreshAgent-Log.ps1',
         'FreshAgent-GameSession.ps1',
         'FreshAgent-Optimize.ps1',
         'FreshAgent-Health.ps1'
@@ -250,16 +263,6 @@ function Remove-FreshWindowsObsoleteLocalAssets {
                 if (-not (Test-FreshWindowsPathUnderFreshRoot -Path $_.FullName -FreshRoot $freshNorm)) { return }
                 try { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop }
                 catch { [void]$errors.Add("Suppression lib $($_.Name) : $($_.Exception.Message)") }
-            }
-    }
-
-    $binDir = Join-Path $FreshAppData 'bin'
-    if (Test-Path -LiteralPath $binDir) {
-        Get-ChildItem -LiteralPath $binDir -Force -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -match '(?i)^voice_worker' } |
-            ForEach-Object {
-                try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop }
-                catch { [void]$errors.Add("voice_worker cache: $($_.Exception.Message)") }
             }
     }
 
@@ -374,9 +377,7 @@ function Import-FreshMaintenanceModules {
             $known[$cmd.Name] = $true
             if ($cmd.ModuleName) { continue }
             $dest = "Function:\Global:$($cmd.Name)"
-            if (-not (Test-Path -LiteralPath $dest)) {
-                Set-Item -LiteralPath $dest -Value $cmd.ScriptBlock
-            }
+            Set-Item -LiteralPath $dest -Value $cmd.ScriptBlock -Force
         }
     }
     return [bool](Get-Command Invoke-FreshAgentCleanup -ErrorAction SilentlyContinue)
@@ -411,7 +412,9 @@ function Invoke-FreshMaintenanceTempCleanup {
     if (-not (Import-FreshMaintenanceModules -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $Ref -IconUrl $IconUrl)) {
         return @{ ok = $false; message = 'Modules maintenance absents (sync menu 11).' }
     }
-    Wait-FreshWindowsWingetIdleForMaintenance | Out-Null
+    if (-not (Wait-FreshWindowsWingetIdleForMaintenance)) {
+        return @{ ok = $false; message = 'Nettoyage temp differe (winget toujours actif apres attente).' }
+    }
     return Invoke-FreshAgentCleanup -Temp
 }
 
@@ -449,12 +452,6 @@ function Start-FreshWindowsUnelevated {
     Start-Process -FilePath "$env:SystemRoot\System32\runas.exe" `
         -ArgumentList "/trustlevel:0x20000 `"$cmdPath`"" `
         -WorkingDirectory $WorkingDirectory
-    Start-Sleep -Seconds 1
-    $alive = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -match 'Launch-GameModeWatch|GameMode-WatchAgent|Start-WatchAgent' }
-    if (-not $alive) {
-        Start-Process -FilePath "$env:SystemRoot\explorer.exe" -ArgumentList "`"$cmdPath`""
-    }
 }
 
 function Register-FreshWindowsWatchAgentLogon {
@@ -619,8 +616,8 @@ function Sync-GameModeLocalScripts {
     $libDir = Join-Path $FreshAppData 'lib'
     if (-not (Test-Path -LiteralPath $libDir)) { New-Item -ItemType Directory -Path $libDir -Force | Out-Null }
     foreach ($rel in @(
+            'lib/Launcher-Core.ps1',
             'lib/FreshAgent-MaintenanceConfig.ps1',
-            'lib/FreshAgent-Log.ps1',
             'lib/FreshAgent-GameSession.ps1',
             'lib/FreshAgent-Optimize.ps1',
             'lib/FreshAgent-Health.ps1',

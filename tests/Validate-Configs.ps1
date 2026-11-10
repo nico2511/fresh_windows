@@ -37,7 +37,9 @@ $requiredJson = @(
     'winutil-oneclick.json',
     'winutil-brave-debloat.json',
     'brave-optimize.json',
-    'appx-bloatware.json'
+    'appx-bloatware.json',
+    'game-mode-watch.json',
+    'maintenance-content.json'
 )
 
 foreach ($name in $requiredJson) {
@@ -307,6 +309,42 @@ if (Test-Path -LiteralPath $gpuPath) {
         }
         if ($socketOk) {
             Ok 'gpu.json cles amd/nvidia/chipset presentes'
+        }
+    }
+}
+
+$watchPath = Join-Path $configs 'game-mode-watch.json'
+if (Test-Path -LiteralPath $watchPath) {
+    $w = Get-Content -LiteralPath $watchPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($null -eq $w.pollIntervalSeconds -or $null -eq $w.cpuThresholdPercent) {
+        Fail 'game-mode-watch.json : seuils agent maintenance manquants'
+    }
+    else {
+        Ok 'game-mode-watch.json structure OK'
+    }
+}
+
+$mcPath = Join-Path $configs 'maintenance-content.json'
+$launcherPath = Join-Path $root 'launcher.ps1'
+$corePath = Join-Path $root 'scripts/lib/Launcher-Core.ps1'
+if ((Test-Path -LiteralPath $mcPath) -and (Test-Path -LiteralPath $launcherPath) -and (Test-Path -LiteralPath $corePath)) {
+    $mc = Get-Content -LiteralPath $mcPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  if ($null -eq $mc.epoch) {
+        Fail 'maintenance-content.json : epoch manquant'
+    }
+    else {
+        $le = ''
+        $ce = ''
+        $lr = Get-Content -LiteralPath $launcherPath -Raw -Encoding UTF8
+        $cr = Get-Content -LiteralPath $corePath -Raw -Encoding UTF8
+        if ($lr -match 'FreshWindowsLibEpoch\s*=\s*(\d+)') { $le = $Matches[1] }
+        if ($cr -match 'FreshWindowsLibEpoch\s*=\s*(\d+)') { $ce = $Matches[1] }
+        $me = [string]$mc.epoch
+        if ($le -ne $ce -or $le -ne $me) {
+            Fail ("maintenance-content epoch {0} != launcher {1} / core {2}" -f $me, $le, $ce)
+        }
+        else {
+            Ok ("maintenance-content.json epoch {0} aligne launcher/core" -f $me)
         }
     }
 }

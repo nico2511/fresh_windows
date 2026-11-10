@@ -166,22 +166,22 @@ function Invoke-MaintenanceReapply {
     }
     Write-Host "Ref    : $RepoRef" -ForegroundColor DarkGray
 
-    Write-FreshStep -Title "[1/2] WinUtil one-click" -Detail "Standard + AppX + prefs + Ultimate Performance (peut prendre plusieurs minutes)" -Color Yellow
+    Write-FreshStep -Title "[1/5] WinUtil one-click" -Detail "Standard + AppX + prefs + Ultimate Performance (peut prendre plusieurs minutes)" -Color Yellow
     $wuOk = Invoke-WinUtilOneClick -NoPause
     if ($wuOk) {
-        Write-FreshStep -Title "[1/2] WinUtil - OK" -Color Green
+        Write-FreshStep -Title "[1/5] WinUtil - OK" -Color Green
     }
     else {
-        Write-FreshStep -Title "[1/2] WinUtil - ÉCHEC" -Color Red
+        Write-FreshStep -Title "[1/5] WinUtil - ÉCHEC" -Color Red
     }
 
-    Write-FreshStep -Title "[2/2] ShutUp10 quiet" -Detail "Import du cfg GitHub (sans GUI)" -Color Yellow
+    Write-FreshStep -Title "[2/5] ShutUp10 quiet" -Detail "Import du cfg GitHub (sans GUI)" -Color Yellow
     $suOk = Invoke-ShutUp10Recommended -NoPause
     if ($suOk) {
-        Write-FreshStep -Title "[2/2] ShutUp10 - OK" -Color Green
+        Write-FreshStep -Title "[2/5] ShutUp10 - OK" -Color Green
     }
     else {
-        Write-FreshStep -Title "[2/2] ShutUp10 - ÉCHEC" -Color Red
+        Write-FreshStep -Title "[2/5] ShutUp10 - ÉCHEC" -Color Red
     }
 
     $syncOk = $true
@@ -198,16 +198,13 @@ function Invoke-MaintenanceReapply {
     }
     if ($syncOk) { Write-FreshStep -Title '[3/5] Sync scripts - OK' -Color Green }
 
-    if (Get-Command Wait-FreshWindowsWingetIdleForMaintenance -ErrorAction SilentlyContinue) {
-        $idle = Wait-FreshWindowsWingetIdleForMaintenance
-        if (-not $idle) {
-            Write-FreshStep -Title '[4/5] Nettoyage temp differe (winget actif)' -Color DarkYellow
-        }
-    }
     if (Get-Command Invoke-FreshMaintenanceTempCleanup -ErrorAction SilentlyContinue) {
         $tc = Invoke-FreshMaintenanceTempCleanup -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl -NoPause
         $tempOk = [bool]$tc.ok
-        Write-FreshStep -Title ('[4/5] Nettoyage temp - {0}' -f $(if ($tempOk) { 'OK' } else { 'partiel' })) -Color $(if ($tempOk) { 'Green' } else { 'Yellow' })
+        $tempLabel = if ($tempOk) { 'OK' } else { 'differe' }
+        $tempColor = if ($tempOk) { 'Green' } else { 'DarkYellow' }
+        $tempDetail = if ($tc.message) { [string]$tc.message } else { '' }
+        Write-FreshStep -Title ("[4/5] Nettoyage temp - {0}" -f $tempLabel) -Detail $tempDetail -Color $tempColor
     }
     else {
         Write-FreshStep -Title '[4/5] Nettoyage temp - skip (modules)' -Color DarkGray
@@ -219,9 +216,12 @@ function Invoke-MaintenanceReapply {
         if (-not $wh -and (Import-FreshMaintenanceModules -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl)) {
             $wh = Invoke-FreshAgentWeeklyHealthReportIfDue -FreshAppData $FreshAppData
         }
-        $healthOk = $true
-        if ($wh -and $wh.ok) {
+        $healthOk = [bool]($wh -and $wh.ok)
+        if ($healthOk) {
             Write-FreshStep -Title ('[5/5] Rapport sante - {0}' -f $wh.message) -Color Green
+        }
+        elseif ($wh) {
+            Write-FreshStep -Title ('[5/5] Rapport sante - {0}' -f $wh.message) -Color DarkGray
         }
         else {
             Write-FreshStep -Title '[5/5] Rapport sante - pas du (deja cette semaine)' -Color DarkGray

@@ -7,6 +7,17 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSCommandPath -Parent
 $failed = 0
 
+function Test-FreshWindowsPesterSuiteFailed {
+    param($Result)
+    $badCount = 0
+    try { $badCount = [int]$Result.FailedCount } catch { $badCount = 1 }
+    $resultName = ''
+    try { $resultName = [string]$Result.Result } catch { $resultName = 'Failed' }
+    if ($badCount -gt 0) { return $true }
+    if ($resultName -eq 'Failed') { return $true }
+    return $false
+}
+
 Write-Host "=== Validate-Configs ===" -ForegroundColor Cyan
 & (Join-Path $root 'Validate-Configs.ps1')
 if ($LASTEXITCODE -ne 0) { $failed++ }
@@ -37,6 +48,8 @@ if ($pesterMod) {
         'FreshWindows-BackgroundAudit.Tests.ps1',
         'Remove-FreshWindowsObsoleteLocalAssets.Tests.ps1',
         'FreshMaintenance-Menu.Tests.ps1',
+        'FreshWatchAgent-Mutex.Tests.ps1',
+        'Run-AllTests.Aggregate.Tests.ps1',
         'Uninstall-FreshWindows.Tests.ps1'
     )
     foreach ($pesterFile in $pesterFiles) {
@@ -50,11 +63,7 @@ if ($pesterMod) {
             $failed++
             continue
         }
-        $badCount = 0
-        try { $badCount = [int]$result.FailedCount } catch { $badCount = 1 }
-        $resultName = ''
-        try { $resultName = [string]$result.Result } catch { }
-        if ($badCount -gt 0) { $failed++ }
+        if (Test-FreshWindowsPesterSuiteFailed -Result $result) { $failed++ }
     }
 }
 else {
