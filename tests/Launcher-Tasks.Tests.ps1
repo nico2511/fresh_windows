@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 Describe 'Launcher-Tasks scheduled triggers' {
     BeforeAll {
         $root = Split-Path (Split-Path $PSCommandPath -Parent) -Parent
-        . (Join-Path $root 'scripts\lib\Launcher-Tasks.ps1')
+        . (Join-Path $root 'scripts/lib/Launcher-Tasks.ps1')
     }
 
     It 'Get-FreshWindowsScheduledTaskLocalStartBoundary est sans offset fuseau' {
@@ -14,6 +14,10 @@ Describe 'Launcher-Tasks scheduled triggers' {
     }
 
     It 'Set-FreshWindowsScheduledTaskTriggerLocalTime reecrit StartBoundary' {
+        if (-not (Get-Command New-ScheduledTaskTrigger -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Inconclusive -Because 'ScheduledTasks (Windows) indisponible sur cette plateforme'
+            return
+        }
         $trigger = New-ScheduledTaskTrigger -Daily -At '12:00'
         $trigger.StartBoundary | Should -Not -BeNullOrEmpty
         $fixed = Set-FreshWindowsScheduledTaskTriggerLocalTime -Trigger $trigger -At '12:30'

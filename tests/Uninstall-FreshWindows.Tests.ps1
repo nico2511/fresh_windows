@@ -220,10 +220,10 @@ Describe 'Staging menu DryRun' {
 }
 
 Describe 'launcher menu desinstallation' {
-    It 'menu 12 epoch 59' {
+    It 'menu 12 epoch 61' {
         $lines = Get-Content -LiteralPath $script:LauncherPath -Encoding UTF8 -Raw
         $lines | Should -Match '12  Desinstallation'
-        $lines | Should -Match 'FreshWindowsLibEpoch = 59'
+        $lines | Should -Match 'FreshWindowsLibEpoch = 61'
     }
 
     It 'ImmuneProcessIdsCsv dans Launcher-Core' {

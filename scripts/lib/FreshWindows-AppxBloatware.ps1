@@ -359,6 +359,7 @@ function Get-FreshWindowsAppxBloatwareInventory {
 function Invoke-FreshWindowsAppxBloatwareCleanup {
     param(
         [switch]$Apply,
+        [switch]$SkipRestorePoint,
         [switch]$DisableSilentInstall,
         [switch]$RevertSilentInstall,
         [string]$ConfigPath = '',
@@ -428,8 +429,13 @@ function Invoke-FreshWindowsAppxBloatwareCleanup {
         }
     }
 
-    $rp = New-FreshWindowsAppxBloatwareRestorePoint
-    [void]$notes.Add([string]$rp.message)
+    if (-not $SkipRestorePoint) {
+        $rp = New-FreshWindowsAppxBloatwareRestorePoint
+        [void]$notes.Add([string]$rp.message)
+    }
+    else {
+        [void]$notes.Add('Point de restauration ignore (SkipRestorePoint).')
+    }
 
     if ($DisableSilentInstall) {
         $cdm = Set-FreshWindowsContentDeliveryManagerSilentInstall -Config $config -FreshAppData $FreshAppData
@@ -507,14 +513,20 @@ function Wait-FreshWindowsBloatwareApplyConfirm {
     )
     Write-Host $Prompt -ForegroundColor Yellow
     $line = Read-Host
-    if (Get-Command Resolve-FreshAgentConfirmUtterance -ErrorAction SilentlyContinue) {
-        $d = Resolve-FreshAgentConfirmUtterance -Transcript ([string]$line)
-        if ($d -eq 'confirm') { return $true }
-        if ($d -eq 'cancel') { return $false }
-    }
     $n = ([string]$line).Trim().ToLowerInvariant()
     if ($n -match '^(oui|ouais|ok|yes|confirme|valide|go)$') { return $true }
     return $false
+}
+
+function Offer-FreshWindowsAppxBloatwarePreviewStep {
+    param(
+        [string]$ConfigsBaseUrl = '',
+        [string]$FreshAppData = $(Join-Path $env:LOCALAPPDATA 'FreshWindows')
+    )
+    $answer = Read-Host 'Apercu nettoyage apps preinstallees (simulation, sans rien supprimer) ? (o/N)'
+    if ($answer -notmatch '^(o|oui|y|yes)$') { return }
+    $r = Invoke-FreshWindowsAppxBloatwareCleanup -ConfigsBaseUrl $ConfigsBaseUrl -FreshAppData $FreshAppData
+    Write-Host $r.message -ForegroundColor Cyan
 }
 
 function Invoke-FreshWindowsAppxBloatwareMenu {
@@ -565,57 +577,4 @@ function Invoke-FreshWindowsAppxBloatwareMenu {
             }
         }
     } while ($true)
-}
-
-function Invoke-SkillRemovePreinstalledApps {
-    param(
-        $Apply = $false,
-        $DisableSilentInstall = $true,
-        [string]$RepoRef = 'main',
-        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
-    )
-    $asBool = {
-        param($Value, [bool]$Default)
-        if (Get-Command ConvertTo-FreshAgentBool -ErrorAction SilentlyContinue) {
-            if ($null -eq $Value) { return $Default }
-            return (ConvertTo-FreshAgentBool -Value $Value -Default $Default)
-        }
-        if ($null -eq $Value) { return $Default }
-        if ($Value -is [bool]) { return [bool]$Value }
-        $s = ([string]$Value).Trim().ToLowerInvariant()
-        if ($s -match '^(1|true|yes|oui|on)$') { return $true }
-        if ($s -match '^(0|false|no|non|off)$') { return $false }
-        return $Default
-    }
-    $doApply = [bool](& $asBool $Apply $false)
-    $doCdm = [bool](& $asBool $DisableSilentInstall $true)
-    $repoRoot = ''
-    if ($PSScriptRoot) {
-        $tryRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-        if (Test-Path -LiteralPath (Join-Path $tryRoot 'configs\appx-bloatware.json')) {
-            $repoRoot = $tryRoot
-        }
-    }
-    $baseUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/configs"
-    $params = @{
-        FreshAppData   = $FreshAppData
-        RepoRoot       = $repoRoot
-        ConfigsBaseUrl = $baseUrl
-        DisableSilentInstall = $doCdm
-    }
-    if (-not $doApply) {
-        return Invoke-FreshWindowsAppxBloatwareCleanup @params
-    }
-    return Invoke-FreshWindowsAppxBloatwareCleanup -Apply @params
-}
-
-function Offer-FreshWindowsAppxBloatwarePreviewStep {
-    param(
-        [string]$ConfigsBaseUrl = '',
-        [string]$FreshAppData = $(Join-Path $env:LOCALAPPDATA 'FreshWindows')
-    )
-    $answer = Read-Host 'Apercu nettoyage apps preinstallees (simulation, sans rien supprimer) ? (o/N)'
-    if ($answer -notmatch '^(o|oui|y|yes)$') { return }
-    $r = Invoke-FreshWindowsAppxBloatwareCleanup -ConfigsBaseUrl $ConfigsBaseUrl -FreshAppData $FreshAppData
-    Write-Host $r.message -ForegroundColor Cyan
 }

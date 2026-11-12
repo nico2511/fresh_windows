@@ -1,33 +1,14 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  Agent barre des taches Fresh Windows.
+  Agent systray maintenance Fresh Windows (surveillance, mode jeu, sante).
 .NOTES
   Prefs: %LOCALAPPDATA%\FreshWindows\watch-agent-user.json
   Lancer avec powershell.exe -STA (sinon l'icone n'apparait pas).
 #>
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction SilentlyContinue
 $ErrorActionPreference = 'Continue'
-$WatchLog = Join-Path $env:LOCALAPPDATA 'FreshWindows\watch-agent.log'
 
-function Write-WatchLog {
-    param([string]$Message)
-    try {
-        $dir = Split-Path $WatchLog
-        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-        Add-Content -LiteralPath $WatchLog -Value ('{0} {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message) -Encoding UTF8
-    } catch { }
-}
-
-function Format-WatchLogUserSpeech {
-    param([string]$Text)
-    if (Get-Command Format-FreshAgentTranscriptForLog -ErrorAction SilentlyContinue) {
-        return Format-FreshAgentTranscriptForLog -Text $Text -FreshAppData $script:FreshAppData
-    }
-    return $Text
-}
-
-# FreshAppData AVANT le mutex (sinon Split-Path null).
 $RepoRef = if ($env:FRESH_WIN_REF) { $env:FRESH_WIN_REF.Trim() } else { 'main' }
 $RepoRawRoot = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef"
 if ($env:FRESH_WIN_APPDATA -and -not [string]::IsNullOrWhiteSpace($env:FRESH_WIN_APPDATA)) {
@@ -39,26 +20,37 @@ elseif ($PSScriptRoot -and ((Split-Path $PSScriptRoot -Leaf) -match 'FreshWindow
 else {
     $FreshAppData = Join-Path $env:LOCALAPPDATA 'FreshWindows'
 }
-$WatchLog = Join-Path $FreshAppData 'watch-agent.log'
 $script:RepoRef = $RepoRef
 $script:FreshAppData = $FreshAppData
 $script:RepoRawRoot = $RepoRawRoot
 $UserSettingsPath = Join-Path $FreshAppData 'watch-agent-user.json'
-$WatchConfigUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/configs/game-mode-watch.json"
+$WatchConfigLocal = Join-Path $FreshAppData 'configs\game-mode-watch.json'
+$WatchConfigUrl = "$RepoRawRoot/configs/game-mode-watch.json"
+$WatchLog = Join-Path $FreshAppData 'watch-agent.log'
 try { New-Item -ItemType Directory -Path $FreshAppData -Force | Out-Null } catch { }
+
+function Write-WatchLog {
+    param([string]$Message)
+    try {
+        $dir = Split-Path $WatchLog
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        Add-Content -LiteralPath $WatchLog -Value ('{0} {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message) -Encoding UTF8
+    }
+    catch { }
+}
 
 function Set-WatchScriptUtf8Bom {
     param([Parameter(Mandatory)][string]$Path)
+    if (Get-Command Set-FreshScriptUtf8Bom -ErrorAction SilentlyContinue) {
+        Set-FreshScriptUtf8Bom -Path $Path
+        return
+    }
     if (-not (Test-Path -LiteralPath $Path)) { return }
     try {
         $bytes = [System.IO.File]::ReadAllBytes($Path)
-        if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
-            return
-        }
+        if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) { return }
         $needsBom = $false
-        foreach ($b in $bytes) {
-            if ($b -gt 127) { $needsBom = $true; break }
-        }
+        foreach ($b in $bytes) { if ($b -gt 127) { $needsBom = $true; break } }
         if (-not $needsBom) { return }
         $text = (New-Object System.Text.UTF8Encoding $false).GetString($bytes)
         [System.IO.File]::WriteAllText($Path, $text, (New-Object System.Text.UTF8Encoding $true))
@@ -71,9 +63,7 @@ function Register-WatchUiHandler {
     if (-not $script:WatchUiHandlers) {
         $script:WatchUiHandlers = New-Object System.Collections.ArrayList
     }
-    if ($null -ne $Handler) {
-        [void]$script:WatchUiHandlers.Add($Handler)
-    }
+    if ($null -ne $Handler) { [void]$script:WatchUiHandlers.Add($Handler) }
     return $Handler
 }
 
@@ -85,10 +75,7 @@ function Add-WatchMenuClick {
     $wrapped = {
         param($sender, $e)
         $label = 'menu'
-        try {
-            if ($sender -and $sender.Text) { $label = [string]$sender.Text }
-        }
-        catch { }
+        try { if ($sender -and $sender.Text) { $label = [string]$sender.Text } } catch { }
         Write-WatchLog ("UI click begin: {0}" -f $label)
         try {
             try { & $Handler $sender $e }
@@ -102,41 +89,6 @@ function Add-WatchMenuClick {
     $MenuItem.Add_Click((Register-WatchUiHandler $wrapped))
 }
 
-function Set-WatchAgentNotifyIconInteractive {
-    if (-not $script:NotifyIcon) { return }
-    $script:NotifyIcon.ContextMenuStrip = $script:WatchContextMenuStrip
-    if (-not $script:WatchMouseHandlersInstalled) {
-        $script:NotifyIcon.Add_MouseUp((Register-WatchUiHandler {
-                param($sender, $e)
-                if ($script:WatchSuppressNotifyActivation) { return }
-                if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
-                    Write-WatchLog 'Systray MouseUp left -> dashboard'
-                    Open-FreshAgentDashboardPanel
-                }
-            }))
-        $script:NotifyIcon.Add_Click((Register-WatchUiHandler {
-                if ($script:WatchSuppressNotifyActivation) { return }
-                Write-WatchLog 'Systray Click -> dashboard'
-                Open-FreshAgentDashboardPanel
-            }))
-        $script:NotifyIcon.Add_DoubleClick((Register-WatchUiHandler {
-                if ($script:WatchSuppressNotifyActivation) { return }
-                Write-WatchLog 'Systray DoubleClick -> dashboard'
-                Open-FreshAgentDashboardPanel
-            }))
-        $script:WatchMouseHandlersInstalled = $true
-    }
-    $script:WatchSuppressNotifyActivation = $true
-    try {
-        $wasVisible = $script:NotifyIcon.Visible
-        if ($wasVisible) { $script:NotifyIcon.Visible = $false }
-        $script:NotifyIcon.Visible = $true
-    }
-    finally {
-        $script:WatchSuppressNotifyActivation = $false
-    }
-}
-
 function Reset-WatchAgentSystrayUi {
     if ($script:NotifyIcon) {
         try { $script:NotifyIcon.Visible = $false } catch { }
@@ -145,9 +97,7 @@ function Reset-WatchAgentSystrayUi {
     }
     if ($script:HiddenForm) {
         try {
-            if (-not $script:HiddenForm.IsDisposed) {
-                $script:HiddenForm.Dispose()
-            }
+            if (-not $script:HiddenForm.IsDisposed) { $script:HiddenForm.Dispose() }
         }
         catch { }
         $script:HiddenForm = $null
@@ -160,33 +110,14 @@ function Test-WatchAgentSystrayLive {
         if (-not $script:NotifyIcon) { return $false }
         return $true
     }
-    catch {
-        return $false
-    }
-}
-
-function Request-WatchAgentShutdown {
-    Write-WatchLog 'Arret agent (Exit)'
-    $script:WatchAgentExitRequested = $true
-    try { Stop-FreshAgentAlwaysOnVoice } catch { }
-    try {
-        if ($script:NotifyIcon) { $script:NotifyIcon.Visible = $false }
-    }
-    catch { }
-    try { Exit-FreshWatchAgentSingleInstance } catch { }
-    [Environment]::Exit(0)
+    catch { return $false }
 }
 
 function Stop-WatchAgentMessageLoop {
     try {
-        if ($script:WatchAppContext) {
-            $script:WatchAppContext.ExitThread()
-        }
-        elseif ($script:HiddenForm) {
+        if ($script:HiddenForm) {
             try {
-                if (-not $script:HiddenForm.IsDisposed) {
-                    $script:HiddenForm.Close()
-                }
+                if (-not $script:HiddenForm.IsDisposed) { $script:HiddenForm.Close() }
             }
             catch { }
         }
@@ -194,8 +125,53 @@ function Stop-WatchAgentMessageLoop {
     catch { }
 }
 
-Write-WatchLog 'WatchAgent start'
-$script:WatchAgentSessionState = $ExecutionContext.SessionState
+function Request-WatchAgentShutdown {
+    Write-WatchLog 'Arret agent (Exit)'
+    $script:WatchAgentExitRequested = $true
+    Stop-WatchAgentPollTimerIfRunning
+    try {
+        if ($script:NotifyIcon) {
+            $script:NotifyIcon.Visible = $false
+            $script:NotifyIcon.Dispose()
+            $script:NotifyIcon = $null
+        }
+    }
+    catch { }
+    try { Exit-FreshWatchAgentSingleInstance } catch { }
+    Stop-WatchAgentMessageLoop
+    [Environment]::Exit(0)
+}
+
+function Get-FreshWatchLegacyMaintenanceMutexNames {
+    return @(
+        'Global\FreshWindows-WatchAgent-FreshWindows',
+        'Global\FreshWindows-WatchAgent',
+        'Global\FreshAgentWatchAgent',
+        ('Global\FreshWindows-WatchAgent-{0}' -f $env:USERNAME)
+    )
+}
+
+function Test-FreshWatchLegacyMaintenanceMutexHeld {
+    param(
+        [string[]]$LegacyMutexNames
+    )
+    if (-not $LegacyMutexNames) {
+        $LegacyMutexNames = @(Get-FreshWatchLegacyMaintenanceMutexNames)
+    }
+    foreach ($mutexName in $LegacyMutexNames) {
+        try {
+            $legacy = [System.Threading.Mutex]::OpenExisting($mutexName)
+            try { $legacy.Dispose() } catch { }
+            return $true
+        }
+        catch [System.Threading.WaitHandleCannotBeOpenedException] { }
+        catch [UnauthorizedAccessException] {
+            return $true
+        }
+        catch { }
+    }
+    return $false
+}
 
 $selfScript = $PSCommandPath
 if (-not $selfScript) { $selfScript = $MyInvocation.MyCommand.Path }
@@ -225,55 +201,54 @@ function Get-FreshWatchAgentPeerProcesses {
 }
 
 function Enter-FreshWatchAgentSingleInstance {
-    $appData = $script:FreshAppData
-    if ([string]::IsNullOrWhiteSpace($appData)) {
-        $appData = Join-Path $env:LOCALAPPDATA 'FreshWindows'
-        $script:FreshAppData = $appData
+    param(
+        [string]$PrimaryMutexName = 'Global\FreshWindowsWatchAgent',
+        [string[]]$LegacyMutexNames,
+        [switch]$WhatIf
+    )
+    if (Test-FreshWatchLegacyMaintenanceMutexHeld -LegacyMutexNames $LegacyMutexNames) {
+        Write-WatchLog 'Mutex legacy detecte — exit (migration ancien agent)'
+        if ($WhatIf) { return @{ shouldExit = $true; reason = 'legacy-mutex' } }
+        exit 0
     }
-    $leaf = Split-Path $appData -Leaf
-    if ([string]::IsNullOrWhiteSpace($leaf)) { $leaf = 'FreshWindows' }
-    $mutexName = "Global\FreshWindows-WatchAgent-$leaf"
+    $peers = @(Get-FreshWatchAgentPeerProcesses)
+    if ($peers.Count -gt 0) {
+        $pids = ($peers | ForEach-Object { [string]$_.ProcessId }) -join ','
+        Write-WatchLog ("Autre instance active (PID {0}) — exit" -f $pids)
+        if ($WhatIf) { return @{ shouldExit = $true; reason = 'peer-process'; peerPids = $pids } }
+        exit 0
+    }
     $script:WatchMutex = $null
     $acquired = $false
     try {
-        $script:WatchMutex = New-Object System.Threading.Mutex($false, $mutexName)
-        try {
-            $acquired = $script:WatchMutex.WaitOne(0, $false)
-        }
+        $script:WatchMutex = New-Object System.Threading.Mutex($false, $PrimaryMutexName)
+        try { $acquired = $script:WatchMutex.WaitOne(0, $false) }
         catch [System.Threading.AbandonedMutexException] {
             $acquired = $true
-            Write-WatchLog 'Mutex abandonne (crash precedent) — reprise'
+            Write-WatchLog ('Mutex abandonne ({0}) — reprise' -f $PrimaryMutexName)
         }
         if (-not $acquired) {
-            $peers = @(Get-FreshWatchAgentPeerProcesses)
-            if ($peers.Count -eq 0) {
-                Write-WatchLog 'Mutex bloque sans processus agent — reset'
-                try { $script:WatchMutex.Dispose() } catch {}
-                $script:WatchMutex = $null
-                $created = $false
-                $script:WatchMutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$created)
-                $acquired = $true
-            }
-            else {
-                $pids = ($peers | ForEach-Object { [string]$_.ProcessId }) -join ','
-                Write-WatchLog ('Autre instance active (PID {0}) — exit. Arreter: Stop-Process -Id {0} -Force' -f $pids)
-                exit 0
-            }
+            Write-WatchLog ("Mutex principal occupe ({0}) — exit" -f $PrimaryMutexName)
+            try { $script:WatchMutex.Dispose() } catch { }
+            $script:WatchMutex = $null
+            if ($WhatIf) { return @{ shouldExit = $true; reason = 'primary-mutex-busy' } }
+            exit 0
         }
-        if ($acquired) {
-            Write-WatchLog ("Mutex acquis PID $PID")
-        }
+        Write-WatchLog ("Mutex acquis ({0}) PID $PID" -f $PrimaryMutexName)
+        if ($WhatIf) { return @{ shouldExit = $false; acquired = $true; mutex = $PrimaryMutexName } }
     }
     catch {
-        Write-WatchLog ("Mutex ignore : {0}" -f $_.Exception.Message)
+        Write-WatchLog ("Mutex {0}: {1}" -f $PrimaryMutexName, $_.Exception.Message)
+        if ($WhatIf) { return @{ shouldExit = $true; reason = 'mutex-error'; detail = $_.Exception.Message } }
+        exit 0
     }
 }
 
 function Exit-FreshWatchAgentSingleInstance {
     try {
         if ($script:WatchMutex) {
-            try { [void]$script:WatchMutex.ReleaseMutex() } catch {}
-            try { $script:WatchMutex.Dispose() } catch {}
+            try { [void]$script:WatchMutex.ReleaseMutex() } catch { }
+            try { $script:WatchMutex.Dispose() } catch { }
             $script:WatchMutex = $null
         }
     }
@@ -283,9 +258,30 @@ function Exit-FreshWatchAgentSingleInstance {
 Enter-FreshWatchAgentSingleInstance
 Write-WatchLog 'Post-mutex OK'
 
+Write-WatchLog 'WatchAgent start (maintenance)'
+$corePaths = @(
+    (Join-Path $FreshAppData 'lib\Launcher-Core.ps1'),
+    (Join-Path $FreshAppData 'Launcher-Core.ps1')
+)
+foreach ($coreCached in $corePaths) {
+    if (-not (Test-Path -LiteralPath $coreCached)) { continue }
+    try {
+        . $coreCached
+        if (Get-Command Stop-FreshWindowsMaintenanceLaunchPrep -ErrorAction SilentlyContinue) {
+            Stop-FreshWindowsMaintenanceLaunchPrep -FreshAppData $FreshAppData -ImmuneProcessIds @($PID) | Out-Null
+            Write-WatchLog 'Prep lancement: anciens agents IA/voix/watch arretes'
+        }
+        break
+    }
+    catch {
+        Write-WatchLog ("Prep lancement: {0}" -f $_.Exception.Message)
+    }
+}
+
 function Hide-WatchConsole {
     try {
-        Add-Type -TypeDefinition @'
+        if (-not ('FreshWinNative' -as [type])) {
+            Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 public static class FreshWinNative {
@@ -293,11 +289,13 @@ public static class FreshWinNative {
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 }
 '@
+        }
         $hwnd = [FreshWinNative]::GetConsoleWindow()
         if ($hwnd -and $hwnd -ne [IntPtr]::Zero) {
             [void][FreshWinNative]::ShowWindow($hwnd, 0)
         }
-    } catch { }
+    }
+    catch { }
 }
 
 try {
@@ -329,165 +327,40 @@ catch {
 try {
     [Net.ServicePointManager]::SecurityProtocol = `
         [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-} catch { }
+}
+catch { }
 
-# RepoRef / FreshAppData deja initialises en tete de script (avant mutex).
 Write-WatchLog ("AppData={0} Ref={1}" -f $script:FreshAppData, $script:RepoRef)
 
-function Ensure-WatchAgentTrayIconFile {
-    param([string]$FreshAppData = $(if ($script:FreshAppData) { $script:FreshAppData } else { Join-Path $env:LOCALAPPDATA 'FreshWindows' }))
-    $iconPath = Join-Path $FreshAppData 'fresh-windows.ico'
-    if ((Test-Path -LiteralPath $iconPath) -and ((Get-Item -LiteralPath $iconPath).Length -gt 1000)) {
-        return $iconPath
-    }
+function Import-WatchLib {
+    param([string]$RelativePath)
+    if (-not $RelativePath) { return $false }
+    $rel = $RelativePath -replace '/', [IO.Path]::DirectorySeparatorChar
     $candidates = @(
-        (Join-Path $env:LOCALAPPDATA 'FreshWindows\fresh-windows.ico'),
-        (Join-Path $PSScriptRoot '..\assets\fresh-windows.ico')
+        (Join-Path $script:FreshAppData $rel),
+        (Join-Path $PSScriptRoot $rel)
     )
-    foreach ($c in $candidates) {
-        if ($c -and (Test-Path -LiteralPath $c) -and ((Get-Item -LiteralPath $c).Length -gt 1000)) {
-            try {
-                Copy-Item -LiteralPath $c -Destination $iconPath -Force
-                Write-WatchLog ("Icone copiee depuis {0}" -f $c)
-                return $iconPath
-            }
-            catch { }
-        }
-    }
-    $ref = if ($script:RepoRef) { $script:RepoRef } else { 'main' }
-    $url = "https://raw.githubusercontent.com/nico2511/fresh_windows/$ref/assets/fresh-windows.ico"
-    try {
-        Invoke-WebRequest -Uri $url -OutFile $iconPath -UseBasicParsing -TimeoutSec 20
-        if ((Test-Path -LiteralPath $iconPath) -and ((Get-Item -LiteralPath $iconPath).Length -gt 1000)) {
-            Write-WatchLog ("Icone telechargee ({0} octets)" -f (Get-Item -LiteralPath $iconPath).Length)
-            return $iconPath
-        }
-    }
-    catch {
-        Write-WatchLog ("Icone download: {0}" -f $_.Exception.Message)
-    }
-    return $null
-}
-
-function Set-WatchAgentTrayIcon {
-    if (-not $script:NotifyIcon) { return }
-    $iconPath = Ensure-WatchAgentTrayIconFile
-    try {
-        if ($iconPath) {
-            $script:NotifyIcon.Icon = New-Object System.Drawing.Icon($iconPath)
-            Write-WatchLog ("Tray icon file: {0}" -f $iconPath)
-        }
-        else {
-            # Secours visible: icone Information (pas Application, trop generique)
-            $script:NotifyIcon.Icon = [System.Drawing.SystemIcons]::Information
-            Write-WatchLog 'Tray icon: SystemIcons.Information (pas de .ico)'
-        }
-    }
-    catch {
-        Write-WatchLog ("Tray icon set: {0}" -f $_.Exception.Message)
-        try { $script:NotifyIcon.Icon = [System.Drawing.SystemIcons]::Information } catch { }
-    }
-}
-
-function Refresh-WatchAgentTrayVisibility {
-    if (-not $script:NotifyIcon) { return }
-    try {
-        Set-WatchAgentTrayIcon
-        $script:NotifyIcon.Text = 'Fresh Agent'
-        $script:NotifyIcon.Visible = $false
-        [System.Windows.Forms.Application]::DoEvents()
-        $script:NotifyIcon.Visible = $true
-        [System.Windows.Forms.Application]::DoEvents()
-        Write-WatchLog ("Tray Visible={0} HasIcon={1}" -f $script:NotifyIcon.Visible, ($null -ne $script:NotifyIcon.Icon))
-    }
-    catch {
-        Write-WatchLog ("Tray refresh: {0}" -f $_.Exception.Message)
-    }
-}
-
-function Initialize-WatchAgentSystrayEarly {
-    if (Test-WatchAgentSystrayLive) { return }
-    Reset-WatchAgentSystrayUi
-    Write-WatchLog 'Init UI (early)'
-    $script:HiddenForm = New-Object System.Windows.Forms.Form
-    $script:HiddenForm.Text = 'Fresh Windows Watch'
-    # Pas Opacity=0: certains builds Win11 n'accrochent pas le NotifyIcon.
-    $script:HiddenForm.ShowInTaskbar = $false
-    $script:HiddenForm.FormBorderStyle = 'FixedToolWindow'
-    $script:HiddenForm.Size = New-Object System.Drawing.Size(1, 1)
-    $script:HiddenForm.StartPosition = 'Manual'
-    $script:HiddenForm.Location = New-Object System.Drawing.Point(-32000, -32000)
-    $script:HiddenForm.Add_FormClosed((Register-WatchUiHandler {
-            if ($script:NotifyIcon) {
-                $script:NotifyIcon.Visible = $false
-                $script:NotifyIcon.Dispose()
-                $script:NotifyIcon = $null
-            }
-            $script:HiddenForm = $null
-            Exit-FreshWatchAgentSingleInstance
-        }))
-
-    $script:NotifyIcon = New-Object System.Windows.Forms.NotifyIcon
-    Set-WatchAgentTrayIcon
-    $script:NotifyIcon.Text = 'Fresh Agent (demarrage...)'
-    $script:WatchEarlyContextMenu = New-Object System.Windows.Forms.ContextMenuStrip
-    $miLoadEarly = $script:WatchEarlyContextMenu.Items.Add('Chargement des modules...')
-    $miLoadEarly.Enabled = $false
-    $miQuitEarly = $script:WatchEarlyContextMenu.Items.Add('Quitter')
-    Add-WatchMenuClick $miQuitEarly { Request-WatchAgentShutdown }
-    $script:NotifyIcon.ContextMenuStrip = $script:WatchEarlyContextMenu
-    $script:NotifyIcon.Visible = $true
-    Write-WatchLog 'NotifyIcon visible (early)'
-    try { Hide-WatchConsole } catch { }
-    try {
-        [System.Windows.Forms.Application]::DoEvents()
-    }
-    catch {
-        Write-WatchLog ("Early DoEvents: {0}" -f $_.Exception.Message)
-    }
-}
-
-Initialize-WatchAgentSystrayEarly
-
-$script:FreshAgentReady = $false
-$script:FreshAgentModuleBootPending = $true
-$script:FreshAgentAi = $null
-$script:VoiceListenActive = $false
-$script:MiAiListenItem = $null
-$script:MiAiListenLabel = $null
-$script:FaBgResultPending = $false
-$script:FaBgResultLastAt = $null
-$script:FaSkillResultPending = $false
-$script:FaSkillResultLastAt = $null
-$script:FaSkillResultId = $null
-$script:FaSkillResultStarted = $null
-$script:FaAiResultPending = $false
-$script:FaAiResultLastAt = $null
-$script:FaAiResultStarted = $null
-$script:FreshAgentDeferredBootPending = $false
-$faConfigCandidates = @(
-    (Join-Path $FreshAppData 'lib\FreshAgent-Config.ps1'),
-    (Join-Path $PSScriptRoot 'lib\FreshAgent-Config.ps1')
-)
-foreach ($faPath in $faConfigCandidates) {
-    if ($faPath -and (Test-Path -LiteralPath $faPath)) {
+    foreach ($path in $candidates) {
+        if (-not (Test-Path -LiteralPath $path)) { continue }
         try {
-            Set-WatchScriptUtf8Bom -Path $faPath
-            . $faPath
-            Write-WatchLog 'FreshAgent-Config charge (boot leger)'
-            break
+            Set-WatchScriptUtf8Bom -Path $path
+            $raw = [System.IO.File]::ReadAllText($path)
+            $raw = [regex]::Replace($raw, '(?m)^(\s*)#Requires[^\r\n]*', '${1}# requires stripped')
+            $raw = [regex]::Replace($raw, '(?m)^(\s*)function\s+(?!script:)([A-Za-z_][\w-]*)', '${1}function script:${2}')
+            Invoke-Expression $raw
+            Write-WatchLog ("Lib chargee: {0}" -f $path)
+            return $true
         }
         catch {
-            Write-WatchLog ("FreshAgent-Config: {0}" -f $_.Exception.Message)
+            Write-WatchLog ("Lib erreur {0}: {1}" -f $path, $_.Exception.Message)
         }
     }
+    Write-WatchLog ("Lib absente: {0}" -f $RelativePath)
+    return $false
 }
 
 Write-WatchLog 'Chargement GameMode-Common'
-$commonPath = $null
-if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
-    $commonPath = Join-Path $PSScriptRoot 'GameMode-Common.ps1'
-}
+$commonPath = if ($PSScriptRoot) { Join-Path $PSScriptRoot 'GameMode-Common.ps1' } else { $null }
 if ($commonPath -and (Test-Path -LiteralPath $commonPath)) {
     try {
         Set-WatchScriptUtf8Bom -Path $commonPath
@@ -498,7 +371,7 @@ if ($commonPath -and (Test-Path -LiteralPath $commonPath)) {
     }
 }
 else {
-    $commonUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/scripts/GameMode-Common.ps1"
+    $commonUrl = "$RepoRawRoot/scripts/GameMode-Common.ps1"
     $tmp = Join-Path $env:TEMP 'GameMode-Common.ps1'
     try {
         Invoke-WebRequest -Uri $commonUrl -OutFile $tmp -UseBasicParsing -TimeoutSec 25
@@ -509,7 +382,25 @@ else {
         Write-WatchLog ("GameMode-Common download: {0}" -f $_.Exception.Message)
     }
 }
-Write-WatchLog 'GameMode-Common pret'
+
+foreach ($lib in @(
+        'lib/FreshAgent-MaintenanceConfig.ps1',
+        'lib/FreshAgent-GameSession.ps1',
+        'lib/FreshAgent-Optimize.ps1',
+        'lib/FreshAgent-Health.ps1'
+    )) {
+    Import-WatchLib -RelativePath $lib | Out-Null
+}
+
+if (Get-Command Get-FreshAgentAppDataRoot -ErrorAction SilentlyContinue) {
+    $script:FreshAppData = Get-FreshAgentAppDataRoot
+    $FreshAppData = $script:FreshAppData
+    $WatchLog = Join-Path $FreshAppData 'watch-agent.log'
+    $UserSettingsPath = Join-Path $FreshAppData 'watch-agent-user.json'
+    $WatchConfigLocal = Join-Path $FreshAppData 'configs\game-mode-watch.json'
+}
+
+$script:MaintenanceLibsReady = $true
 
 function Get-WatchUserSettings {
     $defaults = @{
@@ -544,30 +435,35 @@ function Get-WatchRulesDefault {
         diskBusySustainedSeconds        = 120
         diskAlertOnlyWhenNotGaming      = $true
         cooldownBetweenSameAlertSeconds = 300
+        gamingSessionHeuristic          = @{ minProtectProcessRamMb = 400 }
+        ignoreSuggestProcesses          = @('explorer', 'dwm', 'RuntimeBroker')
         knownDiskHogs                   = @('SearchIndexer', 'MsMpEng')
     }
 }
 
 function Get-WatchRules {
     $defaults = Get-WatchRulesDefault
+    if (Test-Path -LiteralPath $WatchConfigLocal) {
+        try {
+            $r = Get-Content -LiteralPath $WatchConfigLocal -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($r) {
+                Write-WatchLog ("Watch rules: local {0}" -f $WatchConfigLocal)
+                return $r
+            }
+        }
+        catch {
+            Write-WatchLog ("Watch rules local: {0}" -f $_.Exception.Message)
+        }
+    }
     try {
-        $job = Start-Job -ArgumentList $WatchConfigUrl -ScriptBlock {
-            param($Uri)
-            Invoke-RestMethod -Uri $Uri -UseBasicParsing
-        }
-        if (Wait-Job -Job $job -Timeout 8) {
-            $r = Receive-Job -Job $job
-            Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
-            if ($r) { return $r }
-        }
-        else {
-            Stop-Job -Job $job -ErrorAction SilentlyContinue
-            Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
-            Write-WatchLog 'Get-WatchRules: timeout reseau (defaults)'
+        $r = Invoke-RestMethod -Uri $WatchConfigUrl -UseBasicParsing -TimeoutSec 12
+        if ($r) {
+            Write-WatchLog 'Watch rules: GitHub'
+            return $r
         }
     }
     catch {
-        Write-WatchLog ("Get-WatchRules: {0}" -f $_.Exception.Message)
+        Write-WatchLog ("Get-WatchRules remote: {0}" -f $_.Exception.Message)
     }
     return $defaults
 }
@@ -587,24 +483,19 @@ try {
 catch {
     Write-WatchLog ("RAM systeme: {0}" -f $_.Exception.Message)
 }
-Write-WatchLog 'Surveillance prete (avant menu)'
 
 function Test-GamingSessionActive {
     param($GameModeCfg, $Rules)
-
     if (-not $GameModeCfg) { return $false }
-
     $heur = $Rules.gamingSessionHeuristic
     $minRam = if ($heur.minProtectProcessRamMb) { [double]$heur.minProtectProcessRamMb } else { 400 }
     $heavyGameRamMb = 2048
-
     foreach ($name in @($GameModeCfg.GamingLauncherNames)) {
         $procs = Get-Process -Name $name -ErrorAction SilentlyContinue
         foreach ($p in $procs) {
             if (($p.WorkingSet64 / 1MB) -ge $minRam) { return $true }
         }
     }
-
     $protect = @($GameModeCfg.ProtectNames)
     foreach ($p in Get-Process) {
         try {
@@ -617,9 +508,12 @@ function Test-GamingSessionActive {
 }
 
 function Show-Balloon {
-    param([string]$Title, [string]$Text, [System.Windows.Forms.ToolTipIcon]$Icon = 'Info')
+    param(
+        [string]$Title,
+        [string]$Text,
+        [System.Windows.Forms.ToolTipIcon]$Icon = 'Info'
+    )
     if ($script:NotifyIcon) {
-        # ASCII only: BalloonTip WinForms affiche du mojibake sur accents si le .ps1 est mal lu
         $script:NotifyIcon.BalloonTipTitle = $Title
         $script:NotifyIcon.BalloonTipText = $Text
         $script:NotifyIcon.BalloonTipIcon = $Icon
@@ -648,347 +542,45 @@ function Mark-Alert {
     $script:LastAlerts[$Key] = Get-Date
 }
 
-function Update-FreshAgentTrayStatus {
+function Update-MaintenanceTrayStatus {
     if (-not $script:NotifyIcon) { return }
-    $parts = [System.Collections.ArrayList]@('Fresh Agent')
+    $text = 'Fresh Maintenance'
     try {
-        if ($script:FreshAgentAi -and $script:FreshAgentAi.enabled) { [void]$parts.Add('IA') }
-        if ($script:FreshAgentAi -and $script:FreshAgentAi.rag -and $script:FreshAgentAi.rag.enabled) { [void]$parts.Add('RAG') }
-        if ($script:VoiceListenActive) { [void]$parts.Add('MIC') }
         if (Get-Command Get-FreshAgentGameSessionState -ErrorAction SilentlyContinue) {
-            if (Get-FreshAgentGameSessionState -FreshAppData $FreshAppData) { [void]$parts.Add('Jeu') }
+            if (Get-FreshAgentGameSessionState -FreshAppData $script:FreshAppData) {
+                $text = 'Fresh Maintenance | Jeu'
+            }
         }
     }
     catch { }
-    $text = ($parts -join ' | ')
     if ($text.Length -gt 63) { $text = $text.Substring(0, 63) }
     $script:NotifyIcon.Text = $text
 }
 
-function Invoke-FreshWatchAgentModuleBoot {
-    if (-not $script:FreshAgentModuleBootPending) { return }
-    $script:FreshAgentModuleBootPending = $false
-    Write-WatchLog 'Boot modules Fresh Agent (differe)...'
-    try {
-        if (Get-Command Import-FreshAgentMinimalBootModules -ErrorAction SilentlyContinue) {
-            Import-FreshAgentMinimalBootModules -FreshAppData $script:FreshAppData
-        }
-        elseif (Get-Command Import-FreshAgentStandardModules -ErrorAction SilentlyContinue) {
-            Import-FreshAgentStandardModules -FreshAppData $script:FreshAppData
-        }
-        elseif (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
-            foreach ($mod in @(
-                    'lib/FreshAgent-SkillsEngine.ps1', 'lib/FreshAgent-SkillHandlers.ps1',
-                    'lib/FreshAgent-Profiles.ps1', 'lib/FreshAgent-GameSession.ps1'
-                )) {
-                if (-not (Import-FreshAgentModule -RelativePath $mod -FreshAppData $script:FreshAppData)) {
-                    Write-WatchLog ("Module Fresh Agent absent: {0}" -f $mod)
-                }
-            }
-        }
-        if (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue) {
-            $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData -PreferLocal
-            $script:FreshAgentReady = $true
-            Write-WatchLog 'Fresh Agent modules charges (differe)'
-            $script:FreshAgentDeferredBootPending = $true
-        }
-        if ($script:FreshAgentAiMenu) {
-            $m = $script:FreshAgentAiMenu
-            Update-FreshAgentAiMenu -MiAiRoot $m.Root -MiAiToggle $m.Toggle -MiOllamaState $m.OllamaState `
-                -MiSttState $m.SttState -MiAiListen $m.Listen -MiTtsCycle $m.TtsCycle -MiRagToggle $m.RagToggle `
-                -MiListenMode $m.ListenMode
-            if ($script:FreshAgentReady) { $m.Root.Enabled = $true }
-        }
-        Update-FreshAgentTrayStatus
-    }
-    catch {
-        Write-WatchLog ("Module boot: {0}" -f $_.Exception.Message)
-    }
-}
-
-function Ensure-FreshAgentConfigLoadedForBoot {
-    if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
-        return $true
-    }
-    foreach ($faPath in @(
-            (Join-Path $script:FreshAppData 'lib\FreshAgent-Config.ps1'),
-            (Join-Path $PSScriptRoot 'lib\FreshAgent-Config.ps1')
-        )) {
-        if (-not ($faPath -and (Test-Path -LiteralPath $faPath))) { continue }
-        try {
-            Set-WatchScriptUtf8Bom -Path $faPath
-            if (Get-Command Import-FreshAgentFileIntoScriptScope -ErrorAction SilentlyContinue) {
-                Import-FreshAgentFileIntoScriptScope -LiteralPath $faPath
-            }
-            else { . $faPath }
-            Write-WatchLog 'FreshAgent-Config recharge (boot modules)'
-            return [bool](Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue)
-        }
-        catch {
-            Write-WatchLog ("FreshAgent-Config recharge: {0}" -f $_.Exception.Message)
-        }
-    }
-    return $false
-}
-
-function Complete-WatchAgentModuleBoot {
-    try {
-        Write-WatchLog 'Module boot: finalisation...'
-        if (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue) {
-            $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData -PreferLocal
-            $script:FreshAgentReady = $true
-            Write-WatchLog 'Fresh Agent modules charges (differe)'
-            $script:FreshAgentDeferredBootPending = $true
-        }
-        else {
-            Write-WatchLog 'Module boot: Get-FreshAgentAiConfig indisponible'
-        }
-        if ($script:FreshAgentAiMenu) {
-            $m = $script:FreshAgentAiMenu
-            Update-FreshAgentAiMenu -MiAiRoot $m.Root -MiAiToggle $m.Toggle -MiOllamaState $m.OllamaState `
-                -MiSttState $m.SttState -MiAiListen $m.Listen -MiTtsCycle $m.TtsCycle -MiRagToggle $m.RagToggle `
-                -MiListenMode $m.ListenMode `
-                -SkipNetworkChecks
-            if ($script:FreshAgentReady) { $m.Root.Enabled = $true }
-        }
-        Update-FreshAgentTrayStatus
-        Sync-WatchAgentPollTimer
-        if (Get-Command Invoke-FreshAgentPostInitMemoryCleanup -ErrorAction SilentlyContinue) {
-            try {
-                $trim = Invoke-FreshAgentPostInitMemoryCleanup -FreshAppData $script:FreshAppData
-                Write-WatchLog (Format-FreshAgentWatchMemoryTrimBootLogLine -TrimResult $trim)
-            }
-            catch {
-                Write-WatchLog ("Module boot: memory trim: {0}" -f $_.Exception.Message)
-            }
-        }
-        # Vague 1: pas d'auto-start voix (WhisperLoop legacy quarantine). Ecoute = bouton explicite (vague 2).
-        Write-WatchLog 'Module boot: voice auto-start disabled (quarantine)'
-    }
-    catch {
-        Write-WatchLog ("Module boot finalisation: {0}" -f $_.Exception.Message)
-    }
-}
-
-function Invoke-WatchAgentDotModuleAtScript {
-    param([string]$RelativePath)
-    if (-not $RelativePath) { return $true }
-    $rel = $RelativePath -replace '/', [IO.Path]::DirectorySeparatorChar
-    $path = Join-Path $script:FreshAppData $rel
-    if (-not (Test-Path -LiteralPath $path)) {
-        Write-WatchLog ("Module path absent: {0}" -f $path)
-        return $false
-    }
-    try {
-        Set-WatchScriptUtf8Bom -Path $path
-        if (Get-Command Import-FreshAgentFileIntoScriptScope -ErrorAction SilentlyContinue) {
-            Import-FreshAgentFileIntoScriptScope -LiteralPath $path
-        }
-        else {
-            $raw = [System.IO.File]::ReadAllText($path)
-            $raw = [regex]::Replace($raw, '(?m)^(\s*)#Requires[^\r\n]*', '${1}# requires stripped')
-            $raw = [regex]::Replace($raw, '(?m)^(\s*)function\s+(?!script:)([A-Za-z_][\w-]*)', '${1}function script:${2}')
-            Invoke-Expression $raw
-        }
-        return $true
-    }
-    catch {
-        Write-WatchLog ("Module dot: {0}" -f $_.Exception.Message)
-        return $false
-    }
-}
-
-function Ensure-FreshAgentSttLoaded {
-    if (Get-Command Invoke-WindowsSttListenInteractive -ErrorAction SilentlyContinue) {
-        return $true
-    }
-    $path = Join-Path $script:FreshAppData 'ai\Windows-Stt.ps1'
-    if (-not (Test-Path -LiteralPath $path)) {
-        Write-WatchLog ("STT file absent: {0}" -f $path)
-        return $false
-    }
-    try {
-        if (Get-Command Import-FreshAgentFileIntoScriptScope -ErrorAction SilentlyContinue) {
-            Import-FreshAgentFileIntoScriptScope -LiteralPath $path
-        }
-        else {
-            $raw = [System.IO.File]::ReadAllText($path)
-            $raw = [regex]::Replace($raw, '(?m)^(\s*)#Requires[^\r\n]*', '${1}# requires stripped')
-            $raw = [regex]::Replace($raw, '(?m)^(\s*)function\s+(?!script:)([A-Za-z_][\w-]*)', '${1}function script:${2}')
-            Invoke-Expression $raw
-        }
-        Write-WatchLog 'STT module force-loaded'
-    }
-    catch {
-        Write-WatchLog ("STT force-load: {0}" -f $_.Exception.Message)
-        return $false
-    }
-    return [bool](Get-Command Invoke-WindowsSttListenInteractive -ErrorAction SilentlyContinue)
-}
-
-function Invoke-WatchAgentModuleBootStep {
-    if (-not $script:WatchModuleBootPlan) { return $false }
-    $idx = $script:WatchModuleBootIndex
-    if ($idx -ge $script:WatchModuleBootPlan.Count) {
-        Complete-WatchAgentModuleBoot
-        $script:WatchModuleBootPlan = $null
-        $script:WatchModuleBootIndex = 0
-        return $false
-    }
-    $step = $script:WatchModuleBootPlan[$idx]
-    $script:WatchModuleBootIndex = $idx + 1
-    if ($step.Rel) {
-        Write-WatchLog ("Module boot: {0}" -f $step.Rel)
-        if (-not (Invoke-WatchAgentDotModuleAtScript -RelativePath $step.Rel)) {
-            Write-WatchLog ("Module Fresh Agent absent: {0}" -f $step.Rel)
-        }
-    }
-    return $true
-}
-
-function Start-WatchAgentModuleBootAsync {
-    if (-not $script:FreshAgentModuleBootPending) { return }
-    if ($script:WatchModuleBootTimer) { return }
-
-    if (-not (Ensure-FreshAgentConfigLoadedForBoot)) {
-        Write-WatchLog 'Boot modules: FreshAgent-Config / Import-FreshAgentModule indisponible'
-        $script:FreshAgentModuleBootPending = $false
-        return
-    }
-
-    $script:FreshAgentModuleBootPending = $false
-    if (-not $script:FreshAgentStampSyncAttempted) {
-        $script:FreshAgentStampSyncAttempted = $true
-        try {
-            if (Test-LocalScriptsStale) {
-                Write-WatchLog 'Scripts agent perimes — sync avant boot modules'
-                Invoke-SyncLocalScripts
-            }
-        }
-        catch {
-            Write-WatchLog ("Stamp sync: {0}" -f $_.Exception.Message)
-        }
-    }
-    Write-WatchLog 'Boot modules Fresh Agent (async UI)...'
-
-    $bootRels = @(
-        'lib/FreshAgent-Log.ps1',
-        'lib/FreshAgent-SkillsEngine.ps1',
-        'lib/FreshAgent-SkillHandlers.ps1',
-        'lib/FreshAgent-GameSession.ps1',
-        'lib/FreshAgent-Confirm.ps1',
-        'lib/FreshAgent-ActionLog.ps1',
-        'lib/FreshAgent-VoiceRouter.ps1',
-        'lib/FreshAgent-AiLifecycle.ps1'
-    )
-    if (Get-Command Get-FreshAgentMinimalBootModuleList -ErrorAction SilentlyContinue) {
-        $bootRels = @(Get-FreshAgentMinimalBootModuleList)
-    }
-    $script:WatchModuleBootPlan = @($bootRels | ForEach-Object { @{ Rel = $_ } }) + @(@{ Rel = $null })
-    $script:WatchModuleBootIndex = 0
-
-    $script:WatchModuleBootTimer = New-Object System.Windows.Forms.Timer
-    $script:WatchModuleBootTimer.Interval = 120
-    $script:WatchModuleBootTimer.Add_Tick((Register-WatchUiHandler {
-            try {
-                $more = Invoke-WatchAgentModuleBootStep
-                if (-not $more) {
-                    $script:WatchModuleBootTimer.Stop()
-                    $script:WatchModuleBootTimer.Dispose()
-                    $script:WatchModuleBootTimer = $null
-                }
-            }
-            catch {
-                Write-WatchLog ("Module boot step: {0}" -f $_.Exception.Message)
-            }
-        }))
-    $script:WatchModuleBootTimer.Start()
-}
-
-function Invoke-FreshAgentDeferredBoot {
-    if (-not $script:FreshAgentDeferredBootPending) { return }
-    $script:FreshAgentDeferredBootPending = $false
-    if (-not $script:FreshAgentReady) { return }
-    if (Get-Command Build-FreshAgentMachineInventory -ErrorAction SilentlyContinue) {
-        try {
-            $invPath = Get-FreshAgentInventoryPath -FreshAppData $script:FreshAppData
-            if (-not (Test-Path -LiteralPath $invPath)) {
-                Build-FreshAgentMachineInventory -FreshAppData $script:FreshAppData | Out-Null
-                Write-WatchLog 'Inventaire machine initialise (differe)'
-            }
-        }
-        catch {
-            Write-WatchLog ("Inventaire: {0}" -f $_.Exception.Message)
-        }
-    }
-    if ($script:FreshAgentAi -and $script:FreshAgentAi.rag -and $script:FreshAgentAi.rag.enabled) {
-        try {
-            $ragPath = Get-FreshAgentRagIndexPath -FreshAppData $script:FreshAppData
-            if (-not (Test-Path -LiteralPath $ragPath)) {
-                Start-FreshAgentBackgroundWork -Action BuildRagIndex -BusyTitle 'RAG' -BusyText 'Index RAG en cours...'
-                Write-WatchLog 'Index RAG initialise (differe, bg)'
-            }
-        }
-        catch {
-            Write-WatchLog ("RAG: {0}" -f $_.Exception.Message)
-        }
-    }
-}
-
 function Invoke-WatchTick {
-    if ($script:WatchModuleBootTimer -or $script:WatchModuleBootPlan) {
-        return
-    }
     if ($script:WatchRulesRemotePending) {
         $script:WatchRulesRemotePending = $false
         $script:WatchRules = Get-WatchRules
+        Sync-WatchAgentPollTimer
     }
     $script:UserSettings = Get-WatchUserSettings
-    Update-FreshAgentTrayStatus
-    if ($script:FreshAgentModuleBootPending) {
-        Start-WatchAgentModuleBootAsync
-    }
-    Invoke-FreshAgentDeferredBoot
-    Invoke-FreshAgentBackgroundResultPoll
-    $skillPoll = $script:FreshAgentSkillResultPoll
-    if ($skillPoll -is [scriptblock]) { & $skillPoll }
-    elseif (Get-Command Invoke-FreshAgentSkillResultPoll -ErrorAction SilentlyContinue) {
-        Invoke-FreshAgentSkillResultPoll
-    }
-    if (Get-Command Update-FreshAgentDashboardIfOpen -ErrorAction SilentlyContinue) {
-        Update-FreshAgentDashboardIfOpen
-    }
-    $wantIdleSuggest = $false
-    try {
-        if ($script:UserSettings.autoSuggestKill) { $wantIdleSuggest = $true }
-        if ($script:FreshAgentAi -and $script:FreshAgentAi.enabled) { $wantIdleSuggest = $true }
-    }
-    catch { }
-    if ($wantIdleSuggest) {
-        if (Get-Command Ensure-FreshAgentIdleSuggestLoaded -ErrorAction SilentlyContinue) {
-            Ensure-FreshAgentIdleSuggestLoaded -FreshAppData $script:FreshAppData | Out-Null
-        }
-        if (Get-Command Invoke-FreshAgentIdleSuggestTick -ErrorAction SilentlyContinue) {
-            try {
-                Invoke-FreshAgentIdleSuggestTick -FreshAppData $script:FreshAppData -RepoRef $script:RepoRef -AiConfig $script:FreshAgentAi
-            }
-            catch { }
-        }
-    }
+    Update-MaintenanceTrayStatus
+
     if (Get-Command Invoke-FreshAgentWeeklyHealthReportIfDue -ErrorAction SilentlyContinue) {
-        if (Get-Command Ensure-FreshAgentHealthLibsLoaded -ErrorAction SilentlyContinue) {
-            Ensure-FreshAgentHealthLibsLoaded -FreshAppData $script:FreshAppData | Out-Null
-        }
         try {
             $wr = Invoke-FreshAgentWeeklyHealthReportIfDue -FreshAppData $script:FreshAppData
             if ($wr -and $wr.ok) {
-                Show-FreshAgentUserNotice -Title 'Rapport' -Text ([string]$wr.message) -Level Info
+                $msg = [string]$wr.message
+                if ($msg.Length -gt 200) { $msg = $msg.Substring(0, 197) + '...' }
+                Show-Balloon -Title 'Rapport hebdo' -Text $msg -Icon Info
             }
         }
-        catch { }
+        catch {
+            Write-WatchLog ("Weekly report tick: {0}" -f $_.Exception.Message)
+        }
     }
-    # Sample health history ~ every 5 min when ready
-    if ($script:FreshAgentReady -and (Get-Command Get-FreshAgentHealthSnapshot -ErrorAction SilentlyContinue)) {
+
+    if ($script:MaintenanceLibsReady -and (Get-Command Get-FreshAgentHealthSnapshot -ErrorAction SilentlyContinue)) {
         $due = $true
         try {
             if ($script:FaHealthSampleAt -and ((Get-Date) - [datetime]$script:FaHealthSampleAt).TotalMinutes -lt 5) {
@@ -998,27 +590,14 @@ function Invoke-WatchTick {
         catch { }
         if ($due) {
             try {
-                if (Get-Command Ensure-FreshAgentHealthLibsLoaded -ErrorAction SilentlyContinue) {
-                    Ensure-FreshAgentHealthLibsLoaded -FreshAppData $script:FreshAppData | Out-Null
-                }
                 $snap = Get-FreshAgentHealthSnapshot -FreshAppData $script:FreshAppData
                 Add-FreshAgentHealthHistory -Snapshot $snap -FreshAppData $script:FreshAppData
                 $script:FaHealthSampleAt = Get-Date
-                $script:FaHealthLastSummary = 'CPU {0}% | RAM {1}% ({2} Go libres) | C: {3} Go | GPU {4}' -f `
-                    $snap.cpuPct, $snap.ramUsedPct, $snap.ramFreeGb, $snap.diskFreeGb, $(if ($snap.gpuName) { $snap.gpuName } else { 'n/a' })
             }
             catch { }
         }
     }
-    $ttsErr = Join-Path $script:FreshAppData 'fa-tts-error.txt'
-    if (Test-Path -LiteralPath $ttsErr) {
-        try {
-            $em = (Get-Content -LiteralPath $ttsErr -Raw -Encoding UTF8).Trim()
-            Remove-Item -LiteralPath $ttsErr -Force -ErrorAction SilentlyContinue
-            if ($em) { Show-FreshAgentUserNotice -Title 'TTS' -Text $em -Level Warning }
-        }
-        catch { }
-    }
+
     if (-not $script:UserSettings.monitorEnabled) { return }
 
     if (-not $script:GameModeCfg) {
@@ -1065,8 +644,8 @@ function Invoke-WatchTick {
                     $key = "cpu:$id"
                     if ($script:UserSettings.autoSuggestKill -and (Test-AlertCooldown -Key $key -CooldownSec $cooldown)) {
                         $script:PendingKill[$id] = $name
-                        Show-Balloon -Title 'CPU eleve (hors jeu/comm)' -Text (
-                            "$name CPU eleve. Clic droit: Tuer suggestion ou Mode jeu."
+                        Show-Balloon -Title 'CPU eleve' -Text (
+                            "$name CPU eleve. Menu: Tuer suggestions ou Mode jeu."
                         ) -Icon Warning
                         Mark-Alert -Key $key
                         $highSince = $null
@@ -1090,12 +669,11 @@ function Invoke-WatchTick {
                 }
             }
 
-            # SystemSettings et co. reportent souvent Responding=false a tort
             if ($p.Responding -eq $false) {
                 $key = "hang:$id"
                 if ($script:UserSettings.autoSuggestKill -and (Test-AlertCooldown -Key $key -CooldownSec $cooldown)) {
                     $script:PendingKill[$id] = $name
-                    Show-Balloon -Title 'Processus ne repond pas' -Text ("$name - proposition de fermeture via le menu de l'icone.") -Icon Error
+                    Show-Balloon -Title 'Processus bloque' -Text ("$name - proposition via le menu de l'icone.") -Icon Error
                     Mark-Alert -Key $key
                 }
             }
@@ -1103,7 +681,6 @@ function Invoke-WatchTick {
         catch { }
     }
 
-    # Nettoyage PIDs morts
     $live = @{}
     Get-Process | ForEach-Object { $live[$_.Id] = $true }
     foreach ($k in @($script:CpuTrack.Keys)) {
@@ -1127,7 +704,7 @@ function Invoke-WatchTick {
                     $hogs = @($rules.knownDiskHogs) | ForEach-Object {
                         if (Get-Process -Name $_ -ErrorAction SilentlyContinue) { $_ }
                     }
-                    $extra = if ($hogs.Count) { "`nSuspects : $($hogs -join ', ')" } else { '' }
+                    $extra = if ($hogs.Count) { " Suspects: $($hogs -join ', ')" } else { '' }
                     $diskLine = 'Disque ~{0}% (hors session jeu).{1}' -f [math]::Round($disk), $extra
                     Show-Balloon -Title 'Disque sature' -Text $diskLine -Icon Warning
                     Mark-Alert -Key $key
@@ -1142,12 +719,14 @@ function Invoke-WatchTick {
 
 function Invoke-GameModeKillNow {
     try {
-        Ensure-UltimatePerformanceActive | Out-Null
+        if (Get-Command Ensure-UltimatePerformanceActive -ErrorAction SilentlyContinue) {
+            Ensure-UltimatePerformanceActive | Out-Null
+        }
         $cfg = Get-GameModeKillConfig
         $r = Stop-GameModeKillListProcesses -KillNames $cfg.KillNames -ProtectNames $cfg.ProtectNames
         $idle = Stop-IdleGamingLaunchers -LauncherNames $cfg.GamingLauncherNames -LauncherFamilies $cfg.GamingLauncherFamilies
         $n = $r.Killed.Count + $idle.Killed.Count
-        $extra = if ($idle.Kept.Count) { " Gardes : $($idle.Kept[0])." } else { '' }
+        $extra = if ($idle.Kept.Count) { " Gardes: $($idle.Kept[0])." } else { '' }
         Show-Balloon -Title 'Mode jeu' -Text ("$n processus fermes.$extra") -Icon Info
     }
     catch {
@@ -1165,1899 +744,12 @@ function Invoke-IdleLaunchersOnly {
         }
         else {
             Show-Balloon -Title 'Launchers' -Text (
-                "Fermes : $($idle.Killed.Count). Gardes : $($idle.Kept -join ', ')"
+                "Fermes: $($idle.Killed.Count). Gardes: $($idle.Kept -join ', ')"
             ) -Icon Info
         }
     }
     catch {
         Show-Balloon -Title 'Launchers' -Text $_.Exception.Message -Icon Error
-    }
-}
-
-function Test-LocalScriptsStale {
-    $refFile = Join-Path $FreshAppData 'scripts.ref'
-    $devMode = Test-Path -LiteralPath (Join-Path $FreshAppData 'repo.root')
-    if (-not (Test-Path -LiteralPath $refFile)) {
-        return -not $devMode
-    }
-    try {
-        $storedRef = (Get-Content -LiteralPath $refFile -Raw -Encoding UTF8).Trim()
-        if ($storedRef -eq 'local-dev') { return $false }
-        $localEpoch = ''
-        $stampFile = Join-Path $FreshAppData 'scripts.stamp'
-        if (Test-Path -LiteralPath $stampFile) {
-            $localEpoch = (Get-Content -LiteralPath $stampFile -Raw -Encoding UTF8).Trim()
-        }
-        $remoteEpoch = ''
-        if ($storedRef -ne 'local-dev') {
-            try {
-                $url = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/configs/agent-content.json"
-                $meta = Invoke-RestMethod -Uri $url -UseBasicParsing -TimeoutSec 4
-                if ($meta -and $null -ne $meta.epoch) { $remoteEpoch = [string]$meta.epoch }
-            }
-            catch { }
-        }
-        if (Get-Command Test-FreshAgentContentStampStale -ErrorAction SilentlyContinue) {
-            return [bool](Test-FreshAgentContentStampStale -StoredRef $storedRef -LocalEpoch $localEpoch -RemoteEpoch $remoteEpoch -RepoRef $RepoRef -DevMode:$devMode)
-        }
-        if ($devMode -and [string]::IsNullOrWhiteSpace($storedRef)) { return $false }
-        $refOnly = ($storedRef -split '\|', 2)[0].Trim()
-        if ($refOnly -ne $RepoRef) { return $true }
-        if ([string]::IsNullOrWhiteSpace($localEpoch)) { return $true }
-        if ($remoteEpoch) { return ($remoteEpoch.Trim() -ne $localEpoch.Trim()) }
-        return $false
-    }
-    catch { return $true }
-}
-
-function Ensure-FreshAgentProfileReady {
-    # Check rapide uniquement (pas de re-import synchrone sur le thread UI).
-    if (Get-Command Invoke-FreshAgentProfile -ErrorAction SilentlyContinue) {
-        return $true
-    }
-    return (Test-Path -LiteralPath (Join-Path $script:FreshAppData 'lib\FreshAgent-Profiles.ps1'))
-}
-
-function Invoke-FreshAgentProfileFromUi {
-    param([string]$ProfileId)
-    $sb = $script:FreshAgentStartProfileBg
-    if ($sb -is [scriptblock]) {
-        & $sb $ProfileId
-        return
-    }
-    Start-FreshAgentUiProfileBackground -ProfileId $ProfileId
-}
-
-function Start-FreshAgentUiProfileBackground {
-    param([Parameter(Mandatory)][string]$ProfileId)
-    Write-WatchLog ("Profile bg enter: {0}" -f $ProfileId)
-    if (-not $script:FreshAgentReady) {
-        Show-Balloon -Title 'Profil' -Text 'Modules non charges.' -Icon Warning
-        return
-    }
-    if ($script:FaSkillResultPending) {
-        Show-Balloon -Title 'Profil' -Text 'Une action skill/profil est deja en cours.' -Icon Warning
-        return
-    }
-    if (-not (Test-Path -LiteralPath (Join-Path $script:FreshAppData 'lib\FreshAgent-Profiles.ps1'))) {
-        Show-Balloon -Title 'Profil' -Text 'FreshAgent-Profiles absent — sync scripts locaux.' -Icon Warning
-        return
-    }
-
-    Write-WatchLog ("Profile bg start: {0}" -f $ProfileId)
-    Show-Balloon -Title 'Profil' -Text ("Profil en cours: {0}" -f $ProfileId) -Icon Info
-
-    $resultPath = Join-Path $script:FreshAppData 'fa-skill-result.json'
-    try { Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue } catch { }
-    $freshEsc = $script:FreshAppData.Replace("'", "''")
-    $repoEsc = $script:RepoRef.Replace("'", "''")
-    $profEsc = $ProfileId.Replace("'", "''")
-    $scriptBody = @"
-`$ErrorActionPreference = 'Continue'
-`$fresh = '$freshEsc'
-`$repo = '$repoEsc'
-`$profileId = '$profEsc'
-`$resultPath = Join-Path `$fresh 'fa-skill-result.json'
-`$log = Join-Path `$fresh 'watch-agent.log'
-function Log([string]`$m) { try { Add-Content -LiteralPath `$log -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' PROFILE ' + `$m) -Encoding UTF8 } catch {} }
-try {
-  . (Join-Path `$fresh 'lib\FreshAgent-Config.ps1')
-  `$common = Join-Path `$fresh 'GameMode-Common.ps1'
-  if (Test-Path -LiteralPath `$common) {
-    try { . `$common -RepoRef `$repo } catch { Log ("GameMode-Common: `$(`$_.Exception.Message)") }
-  }
-  Import-FreshAgentStandardModules -FreshAppData `$fresh -Full | Out-Null
-  Log ("invoke begin `$profileId")
-  `$r = Invoke-FreshAgentProfile -ProfileId `$profileId -RepoRef `$repo -FreshAppData `$fresh
-  `$payload = @{
-    ok = [bool]`$r.ok
-    message = if (`$r.message) { [string]`$r.message } else { 'OK' }
-    skill = ('profile:' + `$profileId)
-    at = (Get-Date -Format o)
-  }
-  `$payload | ConvertTo-Json -Compress | Set-Content -LiteralPath `$resultPath -Encoding UTF8
-  Log ("invoke end `$profileId ok=`$(`$payload.ok)")
-}
-catch {
-  Log ("invoke fail `$profileId : `$(`$_.Exception.Message)")
-  @{ ok = `$false; message = `$_.Exception.Message; skill = ('profile:' + `$profileId); at = (Get-Date -Format o) } |
-    ConvertTo-Json -Compress | Set-Content -LiteralPath `$resultPath -Encoding UTF8
-}
-"@
-    try {
-        Start-FreshAgentDetachedPs1 -ScriptContent $scriptBody
-    }
-    catch {
-        Write-WatchLog ("Profile bg spawn: {0}" -f $_.Exception.ToString())
-        Show-Balloon -Title 'Profil' -Text $_.Exception.Message -Icon Error
-        return
-    }
-    $script:FaSkillResultPending = $true
-    $script:FaSkillResultStarted = Get-Date
-    $script:FaSkillResultId = "profile:$ProfileId"
-    $script:FaSkillResultLastAt = $null
-    Start-FreshAgentSkillPollTimerIfNeeded
-    Write-WatchLog ("Profile bg queued: {0}" -f $ProfileId)
-}
-
-$script:FreshAgentStartProfileBg = {
-    param([string]$ProfileId)
-    Start-FreshAgentUiProfileBackground -ProfileId $ProfileId
-}
-
-function Invoke-FreshAgentSkillMenu {
-    param(
-        [Parameter(Mandatory)]
-        [string]$SkillId,
-        [hashtable]$Parameters = @{}
-    )
-    if (Get-Command Ensure-FreshAgentSkillsLoaded -ErrorAction SilentlyContinue) {
-        Ensure-FreshAgentSkillsLoaded -FreshAppData $script:FreshAppData | Out-Null
-    }
-    $sb = $script:FreshAgentStartSkillBg
-    if ($sb -is [scriptblock]) {
-        & $sb $SkillId $Parameters
-        return
-    }
-    Start-FreshAgentUiSkillBackground -SkillId $SkillId -Parameters $Parameters
-}
-
-function Start-FreshAgentUiSkillBackground {
-    param(
-        [Parameter(Mandatory)]
-        [string]$SkillId,
-        [hashtable]$Parameters = @{},
-        [switch]$SkipConfirm
-    )
-    Write-WatchLog ("Skill bg enter: {0}" -f $SkillId)
-    if (-not $script:FreshAgentReady) {
-        Show-Balloon -Title 'Fresh Agent' -Text 'Modules skills non charges (sync scripts locaux).' -Icon Warning
-        return
-    }
-    if ($script:FaSkillResultPending) {
-        Show-Balloon -Title 'Fresh Agent' -Text 'Un skill est deja en cours.' -Icon Warning
-        return
-    }
-
-    Write-WatchLog ("Skill bg start: {0}" -f $SkillId)
-    Show-Balloon -Title 'Fresh Agent' -Text ("Skill en cours: {0}" -f $SkillId) -Icon Info
-
-    $resultPath = Join-Path $script:FreshAppData 'fa-skill-result.json'
-    try { Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue } catch { }
-
-    $freshEsc = $script:FreshAppData.Replace("'", "''")
-    $repoEsc = $script:RepoRef.Replace("'", "''")
-    $skillEsc = $SkillId.Replace("'", "''")
-    $skipLit = if ($SkipConfirm) { '$true' } else { '$false' }
-    $paramsJson = '{}'
-    try {
-        if ($Parameters -and $Parameters.Count -gt 0) {
-            $paramsJson = ($Parameters | ConvertTo-Json -Compress -Depth 6)
-        }
-    }
-    catch { $paramsJson = '{}' }
-    $paramsEsc = $paramsJson.Replace("'", "''")
-
-    $scriptBody = @"
-`$ErrorActionPreference = 'Continue'
-`$fresh = '$freshEsc'
-`$repo = '$repoEsc'
-`$skillId = '$skillEsc'
-`$skipConfirm = $skipLit
-`$resultPath = Join-Path `$fresh 'fa-skill-result.json'
-`$log = Join-Path `$fresh 'watch-agent.log'
-function Log([string]`$m) { try { Add-Content -LiteralPath `$log -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' SKILL ' + `$m) -Encoding UTF8 } catch {} }
-try {
-  . (Join-Path `$fresh 'lib\FreshAgent-Config.ps1')
-  `$common = Join-Path `$fresh 'GameMode-Common.ps1'
-  if (Test-Path -LiteralPath `$common) {
-    try { . `$common -RepoRef `$repo } catch { Log ("GameMode-Common: `$(`$_.Exception.Message)") }
-  }
-  Import-FreshAgentStandardModules -FreshAppData `$fresh -Full | Out-Null
-  `$params = @{}
-  try {
-    `$rawParams = '$paramsEsc' | ConvertFrom-Json
-    if (`$rawParams) {
-      `$rawParams.PSObject.Properties | ForEach-Object { `$params[`$_.Name] = `$_.Value }
-    }
-  } catch {}
-  Log ("invoke begin `$skillId skipConfirm=`$skipConfirm")
-  if (`$skipConfirm) {
-    `$r = Invoke-FreshAgentSkill -SkillId `$skillId -Parameters `$params -RepoRef `$repo -FreshAppData `$fresh -SkipConfirm -Source 'confirm'
-  } else {
-    `$r = Invoke-FreshAgentSkill -SkillId `$skillId -Parameters `$params -RepoRef `$repo -FreshAppData `$fresh -Source 'ui'
-  }
-  `$spoken = `$null
-  if (`$r.spoken) { `$spoken = [string]`$r.spoken }
-  elseif (Get-Command ConvertTo-FreshAgentSpokenSkillLine -ErrorAction SilentlyContinue) {
-    try { `$spoken = ConvertTo-FreshAgentSpokenSkillLine -Result `$r } catch {}
-  }
-  `$payload = @{
-    ok = [bool]`$r.ok
-    message = if (`$r.message) { [string]`$r.message } else { 'Termine.' }
-    spoken = `$spoken
-    skill = `$skillId
-    pendingConfirm = [bool]`$r.pendingConfirm
-    at = (Get-Date -Format o)
-  }
-  `$payload | ConvertTo-Json -Compress | Set-Content -LiteralPath `$resultPath -Encoding UTF8
-  Log ("invoke end `$skillId ok=`$(`$payload.ok)")
-}
-catch {
-  Log ("invoke fail `$skillId : `$(`$_.Exception.Message)")
-  @{ ok = `$false; message = `$_.Exception.Message; skill = `$skillId; at = (Get-Date -Format o) } |
-    ConvertTo-Json -Compress | Set-Content -LiteralPath `$resultPath -Encoding UTF8
-}
-"@
-    try {
-        Start-FreshAgentDetachedPs1 -ScriptContent $scriptBody
-    }
-    catch {
-        Write-WatchLog ("Skill bg spawn: {0}" -f $_.Exception.ToString())
-        Show-Balloon -Title 'Fresh Agent' -Text $_.Exception.Message -Icon Error
-        return
-    }
-    $script:FaSkillResultPending = $true
-    $script:FaSkillResultStarted = Get-Date
-    $script:FaSkillResultId = $SkillId
-    $script:FaSkillResultLastAt = $null
-    Start-FreshAgentSkillPollTimerIfNeeded
-    Write-WatchLog ("Skill bg queued: {0}" -f $SkillId)
-}
-
-# Publie sur $script: pour handlers WinForms / InvokeScript (pas de Function:).
-$script:FreshAgentStartSkillBg = {
-    param(
-        [string]$SkillId,
-        [hashtable]$Parameters = @{}
-    )
-    Start-FreshAgentUiSkillBackground -SkillId $SkillId -Parameters $Parameters
-}
-
-function Start-FreshAgentSkillPollTimerIfNeeded {
-    if ($script:FaSkillPollTimer) { return }
-    try {
-        $script:FaSkillPollTimer = New-Object System.Windows.Forms.Timer
-        $script:FaSkillPollTimer.Interval = 1000
-        $script:FaSkillPollTimer.Add_Tick((Register-WatchUiHandler {
-                try {
-                    $poll = $script:FreshAgentSkillResultPoll
-                    if ($poll -is [scriptblock]) {
-                        & $poll
-                    }
-                    elseif ($script:WatchAgentSessionState) {
-                        $null = $script:WatchAgentSessionState.InvokeCommand.InvokeScript(
-                            $false, { Invoke-FreshAgentSkillResultPoll }, $null, @())
-                    }
-                    if (-not $script:FaSkillResultPending -and $script:FaSkillPollTimer) {
-                        $script:FaSkillPollTimer.Stop()
-                        $script:FaSkillPollTimer.Dispose()
-                        $script:FaSkillPollTimer = $null
-                    }
-                }
-                catch {
-                    try {
-                        $log = $script:FreshAgentUiLog
-                        if ($log -is [scriptblock]) {
-                            & $log ("Skill poll timer: {0}" -f $_.Exception.Message)
-                        }
-                        else {
-                            Write-WatchLog ("Skill poll timer: {0}" -f $_.Exception.Message)
-                        }
-                    }
-                    catch { }
-                }
-            }))
-        $script:FaSkillPollTimer.Start()
-    }
-    catch {
-        Write-WatchLog ("Skill poll timer start: {0}" -f $_.Exception.Message)
-    }
-}
-
-function Invoke-FreshAgentSkillResultPoll {
-    if (-not $script:FaSkillResultPending) { return }
-    $path = Join-Path $script:FreshAppData 'fa-skill-result.json'
-    $timeoutSec = 60
-    try {
-        if ($script:FaSkillResultStarted -and ((Get-Date) - $script:FaSkillResultStarted).TotalSeconds -ge $timeoutSec) {
-            $script:FaSkillResultPending = $false
-            Write-WatchLog ("Skill bg timeout: {0}" -f $script:FaSkillResultId)
-            Show-Balloon -Title 'Fresh Agent' -Text ("Skill timeout: {0}" -f $script:FaSkillResultId) -Icon Warning
-            return
-        }
-    }
-    catch { }
-
-    if (-not (Test-Path -LiteralPath $path)) { return }
-    try {
-        $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($raw.at -and $raw.at -eq $script:FaSkillResultLastAt) { return }
-        $script:FaSkillResultLastAt = [string]$raw.at
-        $script:FaSkillResultPending = $false
-        $msg = if ($raw.message) { [string]$raw.message } else { 'Termine.' }
-        $level = if ($raw.ok) { 'Info' } else { 'Warning' }
-        Write-WatchLog ("Skill bg done: {0} ok={1}" -f $script:FaSkillResultId, [bool]$raw.ok)
-        # Overlay + balloon pour retour visible apres commande voix/texte
-        Show-FreshAgentUserNotice -Title 'Skill' -Text $msg -Level $level
-        try { Show-Balloon -Title 'Fresh Agent' -Text $msg -Icon $(if ($raw.ok) { 'Info' } else { 'Warning' }) } catch { }
-        # Liberer le micro (pause TTS) puis re-armer
-        try {
-            if (Get-Command Resume-FreshAgentVoiceListenAfterPause -ErrorAction SilentlyContinue) {
-                Resume-FreshAgentVoiceListenAfterPause -FreshAppData $script:FreshAppData
-            }
-        }
-        catch { }
-        try {
-            # Confirmation en attente: NE PAS TTS (coupe le micro → "oui" perdu). Balloon suffit.
-            if ($raw.pendingConfirm) {
-                Write-WatchLog 'Skill pendingConfirm: listen stays ON for oui/annule'
-                if (Get-Command Resume-FreshAgentVoiceListenAfterPause -ErrorAction SilentlyContinue) {
-                    Resume-FreshAgentVoiceListenAfterPause -FreshAppData $script:FreshAppData
-                }
-            }
-            elseif ($raw.ok -and $msg -and (Get-Command Start-FreshAgentQuickSpeak -ErrorAction SilentlyContinue)) {
-                $speak = $null
-                if ($raw.spoken) { $speak = [string]$raw.spoken }
-                elseif (Get-Command ConvertTo-FreshAgentSpokenSkillLine -ErrorAction SilentlyContinue) {
-                    $speak = ConvertTo-FreshAgentSpokenSkillLine -Result $raw -Message $msg
-                }
-                if (-not $speak) { $speak = $msg }
-                if ($speak.Length -gt 280) { $speak = $speak.Substring(0, 277) + '...' }
-                Start-FreshAgentQuickSpeak -Text $speak
-            }
-        }
-        catch {
-            Write-WatchLog ("Skill TTS: {0}" -f $_.Exception.Message)
-        }
-    }
-    catch {
-        Write-WatchLog ("Skill bg poll: {0}" -f $_.Exception.Message)
-    }
-}
-
-$script:FreshAgentSkillResultPoll = {
-    if (-not $script:FaSkillResultPending) { return }
-    $path = Join-Path $script:FreshAppData 'fa-skill-result.json'
-    $timeoutSec = 60
-    try {
-        if ($script:FaSkillResultStarted -and ((Get-Date) - $script:FaSkillResultStarted).TotalSeconds -ge $timeoutSec) {
-            $script:FaSkillResultPending = $false
-            $log = $script:FreshAgentUiLog
-            if ($log -is [scriptblock]) { & $log ("Skill bg timeout: {0}" -f $script:FaSkillResultId) }
-            Show-Balloon -Title 'Fresh Agent' -Text ("Skill timeout: {0}" -f $script:FaSkillResultId) -Icon Warning
-            return
-        }
-    }
-    catch { }
-    if (-not (Test-Path -LiteralPath $path)) { return }
-    try {
-        $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($raw.at -and $raw.at -eq $script:FaSkillResultLastAt) { return }
-        $script:FaSkillResultLastAt = [string]$raw.at
-        $script:FaSkillResultPending = $false
-        $msg = if ($raw.message) { [string]$raw.message } else { 'Termine.' }
-        $level = if ($raw.ok) { 'Info' } else { 'Warning' }
-        $log = $script:FreshAgentUiLog
-        if ($log -is [scriptblock]) { & $log ("Skill bg done: {0} ok={1}" -f $script:FaSkillResultId, [bool]$raw.ok) }
-        Show-FreshAgentUserNotice -Title 'Skill' -Text $msg -Level $level
-        try { Show-Balloon -Title 'Fresh Agent' -Text $msg -Icon $(if ($raw.ok) { 'Info' } else { 'Warning' }) } catch { }
-        try {
-            if (Get-Command Resume-FreshAgentVoiceListenAfterPause -ErrorAction SilentlyContinue) {
-                Resume-FreshAgentVoiceListenAfterPause -FreshAppData $script:FreshAppData
-            }
-        }
-        catch { }
-        try {
-            if ($raw.pendingConfirm) {
-                if (Get-Command Resume-FreshAgentVoiceListenAfterPause -ErrorAction SilentlyContinue) {
-                    Resume-FreshAgentVoiceListenAfterPause -FreshAppData $script:FreshAppData
-                }
-            }
-            elseif ($raw.ok -and $msg -and (Get-Command Start-FreshAgentQuickSpeak -ErrorAction SilentlyContinue)) {
-                $speak = $null
-                if ($raw.spoken) { $speak = [string]$raw.spoken }
-                elseif (Get-Command ConvertTo-FreshAgentSpokenSkillLine -ErrorAction SilentlyContinue) {
-                    $speak = ConvertTo-FreshAgentSpokenSkillLine -Result $raw -Message $msg
-                }
-                if (-not $speak) { $speak = $msg }
-                if ($speak.Length -gt 280) { $speak = $speak.Substring(0, 277) + '...' }
-                Start-FreshAgentQuickSpeak -Text $speak
-            }
-        }
-        catch { }
-    }
-    catch {
-        $log = $script:FreshAgentUiLog
-        if ($log -is [scriptblock]) { & $log ("Skill bg poll: {0}" -f $_.Exception.Message) }
-    }
-}
-
-function Show-FreshAgentAiPromptDialog {
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = 'Fresh Agent - Tester l IA'
-    $form.Size = New-Object System.Drawing.Size(480, 200)
-    $form.StartPosition = 'CenterScreen'
-    $form.FormBorderStyle = 'FixedDialog'
-    $form.MaximizeBox = $false
-    $form.MinimizeBox = $false
-    $form.TopMost = $true
-    $form.ShowInTaskbar = $true
-    try {
-        if ($script:FreshAgentDashboardForm -and -not $script:FreshAgentDashboardForm.IsDisposed) {
-            $form.Owner = $script:FreshAgentDashboardForm
-        }
-        elseif ($script:HiddenForm -and -not $script:HiddenForm.IsDisposed) {
-            $form.Owner = $script:HiddenForm
-        }
-    }
-    catch { }
-
-    $label = New-Object System.Windows.Forms.Label
-    $label.Text = 'Demande (ex: etat systeme, mets du lofi sur YouTube) :'
-    $label.AutoSize = $true
-    $label.Location = New-Object System.Drawing.Point(12, 12)
-    $form.Controls.Add($label)
-
-    $textBox = New-Object System.Windows.Forms.TextBox
-    $textBox.Location = New-Object System.Drawing.Point(12, 36)
-    $textBox.Size = New-Object System.Drawing.Size(440, 80)
-    $textBox.Multiline = $true
-    $textBox.ScrollBars = 'Vertical'
-    $form.Controls.Add($textBox)
-
-    $ok = New-Object System.Windows.Forms.Button
-    $ok.Text = 'Envoyer'
-    $ok.DialogResult = [System.Windows.Forms.DialogResult]::OK
-    $ok.Location = New-Object System.Drawing.Point(296, 126)
-    $form.AcceptButton = $ok
-    $form.Controls.Add($ok)
-
-    $cancel = New-Object System.Windows.Forms.Button
-    $cancel.Text = 'Annuler'
-    $cancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-    $cancel.Location = New-Object System.Drawing.Point(377, 126)
-    $form.CancelButton = $cancel
-    $form.Controls.Add($cancel)
-
-    $result = $form.ShowDialog()
-    try { $form.Dispose() } catch { }
-    if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
-        return $textBox.Text.Trim()
-    }
-    return $null
-}
-
-function Start-FreshAgentDetachedPs1 {
-    param(
-        [Parameter(Mandatory)]
-        [string]$ScriptContent,
-        [switch]$Sta
-    )
-    $dir = Join-Path $script:FreshAppData 'temp'
-    New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    $path = Join-Path $dir ("fa-bg-{0}.ps1" -f ([guid]::NewGuid().ToString('n')))
-    Set-Content -LiteralPath $path -Value $ScriptContent -Encoding UTF8
-    $psExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass')
-    if ($Sta) { $argList += '-STA' }
-    $argList += @('-File', $path)
-    Start-Process -FilePath $psExe -WindowStyle Hidden -ArgumentList $argList | Out-Null
-}
-
-function Test-FreshAgentOllamaWorkerReady {
-    $worker = Join-Path $script:FreshAppData 'ai\FreshAgent-BackgroundWorker.ps1'
-    $mgr = Join-Path $script:FreshAppData 'ai\Ollama-Manager.ps1'
-    if ((Test-Path -LiteralPath $worker) -and (Test-Path -LiteralPath $mgr)) {
-        return $true
-    }
-    if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
-        Import-FreshAgentModule -RelativePath 'ai/Ollama-Manager.ps1' -FreshAppData $script:FreshAppData | Out-Null
-    }
-    return ((Test-Path -LiteralPath $worker) -and (Test-Path -LiteralPath $mgr))
-}
-
-function Start-FreshAgentAiPromptBackground {
-    param(
-        [Parameter(Mandatory)]
-        [string]$Prompt
-    )
-    if ([string]::IsNullOrWhiteSpace($Prompt)) { return }
-    if ($script:FaAiResultPending) {
-        Show-Balloon -Title 'Fresh Agent IA' -Text 'Une analyse IA est deja en cours.' -Icon Warning
-        return
-    }
-
-    Write-WatchLog ("AI prompt bg start ({0} chars)" -f $Prompt.Length)
-    New-Item -ItemType Directory -Path $script:FreshAppData -Force | Out-Null
-    $promptFile = Join-Path $script:FreshAppData 'ai-prompt.pending.txt'
-    Set-Content -LiteralPath $promptFile -Value $Prompt -Encoding UTF8
-    $resultPath = Join-Path $script:FreshAppData 'fa-ai-result.json'
-    try { Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue } catch { }
-
-    Show-Balloon -Title 'Fresh Agent IA' -Text 'Analyse en cours (Ollama)...' -Icon Info
-
-    $freshEsc = $script:FreshAppData.Replace("'", "''")
-    $repoEsc = $script:RepoRef.Replace("'", "''")
-    $scriptBody = @"
-`$ErrorActionPreference = 'Continue'
-`$fresh = '$freshEsc'
-`$repo = '$repoEsc'
-`$resultPath = Join-Path `$fresh 'fa-ai-result.json'
-`$log = Join-Path `$fresh 'watch-agent.log'
-function Log([string]`$m) { try { Add-Content -LiteralPath `$log -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' AI ' + `$m) -Encoding UTF8 } catch {} }
-function Write-AiResult([bool]`$Ok, [string]`$Message, `$Skills) {
-  `$payload = @{
-    ok = `$Ok
-    message = `$Message
-    skills = @(`$Skills)
-    at = (Get-Date -Format o)
-  }
-  `$payload | ConvertTo-Json -Compress -Depth 6 | Set-Content -LiteralPath `$resultPath -Encoding UTF8
-}
-try {
-  Log 'worker begin'
-  . (Join-Path `$fresh 'lib\FreshAgent-Config.ps1')
-  `$common = Join-Path `$fresh 'GameMode-Common.ps1'
-  if (Test-Path -LiteralPath `$common) {
-    try { . `$common -RepoRef `$repo } catch { Log ("GameMode-Common: `$(`$_.Exception.Message)") }
-  }
-  Import-FreshAgentStandardModules -FreshAppData `$fresh -Full | Out-Null
-  `$prompt = Get-Content -LiteralPath (Join-Path `$fresh 'ai-prompt.pending.txt') -Raw -Encoding UTF8
-  `$cfg = Get-FreshAgentAiConfig -RepoRef `$repo -FreshAppData `$fresh -PreferLocal
-  if (-not `$cfg.enabled) { throw 'IA desactivee - active IA : ON dans le panneau.' }
-  if (-not (Test-OllamaApi -TimeoutSec 2)) { throw 'Ollama API injoignable (127.0.0.1:11434).' }
-  Log 'Invoke-FreshAgentAiTurn...'
-  `$r = Invoke-FreshAgentAiTurn -UserPrompt `$prompt.Trim() -AiConfig `$cfg -RepoRef `$repo -FreshAppData `$fresh
-  `$text = if (`$r.message) { [string]`$r.message } else { 'Termine.' }
-  if (`$r.skills -and `$r.skills.Count -gt 0) { `$text += ([Environment]::NewLine + 'Skills: ' + (`$r.skills -join ', ')) }
-  Log ("done ok=`$(`$r.ok) len=`$(`$text.Length)")
-  if (Get-Command Invoke-FreshAgentSpeak -ErrorAction SilentlyContinue) {
-    try { Invoke-FreshAgentSpeak -Text `$text -AiConfig `$cfg -FreshAppData `$fresh | Out-Null } catch { Log ("tts: `$(`$_.Exception.Message)") }
-  }
-  if (Get-Command Add-FreshAgentAiHistoryEntry -ErrorAction SilentlyContinue) {
-    try { Add-FreshAgentAiHistoryEntry -Prompt `$prompt.Trim() -Response `$text -Skills `$r.skills -FreshAppData `$fresh } catch {}
-  }
-  Write-AiResult -Ok ([bool]`$r.ok) -Message `$text -Skills `$r.skills
-}
-catch {
-  Log ("fail: `$(`$_.Exception.Message)")
-  Write-AiResult -Ok `$false -Message `$_.Exception.Message -Skills @()
-}
-"@
-    try {
-        Start-FreshAgentDetachedPs1 -ScriptContent $scriptBody
-    }
-    catch {
-        Write-WatchLog ("AI prompt spawn: {0}" -f $_.Exception.ToString())
-        Show-Balloon -Title 'Fresh Agent IA' -Text $_.Exception.Message -Icon Error
-        return
-    }
-    $script:FaAiResultPending = $true
-    $script:FaAiResultStarted = Get-Date
-    $script:FaAiResultLastAt = $null
-    Start-FreshAgentAiPollTimerIfNeeded
-    Write-WatchLog 'AI prompt bg queued'
-}
-
-function Start-FreshAgentAiPollTimerIfNeeded {
-    if ($script:FaAiPollTimer) { return }
-    try {
-        $script:FaAiPollTimer = New-Object System.Windows.Forms.Timer
-        $script:FaAiPollTimer.Interval = 1000
-        $script:FaAiPollTimer.Add_Tick((Register-WatchUiHandler {
-                try {
-                    $poll = $script:FreshAgentAiResultPoll
-                    if ($poll -is [scriptblock]) { & $poll }
-                    if (-not $script:FaAiResultPending -and $script:FaAiPollTimer) {
-                        $script:FaAiPollTimer.Stop()
-                        $script:FaAiPollTimer.Dispose()
-                        $script:FaAiPollTimer = $null
-                    }
-                }
-                catch { }
-            }))
-        $script:FaAiPollTimer.Start()
-    }
-    catch { }
-}
-
-$script:FreshAgentAiResultPoll = {
-    if (-not $script:FaAiResultPending) { return }
-    $path = Join-Path $script:FreshAppData 'fa-ai-result.json'
-    try {
-        if ($script:FaAiResultStarted -and ((Get-Date) - $script:FaAiResultStarted).TotalSeconds -ge 180) {
-            $script:FaAiResultPending = $false
-            $script:SttUnpauseAt = (Get-Date).AddSeconds(2)
-            Write-WatchLog 'AI prompt timeout 180s'
-            Show-Balloon -Title 'Fresh Agent IA' -Text 'Timeout analyse IA (180s). Verifie Ollama / modele.' -Icon Warning
-            return
-        }
-    }
-    catch { }
-    if (-not (Test-Path -LiteralPath $path)) { return }
-    try {
-        $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($raw.at -and $raw.at -eq $script:FaAiResultLastAt) { return }
-        $script:FaAiResultLastAt = [string]$raw.at
-        $script:FaAiResultPending = $false
-        $script:SttUnpauseAt = (Get-Date).AddSeconds(6)
-        $msg = if ($raw.message) { [string]$raw.message } else { 'Termine.' }
-        if ($msg.Length -gt 240) { $msg = $msg.Substring(0, 237) + '...' }
-        $icon = if ($raw.ok) { 'Info' } else { 'Error' }
-        Write-WatchLog ("AI prompt done ok={0}" -f [bool]$raw.ok)
-        Show-Balloon -Title 'Fresh Agent IA' -Text $msg -Icon $icon
-    }
-    catch {
-        Write-WatchLog ("AI poll: {0}" -f $_.Exception.Message)
-    }
-}
-
-$script:FreshAgentRunAiTest = {
-    # Pas de ShowDialog: la fenetre modale bloque le thread UI (RunTagged sans OK).
-    Write-WatchLog 'AiTest enter'
-    try {
-        Start-FreshAgentAiPromptBackground -Prompt 'Reponds en une courte phrase: bonjour, je suis Fresh Agent.'
-    }
-    catch {
-        Write-WatchLog ("AiTest error: {0}" -f $_.Exception.Message)
-        Show-Balloon -Title 'Fresh Agent IA' -Text $_.Exception.Message -Icon Error
-    }
-    Write-WatchLog 'AiTest leave'
-}
-function Start-FreshAgentBackgroundWork {
-    param(
-        [ValidateSet('StartOllama', 'EnsureModel', 'BuildRagIndex')]
-        [string]$Action,
-        [string]$BusyTitle = 'Fresh Agent',
-        [string]$BusyText = 'Operation en cours...'
-    )
-    $worker = Join-Path $script:FreshAppData 'ai\FreshAgent-BackgroundWorker.ps1'
-    if ($Action -eq 'BuildRagIndex') {
-        if (-not (Test-Path -LiteralPath $worker)) {
-            Show-FreshAgentUserNotice -Title $BusyTitle -Text 'BackgroundWorker absent. Sync scripts locaux.' -Level Warning
-            return
-        }
-        $ragLib = Join-Path $script:FreshAppData 'lib\FreshAgent-Rag.ps1'
-        if (-not (Test-Path -LiteralPath $ragLib)) {
-            Show-FreshAgentUserNotice -Title $BusyTitle -Text 'Module RAG absent. Sync scripts locaux.' -Level Warning
-            return
-        }
-    }
-    elseif (-not (Test-FreshAgentOllamaWorkerReady)) {
-        Show-FreshAgentUserNotice -Title $BusyTitle -Text 'Scripts Ollama absents (dossier ai\). Sync scripts locaux.' -Level Warning
-        return
-    }
-    Show-FreshAgentUserNotice -Title $BusyTitle -Text $BusyText -Level Info
-    $script:FaBgResultPending = $true
-    $script:FaBgResultLastAt = $null
-    $psExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-    Start-Process -FilePath $psExe -WindowStyle Hidden -ArgumentList @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $worker,
-        '-Action', $Action,
-        '-FreshAppData', $script:FreshAppData,
-        '-RepoRef', $script:RepoRef
-    ) | Out-Null
-    Start-FreshAgentBgPollTimerIfNeeded
-}
-
-function Start-FreshAgentBgPollTimerIfNeeded {
-    if ($script:FaBgPollTimer) { return }
-    try {
-        $script:FaBgPollTimer = New-Object System.Windows.Forms.Timer
-        $script:FaBgPollTimer.Interval = 1000
-        $script:FaBgPollTimer.Add_Tick((Register-WatchUiHandler {
-                try {
-                    if ($script:WatchAgentSessionState) {
-                        $null = $script:WatchAgentSessionState.InvokeCommand.InvokeScript(
-                            $false, { Invoke-FreshAgentBackgroundResultPoll }, $null, @())
-                    }
-                    if (-not $script:FaBgResultPending -and $script:FaBgPollTimer) {
-                        $script:FaBgPollTimer.Stop()
-                        $script:FaBgPollTimer.Dispose()
-                        $script:FaBgPollTimer = $null
-                    }
-                }
-                catch { }
-            }))
-        $script:FaBgPollTimer.Start()
-    }
-    catch { }
-}
-
-function Invoke-FreshAgentBackgroundResultPoll {
-    if (-not $script:FaBgResultPending) { return }
-    $path = Join-Path $script:FreshAppData 'fa-bg-result.json'
-    if (-not (Test-Path -LiteralPath $path)) { return }
-    try {
-        $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($raw.at -and $raw.at -eq $script:FaBgResultLastAt) { return }
-        $script:FaBgResultLastAt = [string]$raw.at
-        $script:FaBgResultPending = $false
-        $script:OllamaOkCacheAt = $null
-        $msg = if ($raw.message) { [string]$raw.message } else { 'Operation terminee.' }
-        $level = if ($raw.ok) { 'Info' } else { 'Error' }
-        $title = if ($raw.action -eq 'BuildRagIndex') { 'RAG' } else { 'Ollama' }
-        Show-FreshAgentUserNotice -Title $title -Text $msg -Level $level
-        if ($raw.ok -and $raw.action -match 'Ollama|Model|EnsureModel|StartOllama') {
-            $script:OllamaOkCache = $true
-            $script:OllamaOkCacheAt = Get-Date
-        }
-        if ($script:FreshAgentAiMenu) {
-            $m = $script:FreshAgentAiMenu
-            Update-FreshAgentAiMenu -MiAiRoot $m.Root -MiAiToggle $m.Toggle -MiOllamaState $m.OllamaState `
-                -MiSttState $m.SttState -MiAiListen $m.Listen -MiTtsCycle $m.TtsCycle -MiRagToggle $m.RagToggle `
-                -MiListenMode $m.ListenMode
-        }
-        if (Get-Command Update-FreshAgentDashboardIfOpen -ErrorAction SilentlyContinue) {
-            Update-FreshAgentDashboardIfOpen
-        }
-    }
-    catch {
-        Write-WatchLog ("BgResult: {0}" -f $_.Exception.Message)
-    }
-}
-
-function Start-FreshAgentQuickSpeak {
-    param([Parameter(Mandatory)][string]$Text)
-    $spoken = ($Text -replace '[^\p{L}\p{N}\s\.,!?''-]', ' ').Trim()
-    if ([string]::IsNullOrWhiteSpace($spoken)) { return }
-    if ($spoken.Length -gt 180) { $spoken = $spoken.Substring(0, 177) }
-    # Coupe vraiment le micro pendant la parole (voice_worker + flag fichier).
-    $resumeSec = [Math]::Max(6, [int]($spoken.Length / 8) + 4)
-    if (Get-Command Suspend-FreshAgentVoiceListenForTts -ErrorAction SilentlyContinue) {
-        Suspend-FreshAgentVoiceListenForTts -FreshAppData $script:FreshAppData -ResumeAfterSeconds $resumeSec
-    }
-    else {
-        $global:FreshAgentSttPaused = $true
-        try { Set-Content -LiteralPath (Join-Path $script:FreshAppData 'fa-stt.paused') -Value '1' -Encoding ASCII } catch { }
-        $script:SttUnpauseAt = (Get-Date).AddSeconds($resumeSec)
-    }
-    $file = Join-Path $script:FreshAppData 'tts-say.txt'
-    Set-Content -LiteralPath $file -Value $spoken -Encoding UTF8
-    $tts = Join-Path $script:FreshAppData 'ai\FreshAgent-Tts.ps1'
-    $cfgPath = Join-Path $script:FreshAppData 'configs\agent-ai.json'
-    $psExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-    $cmd = @"
-. '$($tts.Replace("'","''"))'
-`$t = Get-Content -LiteralPath '$($file.Replace("'","''"))' -Raw -Encoding UTF8
-`$cfg = `$null
-try { `$cfg = Get-Content -LiteralPath '$($cfgPath.Replace("'","''"))' -Raw -Encoding UTF8 | ConvertFrom-Json } catch {}
-if (-not (Invoke-FreshAgentSpeak -Text `$t -AiConfig `$cfg -FreshAppData '$($script:FreshAppData.Replace("'","''"))')) {
-  `$err = Join-Path '$($script:FreshAppData.Replace("'","''"))' 'fa-tts-error.txt'
-  Set-Content -LiteralPath `$err -Value 'TTS edge indisponible (pas de fallback).' -Encoding UTF8
-}
-"@
-    # -STA requis pour System.Windows.Media.MediaPlayer (edge-tts playback).
-    Start-Process -FilePath $psExe -WindowStyle Hidden -ArgumentList @('-NoProfile','-STA','-Command',$cmd) | Out-Null
-}
-
-$script:FreshAgentSttPoll = {
-    if ($global:FreshAgentSttPaused -and -not $script:FaAiResultPending -and $script:SttUnpauseAt -and (Get-Date) -gt $script:SttUnpauseAt) {
-        if (Get-Command Resume-FreshAgentVoiceListenAfterPause -ErrorAction SilentlyContinue) {
-            Resume-FreshAgentVoiceListenAfterPause -FreshAppData $script:FreshAppData
-        }
-        else {
-            $global:FreshAgentSttPaused = $false
-            Remove-Item -LiteralPath (Join-Path $script:FreshAppData 'fa-stt.paused') -Force -ErrorAction SilentlyContinue
-        }
-        Write-WatchLog 'STT always-on resume'
-    }
-    $text = [string]$global:FreshAgentSttPending
-    if ([string]::IsNullOrWhiteSpace($text)) {
-        $pendingFile = Join-Path $script:FreshAppData 'fa-stt-pending.txt'
-        if (Test-Path -LiteralPath $pendingFile) {
-            $text = (Get-Content -LiteralPath $pendingFile -Raw -Encoding UTF8)
-            Remove-Item -LiteralPath $pendingFile -Force -ErrorAction SilentlyContinue
-        }
-    }
-    if ([string]::IsNullOrWhiteSpace($text)) { return }
-    $global:FreshAgentSttPending = $null
-    $text = $text.Trim()
-    if (Get-Command Test-FreshAgentSttTranscriptUseful -ErrorAction SilentlyContinue) {
-        if (-not (Test-FreshAgentSttTranscriptUseful -Text $text)) {
-            Write-WatchLog ("STT ignore (bruit): {0}" -f (Format-WatchLogUserSpeech -Text $text))
-            return
-        }
-    }
-    Write-WatchLog ("STT entendu: {0}" -f (Format-WatchLogUserSpeech -Text $text))
-    Show-FreshAgentUserNotice -Title 'Entendu' -Text $text -Level Info
-    try {
-        if ($script:FreshAgentDashboardUi -and $script:FreshAgentDashboardUi.LblStatus) {
-            $script:FreshAgentDashboardUi.LblStatus.Text = ("Entendu: {0}" -f $text)
-        }
-    }
-    catch { }
-
-    # Router skills d'abord (sans Ollama) — match sync, execute en arriere-plan
-    $routed = $false
-    try {
-        $routed = [bool](Invoke-FreshAgentRoutedCommand -Text $text -Source 'voice')
-    }
-    catch {
-        Write-WatchLog ("STT router: {0}" -f $_.Exception.Message)
-        $routed = $false
-    }
-
-    # Fallback launch: reparation structurelle + resolution floue catalogue (pas d'alias hardcodes)
-    if (-not $routed) {
-        $launchName = $null
-        if (Get-Command Repair-FreshAgentVoiceTranscript -ErrorAction SilentlyContinue) {
-            $repaired = Repair-FreshAgentVoiceTranscript -Text $text -FreshAppData $script:FreshAppData
-            if ($repaired -match '^(?i)(?:lance|lancer|lancez|ouvre|ouvrir|ouvrez|demarre|demarrer|demarrez)\s+(.+)$') {
-                $launchName = $Matches[1].Trim()
-            }
-        }
-        if (-not $launchName -and $text -match '(?i)(?:lance|lancer|lancez|ouvre|ouvrir|ouvrez|demarre|demarrer|demarrez)\s+(.+)$') {
-            $launchName = $Matches[1].Trim()
-        }
-        if ($launchName -and (Get-Command Resolve-FreshAgentSpokenAppName -ErrorAction SilentlyContinue)) {
-            $launchName = Resolve-FreshAgentSpokenAppName -Name $launchName -FreshAppData $script:FreshAppData
-        }
-        if ($launchName) {
-            Write-WatchLog ("STT fallback launch_app: {0}" -f (Format-WatchLogUserSpeech -Text $launchName))
-            Show-FreshAgentUserNotice -Title 'Skill' -Text ("Lancement: {0}" -f $launchName) -Level Info
-            Start-FreshAgentUiSkillBackground -SkillId 'launch_app' -Parameters @{ name = $launchName }
-            $routed = $true
-        }
-    }
-
-    if (-not $routed) {
-        try {
-            $cfg = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData -PreferLocal
-            $route = 'skills'
-            if ($cfg.stt -and $cfg.stt.route) { $route = [string]$cfg.stt.route }
-            # Par defaut voix = skills only: ne PAS envoyer le bruit Whisper a Ollama
-            # (sinon Historique IA = "Stimme / L'Oss / N'etoyage").
-            $allowAi = ($route -eq 'ai' -or $route -eq 'hybrid')
-            if ($allowAi -and $cfg.enabled -and $text.Length -ge 12 -and $text -match '\?|(?:qui|quoi|comment|pourquoi|cest quoi)\b') {
-                Show-FreshAgentUserNotice -Title 'IA' -Text 'Pas de skill — analyse Ollama...' -Level Info
-                Start-FreshAgentAiPromptBackground -Prompt $text
-            }
-            else {
-                Write-WatchLog ("STT no-skill (route=$route): {0}" -f (Format-WatchLogUserSpeech -Text $text))
-                Show-FreshAgentUserNotice -Title 'Voix' -Text 'Commande non reconnue. Reessaie: lance Steam / lance Grok Bot.' -Level Info
-            }
-        }
-        catch {
-            Write-WatchLog ("STT route: {0}" -f $_.Exception.Message)
-        }
-    }
-}
-
-function Invoke-FreshAgentRoutedCommand {
-    param(
-        [Parameter(Mandatory)][string]$Text,
-        [string]$Source = 'text'
-    )
-    # Pending confirm: oui / annule even without router match
-    if (Get-Command Resolve-FreshAgentConfirmUtterance -ErrorAction SilentlyContinue) {
-        $decision = Resolve-FreshAgentConfirmUtterance -Transcript $Text
-        $pending = $null
-        if (Get-Command Get-FreshAgentPendingConfirm -ErrorAction SilentlyContinue) {
-            $pending = Get-FreshAgentPendingConfirm -FreshAppData $script:FreshAppData
-        }
-        if ($decision -and $pending) {
-            if ($decision -eq 'cancel') {
-                $r = Complete-FreshAgentPendingConfirm -Decision cancel -FreshAppData $script:FreshAppData
-                Show-FreshAgentUserNotice -Title 'Confirm' -Text ([string]$r.message) -Level Info
-                return $true
-            }
-            # confirm: run skill in background with SkipConfirm via dedicated path
-            $skillId = [string]$pending.skillId
-            $params = @{}
-            if ($pending.parameters -is [hashtable]) { $params = $pending.parameters }
-            elseif ($pending.parameters) {
-                foreach ($p in $pending.parameters.PSObject.Properties) { $params[$p.Name] = $p.Value }
-            }
-            Clear-FreshAgentPendingConfirm -FreshAppData $script:FreshAppData
-            Show-FreshAgentUserNotice -Title 'Confirm' -Text 'Confirme — execution...' -Level Info
-            Start-FreshAgentUiSkillBackground -SkillId $skillId -Parameters $params -SkipConfirm
-            return $true
-        }
-    }
-
-    if (-not (Get-Command Invoke-FreshAgentVoiceRouter -ErrorAction SilentlyContinue)) {
-        if (Get-Command Ensure-FreshAgentVoiceRouterLoaded -ErrorAction SilentlyContinue) {
-            Ensure-FreshAgentVoiceRouterLoaded -FreshAppData $script:FreshAppData | Out-Null
-        }
-    }
-    if (-not (Get-Command Invoke-FreshAgentVoiceRouter -ErrorAction SilentlyContinue)) {
-        return $false
-    }
-    $r = Invoke-FreshAgentVoiceRouter -Transcript $Text -FreshAppData $script:FreshAppData -RepoRef $script:RepoRef -MatchOnly
-    if (-not $r.matched) { return $false }
-
-    $skillId = [string]$r.skillId
-    if ($skillId -eq '__confirm_yes' -or $skillId -eq '__confirm_no') {
-        $dec = if ($skillId -eq '__confirm_yes') { 'confirm' } else { 'cancel' }
-        if ($dec -eq 'cancel') {
-            $cr = Complete-FreshAgentPendingConfirm -Decision cancel -FreshAppData $script:FreshAppData
-            Show-FreshAgentUserNotice -Title 'Confirm' -Text ([string]$cr.message) -Level Info
-            return $true
-        }
-        $pending = Get-FreshAgentPendingConfirm -FreshAppData $script:FreshAppData
-        if (-not $pending) {
-            Show-FreshAgentUserNotice -Title 'Confirm' -Text 'Aucune action en attente.' -Level Warning
-            return $true
-        }
-        $sid = [string]$pending.skillId
-        $params = @{}
-        if ($pending.parameters -is [hashtable]) { $params = $pending.parameters }
-        elseif ($pending.parameters) {
-            foreach ($p in $pending.parameters.PSObject.Properties) { $params[$p.Name] = $p.Value }
-        }
-        Clear-FreshAgentPendingConfirm -FreshAppData $script:FreshAppData
-        Start-FreshAgentUiSkillBackground -SkillId $sid -Parameters $params -SkipConfirm
-        return $true
-    }
-
-    $say = [string]$r.message
-    Show-FreshAgentUserNotice -Title 'Skill' -Text $say -Level Info
-    # Voix: pas de TTS ici (coupe le micro / bloque le rearm). TTS au resultat du skill.
-    if ($Source -ne 'voice' -and $say -and (Get-Command Start-FreshAgentQuickSpeak -ErrorAction SilentlyContinue)) {
-        Start-FreshAgentQuickSpeak -Text $say
-    }
-    $params = @{}
-    if ($r.parameters -is [hashtable]) { $params = $r.parameters }
-    elseif ($r.parameters) {
-        foreach ($p in $r.parameters.PSObject.Properties) { $params[$p.Name] = $p.Value }
-    }
-    if ($skillId) {
-        Start-FreshAgentUiSkillBackground -SkillId $skillId -Parameters $params
-    }
-    return $true
-}
-
-function Invoke-FreshAgentTextCommand {
-    param([string]$Text)
-    if ([string]::IsNullOrWhiteSpace($Text)) { return }
-    $Text = $Text.Trim()
-    Write-WatchLog ("Text cmd: {0}" -f (Format-WatchLogUserSpeech -Text $Text))
-    $routed = $false
-    try { $routed = [bool](Invoke-FreshAgentRoutedCommand -Text $Text -Source 'text') } catch { $routed = $false }
-    if ($routed) { return }
-    # Heuristique courte: "lancer X" / "ouvre X" si le routeur a rate une variante
-    if ($Text -match '^(?i)(?:lance|lancer|lancez|ouvre|ouvrir|ouvrez|demarre|demarrer|demarrez)\s+(.+)$') {
-        $appName = $Matches[1].Trim()
-        Write-WatchLog ("Text cmd fallback launch_app: {0}" -f $appName)
-        Show-FreshAgentUserNotice -Title 'Skill' -Text ("Lancement: {0}" -f $appName) -Level Info
-        Start-FreshAgentUiSkillBackground -SkillId 'launch_app' -Parameters @{ name = $appName }
-        return
-    }
-    try {
-        $cfg = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData -PreferLocal
-        if ($cfg.enabled) {
-            Show-FreshAgentUserNotice -Title 'IA' -Text 'Pas de skill — analyse Ollama...' -Level Info
-            Start-FreshAgentAiPromptBackground -Prompt $Text
-        }
-        else {
-            Show-FreshAgentUserNotice -Title 'Commande' -Text 'Commande non reconnue (ex: lance Steam).' -Level Info
-        }
-    }
-    catch {
-        Show-FreshAgentUserNotice -Title 'Commande' -Text $_.Exception.Message -Level Error
-    }
-}
-
-function Stop-FreshAgentSttPollTimerIfRunning {
-    if (-not $script:FaSttPollTimer) { return }
-    try { $script:FaSttPollTimer.Stop() } catch { }
-    try { $script:FaSttPollTimer.Dispose() } catch { }
-    $script:FaSttPollTimer = $null
-}
-
-function Start-FreshAgentSttPollTimerIfNeeded {
-    if (-not $script:VoiceListenActive -and -not $script:VoiceAlwaysOn) { return }
-    if ($script:FaSttPollTimer) { return }
-    $script:FaSttPollTimer = New-Object System.Windows.Forms.Timer
-    $script:FaSttPollTimer.Interval = 400
-    $script:FaSttPollTimer.Add_Tick((Register-WatchUiHandler {
-            $poll = $script:FreshAgentSttPoll
-            if ($poll -is [scriptblock]) { & $poll }
-        }))
-    $script:FaSttPollTimer.Start()
-}
-
-function Start-FreshAgentAlwaysOnVoice {
-    # Legacy WhisperLoop retire. Voir Start-FreshAgentVoiceListenSession (voice_worker).
-    if (Get-Command Ensure-FreshAgentVoiceLibsLoaded -ErrorAction SilentlyContinue) {
-        Ensure-FreshAgentVoiceLibsLoaded -FreshAppData $script:FreshAppData | Out-Null
-    }
-    if (Get-Command Start-FreshAgentVoiceListenSession -ErrorAction SilentlyContinue) {
-        Start-FreshAgentVoiceListenSession
-        return
-    }
-    Write-WatchLog 'STT: voice session unavailable (VoiceWorker not loaded)'
-    Show-FreshAgentUserNotice -Title 'STT' -Text 'Ecoute vocale non prete (voice_worker).' -Level Warning
-}
-
-function Stop-FreshAgentAlwaysOnVoice {
-    if (Get-Command Stop-FreshAgentVoiceListenSession -ErrorAction SilentlyContinue) {
-        Stop-FreshAgentVoiceListenSession
-        Stop-FreshAgentSttPollTimerIfRunning
-        return
-    }
-    $script:VoiceAlwaysOn = $false
-    $script:VoiceListenActive = $false
-    $global:FreshAgentSttPaused = $true
-    if ($script:WhisperLoopProc -and -not $script:WhisperLoopProc.HasExited) {
-        try { Stop-Process -Id $script:WhisperLoopProc.Id -Force } catch { }
-    }
-    Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -match 'FreshAgent-WhisperLoop' } |
-        ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force } catch { } }
-    if (Get-Command Stop-WindowsSttAlwaysOn -ErrorAction SilentlyContinue) { Stop-WindowsSttAlwaysOn }
-    if ($script:MiAiListenItem) { $script:MiAiListenItem.Text = 'Ecoute : OFF' }
-    Write-WatchLog 'STT always-on stopped (legacy cleanup)'
-}
-
-function Invoke-FreshAgentVoiceListenMenu {
-    if (-not $script:FreshAgentReady) {
-        Show-FreshAgentUserNotice -Title 'STT' -Text 'Modules non charges.' -Level Warning
-        return
-    }
-    if ($script:VoiceListenActive -or $script:VoiceAlwaysOn) {
-        Stop-FreshAgentAlwaysOnVoice
-        return
-    }
-    Start-FreshAgentAlwaysOnVoice
-}
-
-function Invoke-FreshAgentVoiceListenOn {
-    if ($script:VoiceListenActive) {
-        Show-FreshAgentUserNotice -Title 'Ecoute' -Text 'Deja active — parlez.' -Level Info
-        return
-    }
-    if ($script:FaVoiceListenStarting) { return }
-    # Differer hors du handler clic : Start-Process / IO ne doivent pas bloquer RunTagged.
-    $script:FaVoiceListenStarting = $true
-    Write-WatchLog 'VoiceListenOn: request (deferred)'
-    Show-FreshAgentUserNotice -Title 'Ecoute' -Text 'Demarrage...' -Level Info
-    try {
-        if ($script:FaVoiceListenStartTimer) {
-            $script:FaVoiceListenStartTimer.Stop()
-            $script:FaVoiceListenStartTimer.Dispose()
-            $script:FaVoiceListenStartTimer = $null
-        }
-    }
-    catch { }
-    $t = New-Object System.Windows.Forms.Timer
-    $t.Interval = 80
-    $t.Add_Tick((Register-WatchUiHandler {
-            try {
-                if ($script:FaVoiceListenStartTimer) {
-                    $script:FaVoiceListenStartTimer.Stop()
-                    $script:FaVoiceListenStartTimer.Dispose()
-                    $script:FaVoiceListenStartTimer = $null
-                }
-            }
-            catch { }
-            try {
-                Write-WatchLog 'VoiceListenOn: deferred tick'
-                Start-FreshAgentAlwaysOnVoice
-                Write-WatchLog ("VoiceListenOn: done active={0}" -f [bool]$script:VoiceListenActive)
-                if (Get-Command Update-FreshAgentDashboardIfOpen -ErrorAction SilentlyContinue) {
-                    Update-FreshAgentDashboardIfOpen
-                }
-            }
-            catch {
-                Write-WatchLog ("VoiceListenOn FAIL: {0}" -f $_.Exception.ToString())
-                Show-FreshAgentUserNotice -Title 'Ecoute' -Text $_.Exception.Message -Level Error
-            }
-            finally {
-                $script:FaVoiceListenStarting = $false
-            }
-        }))
-    $script:FaVoiceListenStartTimer = $t
-    $t.Start()
-}
-
-function Invoke-FreshAgentVoiceListenOff {
-    if ($script:FaVoiceListenStarting) { return }
-    if (-not $script:VoiceListenActive -and -not $script:VoiceAlwaysOn) { return }
-    try {
-        Write-WatchLog 'VoiceListenOff: request'
-        Stop-FreshAgentAlwaysOnVoice
-    }
-    catch {
-        Write-WatchLog ("VoiceListenOff FAIL: {0}" -f $_.Exception.ToString())
-    }
-}
-
-function Show-FreshAgentUserNotice {
-    param(
-        [string]$Title = 'Fresh Agent',
-        [string]$Text,
-        [ValidateSet('Info', 'Warning', 'Error')]
-        [string]$Level = 'Info'
-    )
-    if (-not (Get-Command Show-FreshAgentOverlay -ErrorAction SilentlyContinue)) {
-        if (Get-Command Ensure-FreshAgentOverlayLoaded -ErrorAction SilentlyContinue) {
-            Ensure-FreshAgentOverlayLoaded -FreshAppData $script:FreshAppData | Out-Null
-        }
-    }
-    if (Get-Command Show-FreshAgentOverlay -ErrorAction SilentlyContinue) {
-        Show-FreshAgentOverlay -Title $Title -Text $Text -Level $Level
-        return
-    }
-    # Fallback discret: log seulement (plus de balloon invasif pour la voix/IA).
-    Write-WatchLog ("notice [{0}] {1}: {2}" -f $Level, $Title, $Text)
-}
-
-function Invoke-FreshAgentTtsCycleMenu {
-    if (-not $script:FreshAgentReady) { return }
-    $cfg = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData -PreferLocal
-    $cur = 'off'
-    if (Get-Command Get-FreshAgentTtsProvider -ErrorAction SilentlyContinue) {
-        $cur = Get-FreshAgentTtsProvider -AiConfig $cfg
-    }
-    $order = @('off', 'edge', 'windows', 'piper')
-    $idx = [array]::IndexOf($order, $cur)
-    if ($idx -lt 0) { $idx = 0 }
-    $next = $order[($idx + 1) % $order.Count]
-    Set-FreshAgentAiUserConfig -Patch @{ tts = @{ provider = $next } } -FreshAppData $FreshAppData
-    $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData -PreferLocal
-    Show-FreshAgentUserNotice -Title 'TTS' -Text ("TTS : {0}" -f $next.ToUpper()) -Level Info
-    # Pas de Speak synchrone ici: ca bloque le thread UI WinForms.
-}
-
-function Get-FreshAgentListenModeLabel {
-    param($AiConfig = $null)
-    $ptt = $true
-    if (Get-Command Test-FreshAgentSttPushToTalk -ErrorAction SilentlyContinue) {
-        $ptt = Test-FreshAgentSttPushToTalk -AiConfig $AiConfig
-    }
-    elseif ($AiConfig -and $AiConfig.stt) {
-        if ($null -ne $AiConfig.stt.pushToTalk) { $ptt = [bool]$AiConfig.stt.pushToTalk }
-        elseif ($AiConfig.stt.listenMode) { $ptt = ([string]$AiConfig.stt.listenMode -eq 'pushToTalk') }
-    }
-    if ($ptt) { return 'Appui maintenu' }
-    return 'Toujours actif'
-}
-
-function Update-FreshAgentPttHotkeyMenuLabels {
-    param([string]$Hotkey)
-    if (-not $Hotkey) {
-        $Hotkey = 'Ctrl+Alt+Space'
-        if (Get-Command Get-FreshAgentPttHotkeyLabel -ErrorAction SilentlyContinue) {
-            $Hotkey = Get-FreshAgentPttHotkeyLabel -AiConfig $script:FreshAgentAi
-        }
-    }
-    if ($script:MiPttHotkeyItem) {
-        $script:MiPttHotkeyItem.Text = ("Raccourci PTT : {0}" -f $Hotkey)
-    }
-    try {
-        if ($script:FreshAgentDashboardUi -and $script:FreshAgentDashboardUi.BtnPttHotkey) {
-            $script:FreshAgentDashboardUi.BtnPttHotkey.Text = ("Raccourci PTT : {0}" -f $Hotkey)
-        }
-    }
-    catch { }
-}
-
-function Invoke-FreshAgentPttHotkeyPickMenu {
-    if (-not $script:FreshAgentReady) {
-        Show-FreshAgentUserNotice -Title 'PTT' -Text 'Modules non charges.' -Level Warning
-        return
-    }
-    if (-not (Get-Command Show-FreshAgentPttHotkeyPicker -ErrorAction SilentlyContinue)) {
-        Show-FreshAgentUserNotice -Title 'PTT' -Text 'Selecteur raccourci indisponible — sync scripts.' -Level Warning
-        return
-    }
-    $cfg = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData -PreferLocal
-    $current = Get-FreshAgentPttHotkeyLabel -AiConfig $cfg
-    $picked = Show-FreshAgentPttHotkeyPicker -Current $current -FreshAppData $FreshAppData
-    if ([string]::IsNullOrWhiteSpace($picked)) { return }
-    if ($picked -eq $current) {
-        Show-FreshAgentUserNotice -Title 'PTT' -Text ("Raccourci deja actif : $picked") -Level Info
-        return
-    }
-    Set-FreshAgentAiUserConfig -Patch @{
-        stt = @{ pttHotkey = $picked }
-    } -FreshAppData $FreshAppData
-    $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData -PreferLocal
-    if (Get-Command Apply-FreshAgentPttHotkeyLive -ErrorAction SilentlyContinue) {
-        $null = Apply-FreshAgentPttHotkeyLive -Hotkey $picked -AiConfig $script:FreshAgentAi
-    }
-    Update-FreshAgentPttHotkeyMenuLabels -Hotkey $picked
-    Show-FreshAgentUserNotice -Title 'Raccourci PTT' -Text ("Nouveau raccourci : maintenez $picked pour parler.") -Level Info
-    if ($script:FreshAgentAiMenu) {
-        $m = $script:FreshAgentAiMenu
-        Update-FreshAgentAiMenu -MiAiRoot $m.Root -MiAiToggle $m.Toggle -MiOllamaState $m.OllamaState `
-            -MiSttState $m.SttState -MiAiListen $m.Listen -MiTtsCycle $m.TtsCycle -MiRagToggle $m.RagToggle `
-            -MiListenMode $m.ListenMode -SkipNetworkChecks
-    }
-    if ($script:VoiceListenActive -and (Get-Command Restart-FreshAgentVoiceListenForConfig -ErrorAction SilentlyContinue)) {
-        Restart-FreshAgentVoiceListenForConfig -FreshAppData $FreshAppData -AiConfig $script:FreshAgentAi
-    }
-    if (Get-Command Update-FreshAgentDashboardIfOpen -ErrorAction SilentlyContinue) {
-        Update-FreshAgentDashboardIfOpen
-    }
-}
-
-function Invoke-FreshAgentListenModeCycleMenu {
-    if (-not $script:FreshAgentReady) { return }
-    $cfg = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData -PreferLocal
-    $ptt = $true
-    if (Get-Command Test-FreshAgentSttPushToTalk -ErrorAction SilentlyContinue) {
-        $ptt = Test-FreshAgentSttPushToTalk -AiConfig $cfg
-    }
-    $nextPtt = -not $ptt
-    $mode = if ($nextPtt) { 'pushToTalk' } else { 'alwaysOn' }
-    $hk = 'Ctrl+Alt+Space'
-    if ($cfg -and $cfg.stt -and $cfg.stt.pttHotkey) { $hk = [string]$cfg.stt.pttHotkey }
-    Set-FreshAgentAiUserConfig -Patch @{
-        stt = @{
-            pushToTalk = $nextPtt
-            listenMode = $mode
-        }
-    } -FreshAppData $FreshAppData
-    $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData -PreferLocal
-    $label = Get-FreshAgentListenModeLabel -AiConfig $script:FreshAgentAi
-    if ($script:MiListenModeItem) {
-        $script:MiListenModeItem.Text = ("Mode ecoute : {0} (clic = cycle)" -f $label)
-    }
-    $notice = if ($nextPtt) {
-        "Appui maintenu - maintenez $hk pour parler."
-    }
-    else {
-        'Toujours actif - le micro ecoute en continu.'
-    }
-    Show-FreshAgentUserNotice -Title 'Mode ecoute' -Text $notice -Level Info
-    # Relancer la session pour appliquer timings / auto-rearm host.
-    if ($script:VoiceListenActive -or $script:VoiceAlwaysOn) {
-        if (Get-Command Restart-FreshAgentVoiceListenForConfig -ErrorAction SilentlyContinue) {
-            Restart-FreshAgentVoiceListenForConfig -FreshAppData $FreshAppData -AiConfig $script:FreshAgentAi
-        }
-        else {
-            try { Stop-FreshAgentAlwaysOnVoice } catch { }
-            Start-Sleep -Milliseconds 200
-            Invoke-FreshAgentVoiceListenOn
-        }
-    }
-    if ($script:FreshAgentAiMenu) {
-        $m = $script:FreshAgentAiMenu
-        Update-FreshAgentAiMenu -MiAiRoot $m.Root -MiAiToggle $m.Toggle -MiOllamaState $m.OllamaState `
-            -MiSttState $m.SttState -MiAiListen $m.Listen -MiTtsCycle $m.TtsCycle -MiRagToggle $m.RagToggle `
-            -MiListenMode $m.ListenMode
-    }
-    if (Get-Command Update-FreshAgentDashboardIfOpen -ErrorAction SilentlyContinue) {
-        Update-FreshAgentDashboardIfOpen
-    }
-}
-
-function Invoke-FreshAgentAiHistoryMenu {
-    if (-not (Get-Command Get-FreshAgentAiHistoryRecent -ErrorAction SilentlyContinue)) {
-        Show-Balloon -Title 'Historique' -Text 'Module historique absent.' -Icon Warning
-        return
-    }
-    $items = Get-FreshAgentAiHistoryRecent -Count 5 -FreshAppData $FreshAppData
-    if (-not $items -or $items.Count -eq 0) {
-        [System.Windows.Forms.MessageBox]::Show('Aucun echange IA enregistre.', 'Fresh Agent') | Out-Null
-        return
-    }
-    $lines = @()
-    foreach ($it in $items) {
-        $p = [string]$it.prompt
-        if ($p.Length -gt 80) { $p = $p.Substring(0, 77) + '...' }
-        $lines += ("[{0}] {1}" -f $it.at, $p)
-    }
-    [System.Windows.Forms.MessageBox]::Show(($lines -join "`n"), 'Historique IA (5 derniers)') | Out-Null
-}
-
-function Invoke-FreshAgentVoiceCommandsHelpMenu {
-    if (Get-Command Show-FreshAgentVoiceCommandsHelp -ErrorAction SilentlyContinue) {
-        Show-FreshAgentVoiceCommandsHelp -FreshAppData $script:FreshAppData
-        return
-    }
-    Show-Balloon -Title 'Aide' -Text 'Module commandes absent (resync scripts).' -Icon Warning
-}
-
-function Invoke-FreshAgentAppInventoryHelpMenu {
-    if (Get-Command Show-FreshAgentAppInventoryHelp -ErrorAction SilentlyContinue) {
-        Show-FreshAgentAppInventoryHelp -FreshAppData $script:FreshAppData
-        return
-    }
-    Show-Balloon -Title 'Inventaire' -Text 'Module inventaire apps absent.' -Icon Warning
-}
-
-function Update-FreshAgentAiMenu {
-    param($MiAiRoot, $MiAiToggle, $MiOllamaState, $MiSttState, $MiAiListen, $MiTtsCycle, $MiRagToggle, $MiListenMode, [switch]$SkipNetworkChecks)
-    if (-not $MiAiRoot) { return }
-    $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData -PreferLocal
-    $enabled = $false
-    if ($script:FreshAgentAi -and $null -ne $script:FreshAgentAi.enabled) {
-        $enabled = [bool]$script:FreshAgentAi.enabled
-    }
-    $MiAiToggle.Text = if ($enabled) { 'IA : ON' } else { 'IA : OFF (defaut)' }
-    $ollamaOk = $false
-    if (-not $SkipNetworkChecks -and (Get-Command Test-OllamaApi -ErrorAction SilentlyContinue)) {
-        $base = if ($script:FreshAgentAi.ollama.baseUrl) { $script:FreshAgentAi.ollama.baseUrl } else { 'http://127.0.0.1:11434' }
-        $ollamaOk = Test-OllamaApi -BaseUrl $base -TimeoutSec 1
-        $script:OllamaOkCache = $ollamaOk
-        $script:OllamaOkCacheAt = Get-Date
-    }
-    elseif ($script:OllamaOkCacheAt -and ((Get-Date) - [datetime]$script:OllamaOkCacheAt).TotalSeconds -lt 8) {
-        $ollamaOk = [bool]$script:OllamaOkCache
-    }
-    $MiOllamaState.Text = if ($SkipNetworkChecks) { 'Ollama : (verification differee)' } elseif ($ollamaOk) { 'Ollama : actif' } else { 'Ollama : arrete / injoignable' }
-    $sttMsg = 'STT : —'
-    if (-not $script:FreshAgentReady) {
-        $sttMsg = 'STT : modules en cours...'
-    }
-    elseif (Get-Command Get-FreshAgentVoiceStatusMessage -ErrorAction SilentlyContinue) {
-        try {
-            $sttMsg = Get-FreshAgentVoiceStatusMessage -FreshAppData $FreshAppData -AiConfig $script:FreshAgentAi
-        }
-        catch {
-            $sttMsg = 'STT : (statut indisponible)'
-        }
-    }
-    if ($MiSttState) {
-        $MiSttState.Text = $sttMsg
-        $MiSttState.Enabled = [bool]$script:FreshAgentReady
-    }
-    if ($MiAiListen) {
-        $prov = 'n/a'
-        try {
-            if ($script:FreshAgentAi -and $script:FreshAgentAi.stt) { $prov = [string]$script:FreshAgentAi.stt.provider }
-        }
-        catch { }
-        $ready = [bool]$script:FreshAgentReady
-        $listening = [bool]($script:VoiceListenActive -or $script:VoiceAlwaysOn)
-        $workerOk = $false
-        if (Get-Command Test-FreshAgentVoiceWorkerReady -ErrorAction SilentlyContinue) {
-            try { $workerOk = [bool](Test-FreshAgentVoiceWorkerReady -FreshAppData $FreshAppData) } catch { }
-        }
-        # Toujours cliquable apres boot: ON pour demarrer, OFF pour couper.
-        $MiAiListen.Enabled = $ready
-        if ($listening) {
-            $label = 'Ecoute : ON (clic = OFF)'
-        }
-        elseif ($ready -and $workerOk) {
-            $label = 'Ecoute : OFF (clic = ON)'
-        }
-        elseif ($ready) {
-            $label = 'Ecoute : OFF (clic = telecharger worker)'
-        }
-        else {
-            $label = 'Ecoute : modules...'
-        }
-        $MiAiListen.Text = $label
-        $script:MiAiListenLabel = $label
-        $script:MiAiListenItem = $MiAiListen
-        Write-WatchLog ("STT menu ready={0} listening={1} enabled={2} provider={3} worker={4}" -f $ready, $listening, $MiAiListen.Enabled, $prov, $workerOk)
-    }
-    if ($MiTtsCycle -and (Get-Command Get-FreshAgentTtsProvider -ErrorAction SilentlyContinue)) {
-        $p = Get-FreshAgentTtsProvider -AiConfig $script:FreshAgentAi
-        $MiTtsCycle.Text = "TTS : $($p.ToUpper()) (clic = cycle)"
-        $MiTtsCycle.Enabled = $true
-    }
-    if ($MiListenMode) {
-        $modeLabel = Get-FreshAgentListenModeLabel -AiConfig $script:FreshAgentAi
-        $MiListenMode.Text = ("Mode ecoute : {0} (clic = cycle)" -f $modeLabel)
-        $MiListenMode.Enabled = [bool]$script:FreshAgentReady
-        $script:MiListenModeItem = $MiListenMode
-    }
-    try {
-        $hkLabel = 'Ctrl+Alt+Space'
-        if (Get-Command Get-FreshAgentPttHotkeyLabel -ErrorAction SilentlyContinue) {
-            $hkLabel = Get-FreshAgentPttHotkeyLabel -AiConfig $script:FreshAgentAi
-        }
-        Update-FreshAgentPttHotkeyMenuLabels -Hotkey $hkLabel
-        if ($script:MiPttHotkeyItem) {
-            $script:MiPttHotkeyItem.Enabled = [bool]$script:FreshAgentReady
-        }
-    }
-    catch { }
-    if ($MiRagToggle) {
-        $ragOn = $false
-        if ($script:FreshAgentAi.rag -and $null -ne $script:FreshAgentAi.rag.enabled) {
-            $ragOn = [bool]$script:FreshAgentAi.rag.enabled
-        }
-        $MiRagToggle.Text = if ($ragOn) { 'RAG guides : ON' } else { 'RAG guides : OFF' }
-    }
-    Update-FreshAgentTrayStatus
-    if (Get-Command Update-FreshAgentDashboardIfOpen -ErrorAction SilentlyContinue) {
-        Update-FreshAgentDashboardIfOpen
-    }
-}
-
-function Import-FreshAgentDashboardAtScriptScope {
-    if (Get-Command Show-FreshAgentDashboard -ErrorAction SilentlyContinue) {
-        return $true
-    }
-    $candidates = @(
-        (Join-Path $script:FreshAppData 'lib\FreshAgent-Dashboard.ps1')
-    )
-    if ($PSScriptRoot) {
-        $candidates += (Join-Path $PSScriptRoot 'lib\FreshAgent-Dashboard.ps1')
-    }
-    foreach ($path in ($candidates | Select-Object -Unique)) {
-        if (-not (Test-Path -LiteralPath $path)) { continue }
-        try {
-            if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
-                if (Import-FreshAgentModule -RelativePath 'lib/FreshAgent-Dashboard.ps1' -FreshAppData $script:FreshAppData) {
-                    return $true
-                }
-            }
-            $escaped = $path.Replace("'", "''")
-            $dot = [scriptblock]::Create(". '$escaped'")
-            $null = $ExecutionContext.InvokeCommand.InvokeScript($false, $dot, $null, @())
-            if (Get-Command Show-FreshAgentDashboard -ErrorAction SilentlyContinue) {
-                return $true
-            }
-        }
-        catch {
-            Write-WatchLog ("Dashboard dot-source: {0}" -f $_.Exception.Message)
-        }
-    }
-    if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
-        Import-FreshAgentModule -RelativePath 'lib/FreshAgent-Dashboard.ps1' -FreshAppData $script:FreshAppData | Out-Null
-    }
-    return [bool](Get-Command Show-FreshAgentDashboard -ErrorAction SilentlyContinue)
-}
-
-function Ensure-FreshAgentDashboardLoaded {
-    Import-FreshAgentDashboardAtScriptScope
-}
-
-function Test-FreshAgentAiBridgeReady {
-    if (-not $script:FreshAgentReady) {
-        Show-Balloon -Title 'IA' -Text 'Modules non charges.' -Icon Warning
-        return $false
-    }
-    # Check rapide fichiers + commande (pas de re-import synchrone qui bloque l UI).
-    if (Get-Command Invoke-FreshAgentAiTurn -ErrorAction SilentlyContinue) {
-        return $true
-    }
-    $missing = @()
-    foreach ($rel in @(
-            'lib\FreshAgent-SkillsEngine.ps1',
-            'ai\Ollama-Manager.ps1',
-            'ai\FreshAgent-OllamaBridge.ps1'
-        )) {
-        if (-not (Test-Path -LiteralPath (Join-Path $script:FreshAppData $rel))) {
-            $missing += $rel
-        }
-    }
-    if ($missing.Count -eq 0) {
-        try {
-            if (Get-Command Ensure-FreshAgentAiBridgeLoaded -ErrorAction SilentlyContinue) {
-                Ensure-FreshAgentAiBridgeLoaded -FreshAppData $script:FreshAppData | Out-Null
-            }
-        }
-        catch {
-            Write-WatchLog ("AiBridge load: {0}" -f $_.Exception.Message)
-        }
-        if (Get-Command Invoke-FreshAgentAiTurn -ErrorAction SilentlyContinue) {
-            return $true
-        }
-    }
-    $detail = if ($missing.Count -gt 0) { "Fichiers manquants: $($missing -join ', ')" } else { 'Sync scripts locaux puis redemarrer l agent.' }
-    Show-Balloon -Title 'IA' -Text "Bridge Ollama absent — $detail" -Icon Warning
-    return $false
-}
-
-function Get-FreshAgentDashboardState {
-    $st = Get-WatchUserSettings
-    $aiOn = $false
-    $ragOn = $false
-    $ollamaOk = $false
-    $sttMsg = 'STT : —'
-    $listenOk = $false
-    $listenOffOk = $false
-    $aiControls = $false
-    $aiNotice = 'Voix / IA : chantier en reconstruction. Core mode jeu et skills restent actifs.'
-    if ($script:FreshAgentReady) {
-        $cfg = $script:FreshAgentAi
-        if (-not $cfg -and (Get-Command Get-FreshAgentAiConfig -ErrorAction SilentlyContinue)) {
-            try {
-                $cfg = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData -PreferLocal
-                $script:FreshAgentAi = $cfg
-            }
-            catch { }
-        }
-        if ($cfg) {
-            if ($null -ne $cfg.enabled) { $aiOn = [bool]$cfg.enabled }
-            if ($cfg.rag -and $null -ne $cfg.rag.enabled) { $ragOn = [bool]$cfg.rag.enabled }
-        }
-        $base = 'http://127.0.0.1:11434'
-        try {
-            if ($cfg -and $cfg.ollama -and $cfg.ollama.baseUrl) {
-                $base = [string]$cfg.ollama.baseUrl
-            }
-        }
-        catch { }
-        $cacheOk = $false
-        try {
-            if ($script:OllamaOkCacheAt -and ((Get-Date) - [datetime]$script:OllamaOkCacheAt).TotalSeconds -lt 8) {
-                $ollamaOk = [bool]$script:OllamaOkCache
-                $cacheOk = $true
-            }
-        }
-        catch { }
-        if (-not $cacheOk) {
-            try {
-                if (Get-Command Test-OllamaApi -ErrorAction SilentlyContinue) {
-                    $ollamaOk = [bool](Test-OllamaApi -BaseUrl $base -TimeoutSec 1)
-                }
-                else {
-                    $uri = ($base.Trim().TrimEnd('/') + '/api/tags') -replace '(?i)^(https?://)localhost', '${1}127.0.0.1'
-                    $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 1
-                    $ollamaOk = ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300)
-                }
-            }
-            catch {
-                $ollamaOk = $false
-            }
-            $script:OllamaOkCache = $ollamaOk
-            $script:OllamaOkCacheAt = Get-Date
-        }
-        if (Get-Command Get-WindowsSttStatusMessage -ErrorAction SilentlyContinue) {
-            try {
-                $sttMsg = Get-WindowsSttStatusMessage -FreshAppData $script:FreshAppData -RepoRef $script:RepoRef
-            }
-            catch { }
-        }
-        if (Get-Command Test-FreshAgentWindowsSttEnabled -ErrorAction SilentlyContinue) {
-            try {
-                $null = Test-FreshAgentWindowsSttEnabled -AiConfig $cfg
-            }
-            catch { }
-        }
-        # Ecoute ON si modules prets et session inactive (telecharge worker au premier ON).
-        $listenOk = [bool]$script:FreshAgentReady -and -not $script:VoiceListenActive -and `
-            [bool](Get-Command Start-FreshAgentVoiceListenSession -ErrorAction SilentlyContinue)
-        $listenOffOk = [bool]$script:VoiceListenActive
-        $aiControls = [bool]$script:FreshAgentReady
-        $ptt = $true
-        if (Get-Command Test-FreshAgentSttPushToTalk -ErrorAction SilentlyContinue) {
-            try { $ptt = Test-FreshAgentSttPushToTalk -AiConfig $cfg } catch { }
-        }
-        $hk = 'Ctrl+Alt+Space'
-        if ($cfg -and $cfg.stt -and $cfg.stt.pttHotkey) { $hk = [string]$cfg.stt.pttHotkey }
-        $aiNotice = 'Voix OFF par defaut. Ecoute ON demarre voice_worker (asset local).'
-        if ($script:VoiceListenActive) {
-            if ($ptt) {
-                $aiNotice = "PTT actif - maintenez $hk pour parler."
-            }
-            else {
-                $aiNotice = 'Toujours actif - parlez pour une commande PC.'
-            }
-        }
-        elseif ($ptt) {
-            $aiNotice = "Mode appui maintenu ($hk). Ecoute ON puis maintenez la touche."
-        }
-        elseif ($cfg -and $cfg.voice -and [bool]$cfg.voice.enabled) {
-            $aiNotice = 'Voix habilitee — utilisez Ecoute ON / OFF.'
-        }
-        if (Get-Command Get-FreshAgentVoiceStatusMessage -ErrorAction SilentlyContinue) {
-            try { $sttMsg = Get-FreshAgentVoiceStatusMessage -FreshAppData $script:FreshAppData -AiConfig $cfg } catch { }
-        }
-    }
-    $summary = if ($script:NotifyIcon) { $script:NotifyIcon.Text } else { 'Fresh Agent' }
-    # Pas de Get-FreshAgentHealthSnapshot ici (Start-Job) : plante / gele le thread UI.
-    $healthSummary = 'Sante: bouton Rafraichir pour un snapshot.'
-    try {
-        if ($script:FaHealthLastSummary) { $healthSummary = [string]$script:FaHealthLastSummary }
-    }
-    catch { }
-    $listenModeText = 'Mode : Appui maintenu'
-    try {
-        $listenModeText = ('Mode : {0}' -f (Get-FreshAgentListenModeLabel -AiConfig $script:FreshAgentAi))
-    }
-    catch { }
-    $pttHotkeyText = 'Raccourci PTT : Ctrl+Alt+Space'
-    try {
-        if (Get-Command Get-FreshAgentPttHotkeyLabel -ErrorAction SilentlyContinue) {
-            $pttHotkeyText = ('Raccourci PTT : {0}' -f (Get-FreshAgentPttHotkeyLabel -AiConfig $script:FreshAgentAi))
-        }
-        elseif ($cfg -and $cfg.stt -and $cfg.stt.pttHotkey) {
-            $pttHotkeyText = ('Raccourci PTT : {0}' -f $cfg.stt.pttHotkey)
-        }
-    }
-    catch { }
-    return @{
-        AutoSuggestKill       = [bool]$st.autoSuggestKill
-        MonitorEnabled        = [bool]$st.monitorEnabled
-        AiEnabled             = $aiOn
-        RagEnabled            = $ragOn
-        OllamaOk              = $ollamaOk
-        SttMessage            = $sttMsg
-        ListenEnabled         = $listenOk
-        ListenOffEnabled      = $listenOffOk
-        ListenButtonText      = if ($script:VoiceListenActive) { 'Ecoute active…' } else { 'Ecoute ON' }
-        ListenModeButtonText  = $listenModeText
-        PttHotkeyButtonText   = $pttHotkeyText
-        AiControlsEnabled     = $aiControls
-        AiNotice              = $aiNotice
-        FreshAgentReady       = [bool]$script:FreshAgentReady
-        TraySummary           = $summary
-        HealthSummary         = $healthSummary
-    }
-}
-
-function Invoke-FreshAgentSttStatusMenu {
-    if (-not $script:FreshAgentReady) {
-        Show-Balloon -Title 'STT' -Text 'Modules non charges.' -Icon Warning
-        return
-    }
-    $msg = 'STT : ?'
-    if (Get-Command Get-WindowsSttStatusMessage -ErrorAction SilentlyContinue) {
-        try {
-            $msg = Get-WindowsSttStatusMessage -FreshAppData $FreshAppData -RepoRef $RepoRef
-        }
-        catch {
-            $msg = $_.Exception.Message
-        }
-    }
-    else {
-        $msg = 'Module Windows-Stt absent — sync scripts locaux.'
-    }
-    Show-Balloon -Title 'STT' -Text $msg -Icon Info
-}
-
-function Set-FreshAgentAiEnabledFromUi {
-    param([bool]$Enabled)
-    if (-not $script:FreshAgentReady) {
-        Show-FreshAgentUserNotice -Title 'IA' -Text 'Modules non charges.' -Level Warning
-        return
-    }
-    if (-not (Get-Command Set-FreshAgentAiEnabled -ErrorAction SilentlyContinue)) {
-        if (Get-Command Ensure-FreshAgentAiLifecycleLoaded -ErrorAction SilentlyContinue) {
-            Ensure-FreshAgentAiLifecycleLoaded -FreshAppData $script:FreshAppData | Out-Null
-        }
-        else {
-            Import-FreshAgentModule -RelativePath 'lib/FreshAgent-AiLifecycle.ps1' -FreshAppData $script:FreshAppData | Out-Null
-        }
-    }
-    $script:FreshAgentAi = Set-FreshAgentAiEnabled -Enabled $Enabled -FreshAppData $script:FreshAppData -RepoRef $script:RepoRef -OnEnsureModel {
-        Start-FreshAgentBackgroundWork -Action EnsureModel -BusyTitle 'Fresh Agent IA' -BusyText 'Demarrage Ollama + modele...'
-    }
-    if ($script:FreshAgentAiMenu) {
-        $m = $script:FreshAgentAiMenu
-        Update-FreshAgentAiMenu -MiAiRoot $m.Root -MiAiToggle $m.Toggle -MiOllamaState $m.OllamaState `
-            -MiSttState $m.SttState -MiAiListen $m.Listen -MiTtsCycle $m.TtsCycle -MiRagToggle $m.RagToggle `
-                -MiListenMode $m.ListenMode
-    }
-    Update-FreshAgentDashboardIfOpen
-}
-
-function Set-FreshAgentRagEnabledFromUi {
-    param([bool]$Enabled)
-    if (-not $script:FreshAgentReady) { return }
-    Set-FreshAgentAiUserConfig -Patch @{ rag = @{ enabled = $Enabled } } -FreshAppData $script:FreshAppData
-    $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $script:RepoRef -FreshAppData $script:FreshAppData -PreferLocal
-    if ($Enabled) {
-        Start-FreshAgentBackgroundWork -Action BuildRagIndex -BusyTitle 'RAG' -BusyText 'Index RAG en cours...'
-    }
-    if ($script:FreshAgentAiMenu) {
-        $m = $script:FreshAgentAiMenu
-        Update-FreshAgentAiMenu -MiAiRoot $m.Root -MiAiToggle $m.Toggle -MiOllamaState $m.OllamaState `
-            -MiSttState $m.SttState -MiAiListen $m.Listen -MiTtsCycle $m.TtsCycle -MiRagToggle $m.RagToggle `
-                -MiListenMode $m.ListenMode
-    }
-    Update-FreshAgentDashboardIfOpen
-}
-
-function Open-FreshAgentDashboardPanel {
-    if ($script:FreshAgentDashboardOpening) {
-        Write-WatchLog 'Dashboard open ignore (deja en cours)'
-        return
-    }
-    $script:FreshAgentDashboardOpening = $true
-    try {
-    if (Get-Command Import-FreshAgentLibOnce -ErrorAction SilentlyContinue) {
-        Import-FreshAgentLibOnce -RelativePath 'lib/FreshAgent-Dashboard.ps1' -FreshAppData $script:FreshAppData | Out-Null
-    }
-    else {
-        Import-FreshAgentDashboardAtScriptScope | Out-Null
-    }
-    $dashPath = Join-Path $script:FreshAppData 'lib\FreshAgent-Dashboard.ps1'
-    if (-not (Test-Path -LiteralPath $dashPath)) {
-        Write-WatchLog ("Dashboard fichier absent: {0}" -f $dashPath)
-        Show-Balloon -Title 'Fresh Agent' -Text 'Panneau absent — sync scripts locaux (lib\FreshAgent-Dashboard.ps1) puis redemarrer l agent.' -Icon Warning
-        return
-    }
-    try {
-        $dashAge = (Get-Item -LiteralPath $dashPath).LastWriteTimeUtc.ToString('o')
-        Write-WatchLog ("Dashboard open: {0} (mtime UTC {1})" -f $dashPath, $dashAge)
-        Set-WatchScriptUtf8Bom -Path $dashPath
-    }
-    catch { }
-
-    try {
-    # Rebuild action map each open (evite closures / code obsolete en memoire).
-    $script:FreshAgentDashboardActionMap = @{
-            ToggleAutoSuggest = {
-                param([bool]$On)
-                $s = Get-WatchUserSettings
-                $s.autoSuggestKill = $On
-                Set-WatchUserSettings -Settings $s
-                $script:UserSettings = $s
-                if ($script:WatchMenuAutoItem) {
-                    $script:WatchMenuAutoItem.Text = if ($On) { 'Detection auto : ON' } else { 'Detection auto : OFF' }
-                }
-            }
-            ToggleMonitor     = {
-                param([bool]$On)
-                $s = Get-WatchUserSettings
-                $s.monitorEnabled = $On
-                Set-WatchUserSettings -Settings $s
-                $script:UserSettings = $s
-                if ($script:WatchMenuMonItem) {
-                    $script:WatchMenuMonItem.Text = if ($On) { 'Surveillance : ON' } else { 'Surveillance : OFF' }
-                }
-                Sync-WatchAgentPollTimer
-            }
-            GameModeKill      = { Invoke-GameModeKillNow }
-            IdleLaunchers     = { Invoke-IdleLaunchersOnly }
-            PendingKill       = { Stop-PendingSuggestedProcesses }
-            ProfileGame       = { & $script:FreshAgentStartProfileBg 'game' }
-            ProfileWork       = { & $script:FreshAgentStartProfileBg 'work' }
-            ProfileClean      = { & $script:FreshAgentStartProfileBg 'clean' }
-            SkillHealth       = { & $script:FreshAgentStartSkillBg 'check_system_health' @{} }
-            SkillGameSession  = { & $script:FreshAgentStartSkillBg 'game_session' @{} }
-            SkillEndGame      = { & $script:FreshAgentStartSkillBg 'end_game_session' @{} }
-            SetAiEnabled      = { param([bool]$On) Set-FreshAgentAiEnabledFromUi -Enabled $On }
-            SetRagEnabled     = { param([bool]$On) Set-FreshAgentRagEnabledFromUi -Enabled $On }
-            StartOllama       = { Start-FreshAgentBackgroundWork -Action StartOllama -BusyText 'Demarrage Ollama...' }
-            EnsureModel       = { Start-FreshAgentBackgroundWork -Action EnsureModel -BusyText 'Telechargement modele...' }
-            VoiceListen       = { Invoke-FreshAgentVoiceListenMenu }
-            VoiceListenOn     = { Invoke-FreshAgentVoiceListenOn }
-            VoiceListenOff    = { Invoke-FreshAgentVoiceListenOff }
-            ListenModeCycle   = { Invoke-FreshAgentListenModeCycleMenu }
-            PttHotkeyPick     = { Invoke-FreshAgentPttHotkeyPickMenu }
-            TtsCycle          = { Invoke-FreshAgentTtsCycleMenu }
-            VoiceCommandsHelp = { Invoke-FreshAgentVoiceCommandsHelpMenu }
-            AppInventoryHelp  = { Invoke-FreshAgentAppInventoryHelpMenu }
-            AiTest            = {
-                $run = $script:FreshAgentRunAiTest
-                if ($run -is [scriptblock]) { & $run }
-            }
-            AiHistory         = { Invoke-FreshAgentAiHistoryMenu }
-            SubmitTextCommand = {
-                $txt = ''
-                try {
-                    if ($script:FreshAgentDashboardUi -and $script:FreshAgentDashboardUi.TxtCmd) {
-                        $txt = [string]$script:FreshAgentDashboardUi.TxtCmd.Text
-                        $script:FreshAgentDashboardUi.TxtCmd.Text = ''
-                    }
-                }
-                catch { }
-                Invoke-FreshAgentTextCommand -Text $txt
-            }
-            RefreshHealth     = {
-                if (Get-Command Invoke-SkillCheckHealthV2 -ErrorAction SilentlyContinue) {
-                    $r = Invoke-SkillCheckHealthV2 -FreshAppData $script:FreshAppData
-                    $script:FaHealthLastSummary = [string]$r.message
-                    Show-FreshAgentUserNotice -Title 'Sante' -Text ([string]$r.message) -Level Info
-                    Update-FreshAgentDashboardIfOpen
-                }
-                else {
-                    & $script:FreshAgentStartSkillBg 'check_system_health' @{}
-                }
-            }
-            WeeklyReport      = { & $script:FreshAgentStartSkillBg 'weekly_health_report' @{} }
-            AuditStartup      = { & $script:FreshAgentStartSkillBg 'audit_startup' @{} }
-            AuditServices     = { & $script:FreshAgentStartSkillBg 'audit_services' @{} }
-            CleanupConfirm    = { & $script:FreshAgentStartSkillBg 'cleanup' @{} }
-            BloatwarePreview  = { & $script:FreshAgentStartSkillBg 'remove_preinstalled_apps' @{ Apply = $false } }
-            FwMenu            = { try { Start-FreshWindowsElevated -RepoRef $script:RepoRef } catch { Show-FreshAgentUserNotice -Title 'Fresh Windows' -Text $_.Exception.Message -Level Error } }
-            FwMaintenance     = { try { Start-FreshWindowsElevated -SilentMode 'maintenance' -RepoRef $script:RepoRef } catch { Show-FreshAgentUserNotice -Title 'Fresh Windows' -Text $_.Exception.Message -Level Error } }
-            FwGameMode        = { try { Start-FreshWindowsElevated -SilentMode 'game-mode' -RepoRef $script:RepoRef } catch { Show-FreshAgentUserNotice -Title 'Fresh Windows' -Text $_.Exception.Message -Level Error } }
-            SyncScripts       = { Invoke-SyncLocalScripts }
-            OpenPowerShell    = { try { Start-FreshWindowsPowerShell } catch { Show-FreshAgentUserNotice -Title 'PowerShell' -Text $_.Exception.Message -Level Error } }
-            QuitAgent         = { Request-WatchAgentShutdown }
-        }
-        $getState = (Get-Command Get-FreshAgentDashboardState -CommandType Function -ErrorAction Stop).ScriptBlock
-        $escapedDash = $dashPath.Replace("'", "''")
-        $runner = [scriptblock]::Create(@"
-if (-not (Get-Command Show-FreshAgentDashboard -ErrorAction SilentlyContinue)) {
-    . '$escapedDash'
-}
-if (-not (Get-Command Show-FreshAgentDashboard -ErrorAction SilentlyContinue)) {
-    throw 'Show-FreshAgentDashboard absent apres chargement dashboard'
-}
-if (-not `$script:FreshAgentDashboardActionMap) {
-    throw 'FreshAgentDashboardActionMap absent'
-}
-`$st = (Get-Command Get-FreshAgentDashboardState -CommandType Function -ErrorAction Stop).ScriptBlock
-Show-FreshAgentDashboard -Actions `$script:FreshAgentDashboardActionMap -GetState `$st
-"@)
-        if ($script:WatchAgentSessionState) {
-            $null = $script:WatchAgentSessionState.InvokeCommand.InvokeScript($false, $runner, $null, @())
-        }
-        else {
-            . $dashPath
-            Show-FreshAgentDashboard -Actions $script:FreshAgentDashboardActionMap -GetState $getState
-        }
-    }
-    catch {
-        Write-WatchLog ("Dashboard open: {0}" -f $_.Exception.ToString())
-        Show-Balloon -Title 'Fresh Agent' -Text $_.Exception.Message -Icon Error
-    }
-    }
-    finally {
-        $script:FreshAgentDashboardOpening = $false
-    }
-}
-
-function Invoke-SyncLocalScripts {
-    try {
-        $syncScript = Join-Path $FreshAppData 'Sync-FreshWindowsAgent.ps1'
-        if (-not (Test-Path -LiteralPath $syncScript)) {
-            $url = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/scripts/Sync-FreshWindowsAgent.ps1"
-            Invoke-WebRequest -Uri $url -OutFile $syncScript -UseBasicParsing
-            Write-WatchLog 'Sync-FreshWindowsAgent.ps1 telecharge'
-        }
-        if (Test-Path -LiteralPath $syncScript) {
-            & $psExe -NoProfile -ExecutionPolicy Bypass -File $syncScript -RepoRef $RepoRef
-            Show-Balloon -Title 'Scripts locaux' -Text "Sync Fresh Agent OK (ref $RepoRef)." -Icon Info
-            return
-        }
-        $corePath = Join-Path $FreshAppData 'Launcher-Core.ps1'
-        $coreUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/scripts/lib/Launcher-Core.ps1"
-        Invoke-WebRequest -Uri $coreUrl -OutFile $corePath -UseBasicParsing
-        Set-Content -LiteralPath (Join-Path $FreshAppData 'Launcher-Core.ps1.ref') -Value $RepoRef -Encoding UTF8 -NoNewline
-        . $corePath
-        $launcherUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/launcher.ps1"
-        $iconUrl = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/assets/fresh-windows.ico"
-        Write-FreshWindowsLaunchStub -FreshAppData $FreshAppData -Ref $RepoRef -LauncherUrl $launcherUrl | Out-Null
-        Sync-GameModeLocalScripts -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $iconUrl | Out-Null
-        if (Get-Command Import-FreshAgentModule -ErrorAction SilentlyContinue) {
-            foreach ($mod in @(
-                    'lib/FreshAgent-SkillsEngine.ps1',
-                    'lib/FreshAgent-SkillHandlers.ps1',
-                    'lib/FreshAgent-GameSession.ps1',
-                    'ai/Ollama-Manager.ps1',
-                    'ai/FreshAgent-OllamaBridge.ps1',
-                    'ai/Windows-Stt.ps1',
-                    'ai/FreshAgent-Tts.ps1',
-                    'lib/FreshAgent-Inventory.ps1',
-                    'lib/FreshAgent-Rag.ps1',
-                    'lib/FreshAgent-History.ps1',
-                    'lib/FreshAgent-Profiles.ps1',
-                    'lib/FreshAgent-Log.ps1',
-                    'lib/FreshAgent-Dashboard.ps1'
-                )) {
-                    Import-FreshAgentModule -RelativePath $mod -FreshAppData $FreshAppData | Out-Null
-                }
-            $script:FreshAgentAi = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
-            $script:FreshAgentReady = $true
-        }
-        Import-FreshAgentDashboardAtScriptScope | Out-Null
-        if (Get-Command Ensure-FreshAgentAiBridgeLoaded -ErrorAction SilentlyContinue) {
-            Ensure-FreshAgentAiBridgeLoaded -FreshAppData $FreshAppData | Out-Null
-        }
-        if (Get-Command Write-FreshAgentLog -ErrorAction SilentlyContinue) {
-            Write-FreshAgentLog -Category 'Sync' -Message "Menu sync OK ref=$RepoRef" -FreshAppData $FreshAppData
-        }
-        Show-Balloon -Title 'Scripts locaux' -Text "Mis a jour (ref $RepoRef). Modules Fresh Agent recharges." -Icon Info
-    }
-    catch {
-        Show-Balloon -Title 'Scripts locaux' -Text $_.Exception.Message -Icon Error
     }
 }
 
@@ -3074,283 +766,298 @@ function Stop-PendingSuggestedProcesses {
     Show-Balloon -Title 'Suggestions' -Text ("$n processus fermes.") -Icon Info
 }
 
+function Invoke-WatchGameSessionStart {
+    $fresh = $script:FreshAppData
+    if (Get-Command Get-FreshAgentGameSessionState -ErrorAction SilentlyContinue) {
+        if (Get-FreshAgentGameSessionState -FreshAppData $fresh) {
+            Show-Balloon -Title 'Session jeu' -Text 'Session deja active. Utilise Fin session jeu.' -Icon Warning
+            return
+        }
+    }
+    try {
+        $focusSnap = Get-WindowsFocusAssistSnapshot
+        $focusNotes = Set-WindowsFocusAssistBestEffort -Enable
+        $prevPower = Get-ActivePowerSchemeGuid
+        if (Get-Command Ensure-UltimatePerformanceActive -ErrorAction SilentlyContinue) {
+            Ensure-UltimatePerformanceActive | Out-Null
+        }
+        $killNotes = @()
+        if (Get-Command Get-GameModeKillConfig -ErrorAction SilentlyContinue) {
+            $cfg = Get-GameModeKillConfig
+            $result = Stop-GameModeKillListProcesses -KillNames $cfg.KillNames -ProtectNames $cfg.ProtectNames
+            $idle = Stop-IdleGamingLaunchers -LauncherNames $cfg.GamingLauncherNames -LauncherFamilies $cfg.GamingLauncherFamilies
+            $killNotes += "Fermes: $($result.Killed.Count); launchers idle: $($idle.Killed.Count)"
+        }
+        $state = [pscustomobject]@{
+            startedAt   = (Get-Date).ToString('o')
+            focusAssist = $focusSnap
+            powerScheme = $prevPower
+        }
+        if (Get-Command Set-FreshAgentGameSessionState -ErrorAction SilentlyContinue) {
+            Set-FreshAgentGameSessionState -State $state -FreshAppData $fresh
+        }
+        $msg = (($focusNotes + $killNotes) -join ' ').Trim()
+        if ([string]::IsNullOrWhiteSpace($msg)) { $msg = 'Session jeu activee (DND + mode jeu).' }
+        Show-Balloon -Title 'Session jeu' -Text $msg -Icon Info
+        Update-MaintenanceTrayStatus
+    }
+    catch {
+        Show-Balloon -Title 'Session jeu' -Text $_.Exception.Message -Icon Error
+    }
+}
+
+function Invoke-WatchGameSessionEnd {
+    $fresh = $script:FreshAppData
+    if (-not (Get-Command Get-FreshAgentGameSessionState -ErrorAction SilentlyContinue)) {
+        Show-Balloon -Title 'Session jeu' -Text 'Module session indisponible.' -Icon Warning
+        return
+    }
+    $state = Get-FreshAgentGameSessionState -FreshAppData $fresh
+    if (-not $state) {
+        Show-Balloon -Title 'Session jeu' -Text 'Aucune session jeu enregistree.' -Icon Warning
+        return
+    }
+    try {
+        $notes = Restore-WindowsFocusAssistSnapshot -Snapshot $state.focusAssist
+        if ($state.powerScheme) {
+            if (Set-ActivePowerSchemeGuid -Guid $state.powerScheme) {
+                $notes += 'Plan alimentation restaure.'
+            }
+        }
+        Clear-FreshAgentGameSessionState -FreshAppData $fresh
+        $msg = ($notes -join ' ').Trim()
+        if ([string]::IsNullOrWhiteSpace($msg)) { $msg = 'Session jeu terminee.' }
+        Show-Balloon -Title 'Fin session jeu' -Text $msg -Icon Info
+        Update-MaintenanceTrayStatus
+    }
+    catch {
+        Show-Balloon -Title 'Fin session jeu' -Text $_.Exception.Message -Icon Error
+    }
+}
+
+function Invoke-WatchWeeklyHealthReportMenu {
+    if (-not (Get-Command New-FreshAgentWeeklyHealthReport -ErrorAction SilentlyContinue)) {
+        Show-Balloon -Title 'Rapport' -Text 'Module sante indisponible.' -Icon Warning
+        return
+    }
+    try {
+        $r = New-FreshAgentWeeklyHealthReport -FreshAppData $script:FreshAppData
+        $msg = [string]$r.message
+        if ($msg.Length -gt 220) { $msg = $msg.Substring(0, 217) + '...' }
+        Show-Balloon -Title 'Rapport sante' -Text $msg -Icon Info
+    }
+    catch {
+        Show-Balloon -Title 'Rapport sante' -Text $_.Exception.Message -Icon Error
+    }
+}
+
+function Invoke-WatchTempCleanupMenu {
+    if (-not (Get-Command Invoke-FreshAgentCleanup -ErrorAction SilentlyContinue)) {
+        Show-Balloon -Title 'Nettoyage' -Text 'Module optimise indisponible.' -Icon Warning
+        return
+    }
+    $wingetBusy = $false
+    if (Get-Command Test-FreshWindowsWingetBusyForMaintenance -ErrorAction SilentlyContinue) {
+        $wingetBusy = [bool](Test-FreshWindowsWingetBusyForMaintenance)
+    }
+    else {
+        foreach ($n in @('winget', 'WindowsPackageManager', 'AppInstaller')) {
+            if (Get-Process -Name $n -ErrorAction SilentlyContinue) { $wingetBusy = $true; break }
+        }
+    }
+    if ($wingetBusy) {
+        Show-Balloon -Title 'Nettoyage' -Text 'Differe : winget actif (reessayez plus tard).' -Icon Warning
+        return
+    }
+    try {
+        $r = Invoke-FreshAgentCleanup -Temp
+        $msg = if ($r -and $r.message) { [string]$r.message } else { 'Nettoyage temporaires termine.' }
+        if ($msg.Length -gt 220) { $msg = $msg.Substring(0, 217) + '...' }
+        Show-Balloon -Title 'Nettoyage' -Text $msg -Icon Info
+    }
+    catch {
+        Show-Balloon -Title 'Nettoyage' -Text $_.Exception.Message -Icon Error
+    }
+}
+
+function Ensure-WatchAgentTrayIconFile {
+  param([string]$FreshAppData = $script:FreshAppData)
+    $iconPath = Join-Path $FreshAppData 'fresh-windows.ico'
+    if ((Test-Path -LiteralPath $iconPath) -and ((Get-Item -LiteralPath $iconPath).Length -gt 1000)) {
+        return $iconPath
+    }
+    $candidates = @(
+        (Join-Path $PSScriptRoot '..\assets\fresh-windows.ico'),
+        (Join-Path $env:LOCALAPPDATA 'FreshWindows\fresh-windows.ico')
+    )
+    foreach ($c in $candidates) {
+        if ($c -and (Test-Path -LiteralPath $c) -and ((Get-Item -LiteralPath $c).Length -gt 1000)) {
+            try {
+                Copy-Item -LiteralPath $c -Destination $iconPath -Force
+                return $iconPath
+            }
+            catch { }
+        }
+    }
+    $url = "$RepoRawRoot/assets/fresh-windows.ico"
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $iconPath -UseBasicParsing -TimeoutSec 20
+        if ((Test-Path -LiteralPath $iconPath) -and ((Get-Item -LiteralPath $iconPath).Length -gt 1000)) {
+            return $iconPath
+        }
+    }
+    catch {
+        Write-WatchLog ("Icone download: {0}" -f $_.Exception.Message)
+    }
+    return $null
+}
+
+function Set-WatchAgentTrayIcon {
+    if (-not $script:NotifyIcon) { return }
+    $iconPath = Ensure-WatchAgentTrayIconFile
+    try {
+        if ($iconPath) {
+            $script:NotifyIcon.Icon = New-Object System.Drawing.Icon($iconPath)
+        }
+        else {
+            $script:NotifyIcon.Icon = [System.Drawing.SystemIcons]::Information
+        }
+    }
+    catch {
+        try { $script:NotifyIcon.Icon = [System.Drawing.SystemIcons]::Information } catch { }
+    }
+}
+
+function Refresh-WatchAgentTrayVisibility {
+    if (-not $script:NotifyIcon) { return }
+    try {
+        Set-WatchAgentTrayIcon
+        Update-MaintenanceTrayStatus
+        $script:NotifyIcon.Visible = $false
+        [System.Windows.Forms.Application]::DoEvents()
+        $script:NotifyIcon.Visible = $true
+        [System.Windows.Forms.Application]::DoEvents()
+    }
+    catch {
+        Write-WatchLog ("Tray refresh: {0}" -f $_.Exception.Message)
+    }
+}
+
+function Initialize-WatchAgentSystrayEarly {
+    if (Test-WatchAgentSystrayLive) { return }
+    Reset-WatchAgentSystrayUi
+    Write-WatchLog 'Init UI (early)'
+    $script:HiddenForm = New-Object System.Windows.Forms.Form
+    $script:HiddenForm.Text = 'Fresh Windows Maintenance'
+    $script:HiddenForm.ShowInTaskbar = $false
+    $script:HiddenForm.FormBorderStyle = 'FixedToolWindow'
+    $script:HiddenForm.Size = New-Object System.Drawing.Size(1, 1)
+    $script:HiddenForm.StartPosition = 'Manual'
+    $script:HiddenForm.Location = New-Object System.Drawing.Point(-32000, -32000)
+    $script:HiddenForm.Add_FormClosed((Register-WatchUiHandler {
+            if ($script:NotifyIcon) {
+                $script:NotifyIcon.Visible = $false
+                $script:NotifyIcon.Dispose()
+                $script:NotifyIcon = $null
+            }
+            $script:HiddenForm = $null
+            Exit-FreshWatchAgentSingleInstance
+        }))
+
+    $script:NotifyIcon = New-Object System.Windows.Forms.NotifyIcon
+    Set-WatchAgentTrayIcon
+    $script:NotifyIcon.Text = 'Fresh Maintenance (demarrage...)'
+    $script:WatchEarlyContextMenu = New-Object System.Windows.Forms.ContextMenuStrip
+    $miLoadEarly = $script:WatchEarlyContextMenu.Items.Add('Chargement...')
+    $miLoadEarly.Enabled = $false
+    $miQuitEarly = $script:WatchEarlyContextMenu.Items.Add('Quitter')
+    Add-WatchMenuClick $miQuitEarly { Request-WatchAgentShutdown }
+    $script:NotifyIcon.ContextMenuStrip = $script:WatchEarlyContextMenu
+    $script:NotifyIcon.Visible = $true
+    Write-WatchLog 'NotifyIcon visible (early)'
+    try { Hide-WatchConsole } catch { }
+    try { [System.Windows.Forms.Application]::DoEvents() } catch { }
+}
+
+Initialize-WatchAgentSystrayEarly
+
 function Install-WatchAgentFullTrayMenu {
     if ($script:WatchFullMenuInstalled) { return }
     Write-WatchLog 'Init UI (menu complet)'
-    Update-FreshAgentTrayStatus
+    Update-MaintenanceTrayStatus
 
     $menu = New-Object System.Windows.Forms.ContextMenuStrip
 
-$miOpenPanel = New-Object System.Windows.Forms.ToolStripMenuItem
-$miOpenPanel.Text = 'Ouvrir le panneau Fresh Agent...'
-$miOpenPanel.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
-$null = $menu.Items.Add($miOpenPanel)
-Add-WatchMenuClick $miOpenPanel { Open-FreshAgentDashboardPanel }
-$menu.Items.Add('-') | Out-Null
+    $miKill = $menu.Items.Add('Mode jeu (liste + launchers inactifs)')
+    Add-WatchMenuClick $miKill { Invoke-GameModeKillNow }
 
-$miKill = $menu.Items.Add('Mode jeu (liste + launchers inactifs)')
-Add-WatchMenuClick $miKill { Invoke-GameModeKillNow }
+    $miLaunchers = $menu.Items.Add('Fermer launchers gaming inactifs')
+    Add-WatchMenuClick $miLaunchers { Invoke-IdleLaunchersOnly }
 
-$miLaunchers = $menu.Items.Add('Fermer launchers gaming inactifs')
-Add-WatchMenuClick $miLaunchers { Invoke-IdleLaunchersOnly }
+    $miPending = $menu.Items.Add('Tuer suggestions en attente')
+    Add-WatchMenuClick $miPending { Stop-PendingSuggestedProcesses }
 
-$miPending = $menu.Items.Add('Tuer suggestions en attente')
-Add-WatchMenuClick $miPending { Stop-PendingSuggestedProcesses }
-
-$miAuto = $menu.Items.Add('Détection auto : ON')
-$script:WatchMenuAutoItem = $miAuto
-Add-WatchMenuClick $miAuto {
-    $s = Get-WatchUserSettings
-    $s.autoSuggestKill = -not $s.autoSuggestKill
-    Set-WatchUserSettings -Settings $s
-    $script:UserSettings = $s
-    $miAuto.Text = if ($s.autoSuggestKill) { 'Détection auto : ON' } else { 'Détection auto : OFF' }
-}
-
-$miMon = $menu.Items.Add('Surveillance : ON')
-$script:WatchMenuMonItem = $miMon
-Add-WatchMenuClick $miMon {
-    $s = Get-WatchUserSettings
-    $s.monitorEnabled = -not $s.monitorEnabled
-    Set-WatchUserSettings -Settings $s
-    $script:UserSettings = $s
-    $miMon.Text = if ($s.monitorEnabled) { 'Surveillance : ON' } else { 'Surveillance : OFF' }
-    Sync-WatchAgentPollTimer
-}
-
-$menu.Items.Add('-') | Out-Null
-
-$miSkillHealth = $menu.Items.Add('Etat systeme (skill)')
-Add-WatchMenuClick $miSkillHealth { Invoke-FreshAgentSkillMenu -SkillId 'check_system_health' }
-
-$miSkillGame = $menu.Items.Add('Session jeu (DND + mode jeu)')
-Add-WatchMenuClick $miSkillGame { Invoke-FreshAgentSkillMenu -SkillId 'game_session' }
-
-$miSkillEndGame = $menu.Items.Add('Fin session jeu')
-Add-WatchMenuClick $miSkillEndGame { Invoke-FreshAgentSkillMenu -SkillId 'end_game_session' }
-
-$miProfiles = New-Object System.Windows.Forms.ToolStripMenuItem
-$miProfiles.Text = 'Profils'
-$null = $menu.Items.Add($miProfiles)
-foreach ($pair in @(
-        @{ Id = 'game'; Label = 'Jeu (session)' },
-        @{ Id = 'work'; Label = 'Travail (fin session + sante)' },
-        @{ Id = 'clean'; Label = 'Clean (sante + inventaire)' }
-    )) {
-    $item = New-Object System.Windows.Forms.ToolStripMenuItem
-    $item.Text = $pair.Label
-    $item.Tag = $pair.Id
-    Add-WatchMenuClick $item {
-            param($sender, $e)
-            $run = $script:FreshAgentStartProfileBg
-            if ($run -is [scriptblock]) {
-                & $run ([string]$sender.Tag)
-            }
-            else {
-                Invoke-FreshAgentProfileFromUi -ProfileId ([string]$sender.Tag)
-            }
-        }
-    $miProfiles.DropDownItems.Add($item) | Out-Null
-}
-
-$menu.Items.Add('-') | Out-Null
-
-$miAi = New-Object System.Windows.Forms.ToolStripMenuItem
-$miAi.Text = 'Intelligence artificielle'
-$null = $menu.Items.Add($miAi)
-
-$miAiToggle = New-Object System.Windows.Forms.ToolStripMenuItem
-$miAiToggle.Text = 'IA : OFF (defaut)'
-Add-WatchMenuClick $miAiToggle {
-    if (-not $script:FreshAgentReady) {
-        Show-FreshAgentUserNotice -Title 'IA' -Text 'Modules non charges.' -Level Warning
-        return
+    $miAuto = $menu.Items.Add('Detection auto : ON')
+    $script:WatchMenuAutoItem = $miAuto
+    Add-WatchMenuClick $miAuto {
+        $s = Get-WatchUserSettings
+        $s.autoSuggestKill = -not $s.autoSuggestKill
+        Set-WatchUserSettings -Settings $s
+        $script:UserSettings = $s
+        $miAuto.Text = if ($s.autoSuggestKill) { 'Detection auto : ON' } else { 'Detection auto : OFF' }
     }
-    $cur = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData -PreferLocal
-    $next = -not [bool]$cur.enabled
-    Set-FreshAgentAiEnabledFromUi -Enabled $next
-}
-$miAi.DropDownItems.Add($miAiToggle) | Out-Null
 
-$miOllamaStart = New-Object System.Windows.Forms.ToolStripMenuItem
-$miOllamaStart.Text = 'Demarrer Ollama'
-Add-WatchMenuClick $miOllamaStart {
-    Start-FreshAgentBackgroundWork -Action StartOllama -BusyText 'Demarrage Ollama...'
-}
-$miAi.DropDownItems.Add($miOllamaStart) | Out-Null
-
-$miOllamaPull = New-Object System.Windows.Forms.ToolStripMenuItem
-$miOllamaPull.Text = 'Telecharger modele par defaut'
-Add-WatchMenuClick $miOllamaPull {
-    Start-FreshAgentBackgroundWork -Action EnsureModel -BusyText 'Telechargement modele...'
-}
-$miAi.DropDownItems.Add($miOllamaPull) | Out-Null
-
-$miOllamaState = New-Object System.Windows.Forms.ToolStripMenuItem
-$miOllamaState.Text = 'Ollama : ?'
-$miOllamaState.Enabled = $false
-$miAi.DropDownItems.Add($miOllamaState) | Out-Null
-
-$miSttState = New-Object System.Windows.Forms.ToolStripMenuItem
-$miSttState.Text = 'STT : Windows API'
-$miSttState.Enabled = $false
-Add-WatchMenuClick $miSttState { Invoke-FreshAgentSttStatusMenu }
-$miAi.DropDownItems.Add($miSttState) | Out-Null
-
-$miAiListen = New-Object System.Windows.Forms.ToolStripMenuItem
-$miAiListen.Text = 'Ecoute : OFF'
-$miAiListen.Enabled = $false
-Add-WatchMenuClick $miAiListen { Invoke-FreshAgentVoiceListenMenu }
-$miAi.DropDownItems.Add($miAiListen) | Out-Null
-
-$miListenMode = New-Object System.Windows.Forms.ToolStripMenuItem
-$miListenMode.Text = 'Mode ecoute : Appui maintenu (clic = cycle)'
-$miListenMode.Enabled = $false
-Add-WatchMenuClick $miListenMode { Invoke-FreshAgentListenModeCycleMenu }
-$miAi.DropDownItems.Add($miListenMode) | Out-Null
-
-$miPttHotkey = New-Object System.Windows.Forms.ToolStripMenuItem
-$miPttHotkey.Text = 'Raccourci PTT : Ctrl+Alt+Space'
-$miPttHotkey.Enabled = $false
-Add-WatchMenuClick $miPttHotkey { Invoke-FreshAgentPttHotkeyPickMenu }
-$miAi.DropDownItems.Add($miPttHotkey) | Out-Null
-$script:MiPttHotkeyItem = $miPttHotkey
-
-$miTtsCycle = New-Object System.Windows.Forms.ToolStripMenuItem
-$miTtsCycle.Text = 'TTS : OFF (clic = cycle)'
-Add-WatchMenuClick $miTtsCycle { Invoke-FreshAgentTtsCycleMenu }
-$miAi.DropDownItems.Add($miTtsCycle) | Out-Null
-
-$miRagToggle = New-Object System.Windows.Forms.ToolStripMenuItem
-$miRagToggle.Text = 'RAG guides : OFF'
-Add-WatchMenuClick $miRagToggle {
-    if (-not $script:FreshAgentReady) { return }
-    $cur = Get-FreshAgentAiConfig -RepoRef $RepoRef -FreshAppData $FreshAppData
-    $ragOn = -not [bool]$cur.rag.enabled
-    Set-FreshAgentRagEnabledFromUi -Enabled $ragOn
-}
-$miAi.DropDownItems.Add($miRagToggle) | Out-Null
-
-$miAiHistory = New-Object System.Windows.Forms.ToolStripMenuItem
-$miAiHistory.Text = 'Historique IA (5 derniers)'
-Add-WatchMenuClick $miAiHistory { Invoke-FreshAgentAiHistoryMenu }
-$miAi.DropDownItems.Add($miAiHistory) | Out-Null
-
-$miCmdHelp = New-Object System.Windows.Forms.ToolStripMenuItem
-$miCmdHelp.Text = 'Aide commandes (skills)...'
-Add-WatchMenuClick $miCmdHelp { Invoke-FreshAgentVoiceCommandsHelpMenu }
-$miAi.DropDownItems.Add($miCmdHelp) | Out-Null
-
-$miAppInv = New-Object System.Windows.Forms.ToolStripMenuItem
-$miAppInv.Text = 'Inventaire apps & aliases...'
-Add-WatchMenuClick $miAppInv { Invoke-FreshAgentAppInventoryHelpMenu }
-$miAi.DropDownItems.Add($miAppInv) | Out-Null
-
-$miAiTest = New-Object System.Windows.Forms.ToolStripMenuItem
-$miAiTest.Text = 'Tester l IA (tool calling)...'
-Add-WatchMenuClick $miAiTest {
-    $run = $script:FreshAgentRunAiTest
-    if ($run -is [scriptblock]) { & $run }
-}
-$miAi.DropDownItems.Add($miAiTest) | Out-Null
-
-$script:FreshAgentAiMenu = @{
-    Root        = $miAi
-    Toggle      = $miAiToggle
-    OllamaState = $miOllamaState
-    SttState    = $miSttState
-    Listen      = $miAiListen
-    ListenMode  = $miListenMode
-    TtsCycle    = $miTtsCycle
-    RagToggle   = $miRagToggle
-}
-if ($script:FreshAgentReady) {
-    Update-FreshAgentAiMenu -MiAiRoot $miAi -MiAiToggle $miAiToggle -MiOllamaState $miOllamaState -MiSttState $miSttState -MiAiListen $miAiListen -MiTtsCycle $miTtsCycle -MiRagToggle $miRagToggle -MiListenMode $miListenMode
-}
-else {
-    $miAi.Enabled = $false
-}
-
-$menu.Items.Add('-') | Out-Null
-
-$miFw = New-Object System.Windows.Forms.ToolStripMenuItem
-$miFw.Text = 'Fresh Windows (terminal admin)'
-$null = $menu.Items.Add($miFw)
-
-$miFwMenu = New-Object System.Windows.Forms.ToolStripMenuItem
-$miFwMenu.Text = 'Menu interactif (comme le raccourci Bureau)'
-Add-WatchMenuClick $miFwMenu {
-    try { Start-FreshWindowsElevated -RepoRef $RepoRef } catch { Show-Balloon -Title 'Fresh Windows' -Text $_.Exception.Message -Icon Error }
-}
-$miFw.DropDownItems.Add($miFwMenu)
-
-$fwModes = @(
-    @{ Label = 'Maintenance (WinUtil + ShutUp10)'; Mode = 'maintenance' },
-    @{ Label = 'WinUtil one-click'; Mode = 'winutil-oneclick' },
-    @{ Label = 'Winget upgrade --all'; Mode = 'winget-upgrade' },
-    @{ Label = 'Mode jeu (via launcher admin)'; Mode = 'game-mode' }
-)
-foreach ($pair in $fwModes) {
-    $item = New-Object System.Windows.Forms.ToolStripMenuItem
-    $item.Text = $pair.Label
-    $item.Tag = $pair.Mode
-    Add-WatchMenuClick $item {
-        param($sender, $e)
-        $m = $sender.Tag
-        try { Start-FreshWindowsElevated -SilentMode $m -RepoRef $RepoRef } catch { Show-Balloon -Title 'Fresh Windows' -Text $_.Exception.Message -Icon Error }
+    $miMon = $menu.Items.Add('Surveillance : ON')
+    $script:WatchMenuMonItem = $miMon
+    Add-WatchMenuClick $miMon {
+        $s = Get-WatchUserSettings
+        $s.monitorEnabled = -not $s.monitorEnabled
+        Set-WatchUserSettings -Settings $s
+        $script:UserSettings = $s
+        $miMon.Text = if ($s.monitorEnabled) { 'Surveillance : ON' } else { 'Surveillance : OFF' }
+        Sync-WatchAgentPollTimer
     }
-    $miFw.DropDownItems.Add($item) | Out-Null
-}
 
-$miPs = New-Object System.Windows.Forms.ToolStripMenuItem
-$miPs.Text = 'Ouvrir PowerShell (sans admin)'
-Add-WatchMenuClick $miPs {
-    try {
-        Start-FreshWindowsPowerShell
-    }
-    catch {
-        Show-Balloon -Title 'PowerShell' -Text $_.Exception.Message -Icon Error
-    }
-}
-$miFw.DropDownItems.Add($miPs) | Out-Null
+    $menu.Items.Add('-') | Out-Null
 
-$miSync = New-Object System.Windows.Forms.ToolStripMenuItem
-$miSync.Text = 'Mettre à jour scripts locaux (ref GitHub)'
-Add-WatchMenuClick $miSync { Invoke-SyncLocalScripts }
-$miFw.DropDownItems.Add($miSync) | Out-Null
+    $miCleanup = $menu.Items.Add('Nettoyage fichiers temporaires')
+    Add-WatchMenuClick $miCleanup { Invoke-WatchTempCleanupMenu }
 
-$miBgAudit = New-Object System.Windows.Forms.ToolStripMenuItem
-$miBgAudit.Text = 'Audit arriere-plan (rapport CPU/agent)'
-Add-WatchMenuClick $miBgAudit {
-    try {
-        $auditPs1 = Join-Path $FreshAppData 'Invoke-FreshWindowsBackgroundAudit.ps1'
-        $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-        if (-not (Test-Path -LiteralPath $auditPs1)) {
-            $raw = "https://raw.githubusercontent.com/nico2511/fresh_windows/$RepoRef/scripts/Invoke-FreshWindowsBackgroundAudit.ps1"
-            Invoke-WebRequest -Uri $raw -OutFile $auditPs1 -UseBasicParsing
-        }
-        Start-Process -FilePath $psExe -ArgumentList @(
-            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-File', $auditPs1
-        ) | Out-Null
-    }
-    catch {
-        Show-Balloon -Title 'Audit' -Text $_.Exception.Message -Icon Error
-    }
-}
-$miFw.DropDownItems.Add($miBgAudit) | Out-Null
+    $miWeekly = $menu.Items.Add('Rapport sante hebdomadaire')
+    Add-WatchMenuClick $miWeekly { Invoke-WatchWeeklyHealthReportMenu }
 
-$menu.Items.Add('-') | Out-Null
-$miExit = $menu.Items.Add('Quitter')
-Add-WatchMenuClick $miExit { Request-WatchAgentShutdown }
+    $menu.Items.Add('-') | Out-Null
+
+    $miGameSession = $menu.Items.Add('Session jeu (mode jeu + DND)')
+    Add-WatchMenuClick $miGameSession { Invoke-WatchGameSessionStart }
+
+    $miEndGame = $menu.Items.Add('Fin session jeu')
+    Add-WatchMenuClick $miEndGame { Invoke-WatchGameSessionEnd }
+
+    $menu.Items.Add('-') | Out-Null
+    $miExit = $menu.Items.Add('Quitter')
+    Add-WatchMenuClick $miExit { Request-WatchAgentShutdown }
 
     $script:WatchContextMenuStrip = $menu
-    Set-WatchAgentNotifyIconInteractive
+    if ($script:NotifyIcon) {
+        $script:NotifyIcon.ContextMenuStrip = $script:WatchContextMenuStrip
+    }
 
     if ($script:WatchMenuAutoItem) {
-        $script:WatchMenuAutoItem.Text = if ($script:UserSettings.autoSuggestKill) { 'Détection auto : ON' } else { 'Détection auto : OFF' }
+        $script:WatchMenuAutoItem.Text = if ($script:UserSettings.autoSuggestKill) {
+            'Detection auto : ON'
+        }
+        else {
+            'Detection auto : OFF'
+        }
     }
     if ($script:WatchMenuMonItem) {
-        $script:WatchMenuMonItem.Text = if ($script:UserSettings.monitorEnabled) { 'Surveillance : ON' } else { 'Surveillance : OFF' }
+        $script:WatchMenuMonItem.Text = if ($script:UserSettings.monitorEnabled) {
+            'Surveillance : ON'
+        }
+        else {
+            'Surveillance : OFF'
+        }
     }
     $script:WatchFullMenuInstalled = $true
     Write-WatchLog 'Menu complet installe'
@@ -3372,7 +1079,7 @@ function Start-WatchAgentPollTimerIfNeeded {
     $script:WatchPollTimer.Interval = $pollMs
     $script:WatchPollTimer.Add_Tick((Register-WatchUiHandler { Invoke-WatchTick }))
     $script:WatchPollTimer.Start()
-    Write-WatchLog 'Surveillance poll demarree (post-boot modules)'
+    Write-WatchLog ("Surveillance poll demarree ({0} ms)" -f $pollMs)
 }
 
 function Sync-WatchAgentPollTimer {
@@ -3384,41 +1091,14 @@ function Sync-WatchAgentPollTimer {
     }
 }
 
-function Start-WatchAgentTimers {
-    if ($script:WatchBootTimer) { return }
-    $script:WatchBootTimer = New-Object System.Windows.Forms.Timer
-    $script:WatchBootTimer.Interval = 400
-    $script:WatchBootTimer.Add_Tick((Register-WatchUiHandler {
-            $script:WatchBootTimer.Stop()
-            $script:WatchBootTimer.Dispose()
-            $script:WatchBootTimer = $null
-            Invoke-FreshAgentDeferredBoot
-        }))
-    $script:WatchBootTimer.Start()
-
-    if (-not $script:WatchModuleDelayTimer) {
-        $script:WatchModuleDelayTimer = New-Object System.Windows.Forms.Timer
-        $script:WatchModuleDelayTimer.Interval = 5000
-        $script:WatchModuleDelayTimer.Add_Tick((Register-WatchUiHandler {
-                $script:WatchModuleDelayTimer.Stop()
-                $script:WatchModuleDelayTimer.Dispose()
-                $script:WatchModuleDelayTimer = $null
-                Write-WatchLog 'Demarrage boot modules (apres delai UI)'
-                Start-WatchAgentModuleBootAsync
-            }))
-        $script:WatchModuleDelayTimer.Start()
-        Write-WatchLog 'Boot modules planifie (+5s, UI prioritaire)'
-    }
-}
-
 function Start-WatchAgentUiBootstrap {
     if ($script:WatchUiBootstrapStarted) { return }
     $script:WatchUiBootstrapStarted = $true
     try {
         Install-WatchAgentFullTrayMenu
-        Start-WatchAgentTimers
+        Sync-WatchAgentPollTimer
         Refresh-WatchAgentTrayVisibility
-        Show-Balloon -Title 'Fresh Agent' -Text 'Agent actif — regardez la zone de notification (icones cachees ^).' -Icon Info
+        Show-Balloon -Title 'Fresh Maintenance' -Text 'Agent actif — icone dans la zone de notification (^).' -Icon Info
         Write-WatchLog 'UI bootstrap OK'
     }
     catch {
@@ -3426,10 +1106,7 @@ function Start-WatchAgentUiBootstrap {
     }
 }
 
-# --- UI (formulaire cache obligatoire pour le message loop WinForms) ---
-$ErrorActionPreference = 'Continue'
 $script:WatchAgentExitRequested = $false
-$script:WatchAgentInMessageLoop = $false
 if (-not (Test-WatchAgentSystrayLive)) {
     Initialize-WatchAgentSystrayEarly
 }
@@ -3438,13 +1115,13 @@ if ($script:WatchAgentExitRequested) {
     exit 0
 }
 if (-not (Test-WatchAgentSystrayLive)) {
-    Write-WatchLog 'UI systray indisponible — abandon Run'
+    Write-WatchLog 'UI systray indisponible'
     exit 1
 }
-$script:WatchFullMenuInstalled = $false
 
+$script:WatchFullMenuInstalled = $false
 $script:WatchBootstrapTimer = New-Object System.Windows.Forms.Timer
-$script:WatchBootstrapTimer.Interval = 150
+$script:WatchBootstrapTimer.Interval = 200
 $script:WatchBootstrapTimer.Add_Tick((Register-WatchUiHandler {
         $script:WatchBootstrapTimer.Stop()
         $script:WatchBootstrapTimer.Dispose()
@@ -3456,15 +1133,15 @@ $script:WatchBootstrapTimer.Start()
 if (-not $script:HiddenForm.IsDisposed -and -not $script:HiddenForm.Visible) {
     [void]$script:HiddenForm.Show()
 }
+
 Write-WatchLog 'Application.Run(form)'
-$script:WatchAgentInMessageLoop = $true
 try {
     [System.Windows.Forms.Application]::Run($script:HiddenForm)
 }
 catch {
     Write-WatchLog ("Run: {0}" -f $_.Exception.Message)
-    try {
-        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Fresh Windows agent')
-    } catch { }
     throw
+}
+finally {
+    try { Hide-WatchConsole } catch { }
 }

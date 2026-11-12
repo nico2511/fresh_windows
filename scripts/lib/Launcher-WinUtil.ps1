@@ -160,31 +160,90 @@ function Invoke-MaintenanceReapply {
     Write-Host "=======================================================" -ForegroundColor Cyan
     Write-Host "       FRESH WINDOWS - MAINTENANCE HEBDO" -ForegroundColor Cyan
     Write-Host "=======================================================" -ForegroundColor Cyan
-    Write-Host "Étapes : 1) WinUtil one-click  2) ShutUp10 quiet" -ForegroundColor DarkGray
+    Write-Host "Etapes : 1) WinUtil  2) ShutUp10  3) Sync scripts  4) Temp  5) Rapport sante" -ForegroundColor DarkGray
     if ($logPath) {
         Write-Host "Log    : $logPath" -ForegroundColor DarkGray
     }
     Write-Host "Ref    : $RepoRef" -ForegroundColor DarkGray
 
-    Write-FreshStep -Title "[1/2] WinUtil one-click" -Detail "Standard + AppX + prefs + Ultimate Performance (peut prendre plusieurs minutes)" -Color Yellow
+    Write-FreshStep -Title "[1/5] WinUtil one-click" -Detail "Standard + AppX + prefs + Ultimate Performance (peut prendre plusieurs minutes)" -Color Yellow
     $wuOk = Invoke-WinUtilOneClick -NoPause
     if ($wuOk) {
-        Write-FreshStep -Title "[1/2] WinUtil - OK" -Color Green
+        Write-FreshStep -Title "[1/5] WinUtil - OK" -Color Green
     }
     else {
-        Write-FreshStep -Title "[1/2] WinUtil - ÉCHEC" -Color Red
+        Write-FreshStep -Title "[1/5] WinUtil - ÉCHEC" -Color Red
     }
 
-    Write-FreshStep -Title "[2/2] ShutUp10 quiet" -Detail "Import du cfg GitHub (sans GUI)" -Color Yellow
+    Write-FreshStep -Title "[2/5] ShutUp10 quiet" -Detail "Import du cfg GitHub (sans GUI)" -Color Yellow
     $suOk = Invoke-ShutUp10Recommended -NoPause
     if ($suOk) {
-        Write-FreshStep -Title "[2/2] ShutUp10 - OK" -Color Green
+        Write-FreshStep -Title "[2/5] ShutUp10 - OK" -Color Green
     }
     else {
-        Write-FreshStep -Title "[2/2] ShutUp10 - ÉCHEC" -Color Red
+        Write-FreshStep -Title "[2/5] ShutUp10 - ÉCHEC" -Color Red
     }
 
-    $ok = [bool]$wuOk -and [bool]$suOk
+    $syncOk = $true
+    $tempOk = $true
+    $healthOk = $true
+    try {
+        if (Get-Command Sync-GameModeLocalScripts -ErrorAction SilentlyContinue) {
+            Sync-GameModeLocalScripts -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl | Out-Null
+        }
+    }
+    catch {
+        Write-FreshStep -Title '[3/5] Sync scripts' -Detail $_.Exception.Message -Color Red
+        $syncOk = $false
+    }
+    if ($syncOk) { Write-FreshStep -Title '[3/5] Sync scripts - OK' -Color Green }
+
+    if (Get-Command Invoke-FreshMaintenanceTempCleanup -ErrorAction SilentlyContinue) {
+        $tc = Invoke-FreshMaintenanceTempCleanup -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl -NoPause
+        $tempOk = [bool]$tc.ok
+        $msg = if ($tc.message) { [string]$tc.message } else { '' }
+        $tempLabel = if ($tempOk) {
+            'OK'
+        }
+        elseif ($msg -match '(?i)winget') {
+            'differe (winget)'
+        }
+        elseif ($msg -match '(?i)Modules maintenance absents') {
+            'absent (modules)'
+        }
+        else {
+            'differe'
+        }
+        $tempColor = if ($tempOk) { 'Green' } else { 'DarkYellow' }
+        $tempDetail = $msg
+        Write-FreshStep -Title ("[4/5] Nettoyage temp - {0}" -f $tempLabel) -Detail $tempDetail -Color $tempColor
+    }
+    else {
+        Write-FreshStep -Title '[4/5] Nettoyage temp - skip (modules)' -Color DarkGray
+        $tempOk = $false
+    }
+
+    if (Get-Command Invoke-FreshMaintenanceWeeklyReport -ErrorAction SilentlyContinue) {
+        $wh = Invoke-FreshAgentWeeklyHealthReportIfDue -FreshAppData $FreshAppData
+        if (-not $wh -and (Import-FreshMaintenanceModules -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl)) {
+            $wh = Invoke-FreshAgentWeeklyHealthReportIfDue -FreshAppData $FreshAppData
+        }
+        $healthOk = [bool]($wh -and $wh.ok)
+        if ($healthOk) {
+            Write-FreshStep -Title ('[5/5] Rapport sante - {0}' -f $wh.message) -Color Green
+        }
+        elseif ($wh) {
+            Write-FreshStep -Title ('[5/5] Rapport sante - {0}' -f $wh.message) -Color DarkGray
+        }
+        else {
+            Write-FreshStep -Title '[5/5] Rapport sante - pas du (deja cette semaine)' -Color DarkGray
+        }
+    }
+    else {
+        Write-FreshStep -Title '[5/5] Rapport sante - skip (modules)' -Color DarkGray
+    }
+
+    $ok = [bool]$wuOk -and [bool]$suOk -and $syncOk -and $tempOk -and $healthOk
     Write-Host ""
     Write-Host "=======================================================" -ForegroundColor Cyan
     if ($ok) {

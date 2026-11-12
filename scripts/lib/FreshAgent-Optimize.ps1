@@ -80,19 +80,26 @@ function Invoke-FreshAgentCleanup {
         [void]$notes.Add($rp.message)
     }
     if ($Temp) {
-        foreach ($dir in @($env:TEMP, (Join-Path $env:WINDIR 'Temp'))) {
+        $tempDirs = @()
+        if (-not [string]::IsNullOrWhiteSpace($env:TEMP)) { $tempDirs += $env:TEMP }
+        if (-not [string]::IsNullOrWhiteSpace($env:WINDIR)) {
+            $tempDirs += (Join-Path $env:WINDIR 'Temp')
+        }
+        foreach ($dir in $tempDirs) {
             if (-not (Test-Path -LiteralPath $dir)) { continue }
-            try {
-                Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue |
-                    Where-Object { $_.Name -notmatch '^FreshWindows' } |
-                    ForEach-Object {
-                        try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue } catch { }
+            $skipped = 0
+            $removed = 0
+            Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    try {
+                        Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop
+                        $removed++
                     }
-                [void]$notes.Add("Temp nettoye: $dir")
-            }
-            catch {
-                [void]$notes.Add("Temp echoue: $dir")
-            }
+                    catch {
+                        $skipped++
+                    }
+                }
+            [void]$notes.Add(("Temp nettoye: {0} ({1} supprimes, {2} verrouilles/ignores)" -f $dir, $removed, $skipped))
         }
     }
     if ($RecycleBin) {
@@ -255,67 +262,4 @@ function Invoke-FreshAgentWeeklyHealthReportIfDue {
     $r = New-FreshAgentWeeklyHealthReport -FreshAppData $FreshAppData
     @{ at = (Get-Date).ToString('o') } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $FreshAppData 'weekly-health-last.json') -Encoding UTF8
     return $r
-}
-
-# --- Skill handlers ---
-
-function Invoke-SkillCleanup {
-    param(
-        $Temp = $true,
-        $RecycleBin = $false,
-        $WuCache = $false,
-        $Dism = $false,
-        $CreateRestorePoint = $true
-    )
-    # [bool]'false' vaut $true en PowerShell: parser les chaines explicitement.
-    $asBool = {
-        param($Value, [bool]$Default)
-        if (Get-Command ConvertTo-FreshAgentBool -ErrorAction SilentlyContinue) {
-            if ($null -eq $Value) { return $Default }
-            return (ConvertTo-FreshAgentBool -Value $Value -Default $Default)
-        }
-        if ($null -eq $Value) { return $Default }
-        if ($Value -is [bool]) { return [bool]$Value }
-        $s = ([string]$Value).Trim().ToLowerInvariant()
-        if ($s -match '^(1|true|yes|oui|on|vrai)$') { return $true }
-        if ($s -match '^(0|false|no|non|off|faux)$') { return $false }
-        return $Default
-    }
-    $doTemp = [bool](& $asBool $Temp $true)
-    $doRecycle = [bool](& $asBool $RecycleBin $false)
-    $doWu = [bool](& $asBool $WuCache $false)
-    $doDism = [bool](& $asBool $Dism $false)
-    $doRp = [bool](& $asBool $CreateRestorePoint $true)
-    return Invoke-FreshAgentCleanup -Temp:$doTemp -RecycleBin:$doRecycle -WuCache:$doWu -Dism:$doDism -CreateRestorePoint:$doRp
-}
-
-function Invoke-SkillAuditStartup {
-    $items = Get-FreshAgentStartupAudit
-    $top = $items | Select-Object -First 12
-    $msg = if ($top.Count -eq 0) { 'Aucune entree demarrage detectee.' } else {
-        ($top | ForEach-Object { '{0}: {1}' -f $_.Name, $_.Suggestion }) -join ' | '
-    }
-    return @{ ok = $true; message = $msg; items = $items }
-}
-
-function Invoke-SkillAuditServices {
-    param(
-        [string]$RepoRef = 'main',
-        [string]$FreshAppData = $(Get-FreshAgentAppDataRoot)
-    )
-    $items = Get-FreshAgentServicesAudit -RepoRef $RepoRef -FreshAppData $FreshAppData
-    $top = $items | Select-Object -First 10
-    $msg = ($top | ForEach-Object { '{0}: {1}' -f $_.Name, $_.Suggestion }) -join ' | '
-    if (-not $msg) { $msg = 'Aucun service auto a auditer.' }
-    return @{ ok = $true; message = $msg; items = $items }
-}
-
-function Invoke-SkillWeeklyHealthReport {
-    param([string]$FreshAppData = $(Get-FreshAgentAppDataRoot))
-    return New-FreshAgentWeeklyHealthReport -FreshAppData $FreshAppData
-}
-
-function Invoke-SkillCreateRestorePoint {
-    param([string]$Description = 'Fresh Agent')
-    return New-FreshAgentRestorePoint -Description $Description
 }

@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Sync complet agent Fresh Windows (mode jeu + Fresh Agent) vers %LOCALAPPDATA%\FreshWindows.
+  Sync scripts mode jeu + maintenance vers %LOCALAPPDATA%\FreshWindows.
 .PARAMETER RepoRef
   Branche / commit GitHub (defaut: scripts.ref, FRESH_WIN_REF ou main).
 #>
@@ -52,54 +52,33 @@ function Set-FreshScriptUtf8Bom {
     [System.IO.File]::WriteAllText($Path, $text, $utf8Bom)
 }
 
-foreach ($scriptName in @(
-        'GameMode-Common.ps1',
-        'Invoke-GameModeKill.ps1',
-        'GameMode-WatchAgent.ps1',
-        'Stop-FreshWatchAgent.ps1',
-        'Sync-FreshWindowsAgent.ps1',
-        'Invoke-FreshWindowsBackgroundAudit.ps1'
-    )) {
-    $dest = Join-Path $FreshAppData $scriptName
-    $url = "$RepoRawRoot/scripts/$scriptName"
-    Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
-    Set-FreshScriptUtf8Bom -Path $dest
-}
-
-$configLib = Join-Path $FreshAppData 'lib\FreshAgent-Config.ps1'
-$configUrl = "$RepoRawRoot/scripts/lib/FreshAgent-Config.ps1"
-New-Item -ItemType Directory -Path (Split-Path $configLib -Parent) -Force | Out-Null
-Invoke-WebRequest -Uri $configUrl -OutFile $configLib -UseBasicParsing
-Set-FreshScriptUtf8Bom -Path $configLib
-. $configLib
-
-$logLib = Join-Path $FreshAppData 'lib\FreshAgent-Log.ps1'
-try {
-    Invoke-WebRequest -Uri "$RepoRawRoot/scripts/lib/FreshAgent-Log.ps1" -OutFile $logLib -UseBasicParsing
-    Set-FreshScriptUtf8Bom -Path $logLib
-    . $logLib
-}
-catch { }
-
-Sync-FreshAgentLocalAssets -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef | Out-Null
-Set-Content -LiteralPath (Join-Path $FreshAppData 'scripts.ref') -Value $RepoRef -Encoding UTF8 -NoNewline
-
-$coreLib = Join-Path $FreshAppData 'lib\Launcher-Core.ps1'
+$libDir = Join-Path $FreshAppData 'lib'
+New-Item -ItemType Directory -Path $libDir -Force | Out-Null
+$coreLib = Join-Path $libDir 'Launcher-Core.ps1'
 $coreUrl = "$RepoRawRoot/scripts/lib/Launcher-Core.ps1"
 try {
-    New-Item -ItemType Directory -Path (Split-Path $coreLib -Parent) -Force | Out-Null
     Invoke-WebRequest -Uri $coreUrl -OutFile $coreLib -UseBasicParsing
     Set-FreshScriptUtf8Bom -Path $coreLib
+    Set-Content -LiteralPath (Join-Path $libDir 'Launcher-Core.ps1.ref') -Value $RepoRef -Encoding UTF8 -NoNewline
     . $coreLib
     Sync-GameModeLocalScripts -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef | Out-Null
-    Write-Host '-> Launch-GameModeWatch.ps1 + Start-WatchAgent.cmd' -ForegroundColor DarkGray
 }
 catch {
-    Write-Host "!! Stub watch agent : $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "!! Sync local partiel : $($_.Exception.Message)" -ForegroundColor Yellow
+    foreach ($scriptName in @(
+            'GameMode-Common.ps1',
+            'Invoke-GameModeKill.ps1',
+            'GameMode-WatchAgent.ps1',
+            'Stop-FreshWatchAgent.ps1',
+            'Sync-FreshWindowsAgent.ps1',
+            'Invoke-FreshWindowsBackgroundAudit.ps1'
+        )) {
+        $dest = Join-Path $FreshAppData $scriptName
+        $url = "$RepoRawRoot/scripts/$scriptName"
+        Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+        Set-FreshScriptUtf8Bom -Path $dest
+    }
+    Set-Content -LiteralPath (Join-Path $FreshAppData 'scripts.ref') -Value $RepoRef -Encoding UTF8 -NoNewline
 }
 
-if (Get-Command Write-FreshAgentLog -ErrorAction SilentlyContinue) {
-    Write-FreshAgentLog -Category 'Sync' -Message "Sync-FreshWindowsAgent.ps1 termine (ref $RepoRef)" -FreshAppData $FreshAppData
-}
-
-Write-Host "Sync Fresh Agent OK (ref $RepoRef) -> $FreshAppData" -ForegroundColor Green
+Write-Host "Sync Fresh Windows OK (ref $RepoRef) -> $FreshAppData" -ForegroundColor Green

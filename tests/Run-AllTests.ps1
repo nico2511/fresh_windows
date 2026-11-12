@@ -6,21 +6,14 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSCommandPath -Parent
 $failed = 0
+. (Join-Path $root 'lib/FreshWindows-RunAggregate.ps1')
 
 Write-Host "=== Validate-Configs ===" -ForegroundColor Cyan
 & (Join-Path $root 'Validate-Configs.ps1')
 if ($LASTEXITCODE -ne 0) { $failed++ }
 
-Write-Host "`n=== Validate-SkillsRegistry ===" -ForegroundColor Cyan
-& (Join-Path $root 'Validate-SkillsRegistry.ps1')
-if ($LASTEXITCODE -ne 0) { $failed++ }
-
 Write-Host "`n=== Parse-Scripts ===" -ForegroundColor Cyan
 & (Join-Path $root 'Parse-Scripts.ps1')
-if ($LASTEXITCODE -ne 0) { $failed++ }
-
-Write-Host "`n=== Smoke-VoiceHealth ===" -ForegroundColor Cyan
-& (Join-Path $root 'Smoke-VoiceHealth.ps1')
 if ($LASTEXITCODE -ne 0) { $failed++ }
 
 $pesterMods = @(Get-Module -ListAvailable -Name Pester |
@@ -41,20 +34,13 @@ if ($pesterMod) {
         'Launcher-Iex.Tests.ps1',
         'Launcher-Tasks.Tests.ps1',
         'Launcher-Core.Tests.ps1',
-        'FreshAgent-OllamaBridge.Tests.ps1',
-        'FreshAgent-Inventory.Tests.ps1',
-        'FreshAgent-Rag.Tests.ps1',
-        'FreshAgent-Config.Tests.ps1',
-        'FreshAgent-VoiceRouter.Tests.ps1',
-        'FreshAgent-Ptt.Tests.ps1',
-        'FreshAgent-SttMode.Tests.ps1',
-        'FreshAgent-Health.Tests.ps1',
-        'FreshAgent-Safety.Tests.ps1',
         'Appx-Bloatware.Tests.ps1',
-        'Windows-Stt.Tests.ps1',
         'FreshWindows-BackgroundAudit.Tests.ps1',
-        'FreshAgent-RamLazyLoad.Tests.ps1',
-        'FreshAgent-VoicePrivacy.Tests.ps1',
+        'Remove-FreshWindowsObsoleteLocalAssets.Tests.ps1',
+        'FreshMaintenance-Menu.Tests.ps1',
+        'FreshWatchAgent-SystrayCleanup.Tests.ps1',
+        'FreshWatchAgent-Mutex.Tests.ps1',
+        'Run-AllTests.Aggregate.Tests.ps1',
         'Uninstall-FreshWindows.Tests.ps1'
     )
     foreach ($pesterFile in $pesterFiles) {
@@ -63,17 +49,12 @@ if ($pesterMod) {
         Write-Host "`n=== Pester $pesterFile ===" -ForegroundColor Cyan
         $pesterConfig.Run.Path = $path
         $result = Invoke-Pester -Configuration $pesterConfig
-        # Sans PassThru, Invoke-Pester (Pester 5) renvoie $null et le job reste vert.
         if ($null -eq $result) {
             Write-Host "Pester n'a pas renvoye de resultat pour $pesterFile." -ForegroundColor Red
             $failed++
             continue
         }
-        $badCount = 0
-        try { $badCount = [int]$result.FailedCount } catch { $badCount = 1 }
-        $resultName = ''
-        try { $resultName = [string]$result.Result } catch { }
-        if ($badCount -gt 0 -or $resultName -eq 'Failed') { $failed++ }
+        if (Test-FreshWindowsPesterSuiteFailed -Result $result) { $failed++ }
     }
 }
 else {

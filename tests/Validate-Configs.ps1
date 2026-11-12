@@ -31,14 +31,15 @@ $requiredJson = @(
     'extensions-firefox-based.json',
     'extensions-chrome-based.json',
     'game-mode-kill.json',
-    'game-mode-watch.json',
     'gpu.json',
     'powertoys-profile.json',
     'winutil-appx.json',
     'winutil-oneclick.json',
     'winutil-brave-debloat.json',
     'brave-optimize.json',
-    'appx-bloatware.json'
+    'appx-bloatware.json',
+    'game-mode-watch.json',
+    'maintenance-content.json'
 )
 
 foreach ($name in $requiredJson) {
@@ -208,16 +209,19 @@ if (Test-Path -LiteralPath $killPath) {
                 Fail 'game-mode-kill.json : Bitwarden manquant dans domains'
             }
             elseif (-not $kill.protect.ai_runtime) {
-                Fail 'game-mode-kill.json : protect.ai_runtime manquant (Ollama / STT)'
+                Fail 'game-mode-kill.json : protect.ai_runtime manquant'
             }
             else {
+                $aiLocal = @()
+                if ($kill.domains.ai_local) { $aiLocal = @($kill.domains.ai_local) }
+                $hasOllamaKill = ($aiLocal | Where-Object { $_ -match '^(?i)ollama$' }).Count -gt 0
                 $aiProt = @($kill.protect.ai_runtime | Where-Object { $_ })
-                $hasOllama = $false
-                foreach ($n in $aiProt) {
-                    if ($n -match 'ollama') { $hasOllama = $true }
+                $ollamaProtected = ($aiProt | Where-Object { $_ -match 'ollama' }).Count -gt 0
+                if (-not $hasOllamaKill) {
+                    Fail 'game-mode-kill.json : ollama manquant dans domains.ai_local (ferme en mode jeu)'
                 }
-                if (-not $hasOllama) {
-                    Fail 'game-mode-kill.json : ollama manquant dans protect.ai_runtime'
+                if ($ollamaProtected) {
+                    Fail 'game-mode-kill.json : ollama ne doit pas etre dans protect.ai_runtime (incoherent avec mode jeu)'
                 }
                 Ok ("game-mode-kill.json ({0} kill, {1} protect entries, {2} launcher names)" -f $names.Count, $prot, $launcherCount)
             }
@@ -309,58 +313,40 @@ if (Test-Path -LiteralPath $gpuPath) {
     }
 }
 
-$agentAiPath = Join-Path $configs 'agent-ai.json'
-if (Test-Path -LiteralPath $agentAiPath) {
-    $ai = Get-Content -LiteralPath $agentAiPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($null -eq $ai.enabled) {
-        Fail 'agent-ai.json : enabled manquant'
-    }
-    elseif (-not $ai.ollama -or -not $ai.ollama.defaultModel) {
-        Fail 'agent-ai.json : ollama.defaultModel manquant'
-    }
-    elseif ($ai.stt.provider -ne 'windows' -and $ai.stt.provider -ne 'cyberScribe' -and $ai.stt.provider -ne 'voiceWorker' -and $ai.stt.provider -ne 'off') {
-        Fail 'agent-ai.json : stt.provider doit etre voiceWorker, windows, cyberScribe ou off'
-    }
-    elseif ($ai.tts.provider -ne 'off' -and $ai.tts.provider -ne 'edge' -and $ai.tts.provider -ne 'windows' -and $ai.tts.provider -ne 'piper') {
-        Fail 'agent-ai.json : tts.provider doit etre off, edge, windows ou piper'
-    }
-    elseif ($ai.stt.provider -eq 'windows' -and $null -eq $ai.stt.listenSeconds) {
-        Fail 'agent-ai.json : stt.listenSeconds manquant (windows)'
+$watchPath = Join-Path $configs 'game-mode-watch.json'
+if (Test-Path -LiteralPath $watchPath) {
+    $w = Get-Content -LiteralPath $watchPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($null -eq $w.pollIntervalSeconds -or $null -eq $w.cpuThresholdPercent) {
+        Fail 'game-mode-watch.json : seuils agent maintenance manquants'
     }
     else {
-        Ok ("agent-ai.json (enabled=$($ai.enabled), model=$($ai.ollama.defaultModel), stt=$($ai.stt.provider))")
+        Ok 'game-mode-watch.json structure OK'
     }
 }
-else {
-    Fail 'agent-ai.json manquant'
-}
 
-$skillsReg = Join-Path $configs 'skills\registry.json'
-if (Test-Path -LiteralPath $skillsReg) {
-    $reg = Get-Content -LiteralPath $skillsReg -Raw -Encoding UTF8 | ConvertFrom-Json
-    if (-not $reg.skills -or @($reg.skills).Count -lt 1) {
-        Fail 'skills/registry.json : liste skills vide'
+$mcPath = Join-Path $configs 'maintenance-content.json'
+$launcherPath = Join-Path $root 'launcher.ps1'
+$corePath = Join-Path $root 'scripts/lib/Launcher-Core.ps1'
+if ((Test-Path -LiteralPath $mcPath) -and (Test-Path -LiteralPath $launcherPath) -and (Test-Path -LiteralPath $corePath)) {
+    $mc = Get-Content -LiteralPath $mcPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  if ($null -eq $mc.epoch) {
+        Fail 'maintenance-content.json : epoch manquant'
     }
     else {
-        Ok ("skills/registry.json ({0} skills)" -f @($reg.skills).Count)
+        $le = ''
+        $ce = ''
+        $lr = Get-Content -LiteralPath $launcherPath -Raw -Encoding UTF8
+        $cr = Get-Content -LiteralPath $corePath -Raw -Encoding UTF8
+        if ($lr -match 'FreshWindowsLibEpoch\s*=\s*(\d+)') { $le = $Matches[1] }
+        if ($cr -match 'FreshWindowsLibEpoch\s*=\s*(\d+)') { $ce = $Matches[1] }
+        $me = [string]$mc.epoch
+        if ($le -ne $ce -or $le -ne $me) {
+            Fail ("maintenance-content epoch {0} != launcher {1} / core {2}" -f $me, $le, $ce)
+        }
+        else {
+            Ok ("maintenance-content.json epoch {0} aligne launcher/core" -f $me)
+        }
     }
-}
-else {
-    Fail 'skills/registry.json manquant'
-}
-
-$profilesPath = Join-Path $configs 'agent-profiles.json'
-if (Test-Path -LiteralPath $profilesPath) {
-    $prof = Get-Content -LiteralPath $profilesPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    if (-not $prof.profiles) { Fail 'agent-profiles.json : profiles manquant' }
-    else { Ok 'agent-profiles.json' }
-}
-
-$svcPath = Join-Path $configs 'services-allowlist.json'
-if (Test-Path -LiteralPath $svcPath) {
-    $svc = Get-Content -LiteralPath $svcPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    if (-not $svc.services -or @($svc.services).Count -lt 1) { Fail 'services-allowlist.json vide' }
-    else { Ok 'services-allowlist.json' }
 }
 
 Write-Host ""

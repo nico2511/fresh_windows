@@ -8,7 +8,7 @@
 #    Apps : standard | gaming | dev | custom | custom:<nom> | full
 #    WinUtil : winutil-oneclick | winutil-standard | winutil-minimal |
 #              winutil-advanced | winutil-appx | appx-bloatware | appx-bloatware-apply | maintenance
-#    Autre : tasks | game-mode | game-mode-shortcuts | game-mode-watch |
+#    Autre : tasks | game-mode | game-mode-shortcuts |
 #            background-audit | powertoys-profile | shutup10 | brave-optimize | brave-debloat | betterzen
 #
 #  Pin de version (commit / tag / branche) :
@@ -72,7 +72,7 @@ $FreshAppData = Join-Path $env:LOCALAPPDATA "FreshWindows"
 $CustomAppsLocalDir = Join-Path $FreshAppData "apps-custom"
 $script:FreshBrand = "Fresh Windows"
 # Incrementer quand les libs changent alors que FRESH_WIN_REF reste "main" (sinon cache perime)
-$script:FreshWindowsLibEpoch = 59
+$script:FreshWindowsLibEpoch = 61
 
 function Ensure-FreshWindowsExecutionPolicy {
     <#
@@ -207,7 +207,7 @@ try {
     }
 
     # Cache "main" sans epoch = libs d'avant le merge : forcer un re-telechargement
-    if (-not (Get-Command Register-FreshWindowsWatchAgentLogon -ErrorAction SilentlyContinue)) {
+    if (-not (Get-Command Open-FreshWindowsUninstallMenu -ErrorAction SilentlyContinue)) {
         Write-Host "Cache libs obsolete -> re-telechargement force..." -ForegroundColor Yellow
         $libPaths = @()
         foreach ($name in $script:FreshWindowsLibFiles) {
@@ -248,26 +248,24 @@ catch {
     exit 1
 }
 
-# Install existante: scripts.ref = "main" ne voit pas les nouveaux fichiers agent.
-# L'epoch du launcher (frais via irm) force un sync tant que scripts.stamp ne suit pas.
+# Install existante : epoch launcher (via irm) force sync + nettoyage artefacts obsoletes.
 try {
-    $agentRefFile = Join-Path $FreshAppData 'scripts.ref'
-    if (Test-Path -LiteralPath $agentRefFile) {
-        $agentRef = (Get-Content -LiteralPath $agentRefFile -Raw -Encoding UTF8).Trim()
-        $agentStampFile = Join-Path $FreshAppData 'scripts.stamp'
-        $agentStamp = ''
-        if (Test-Path -LiteralPath $agentStampFile) {
-            $agentStamp = (Get-Content -LiteralPath $agentStampFile -Raw -Encoding UTF8).Trim()
+    $scriptsRefFile = Join-Path $FreshAppData 'scripts.ref'
+    if (Test-Path -LiteralPath $scriptsRefFile) {
+        $storedRef = (Get-Content -LiteralPath $scriptsRefFile -Raw -Encoding UTF8).Trim()
+        $stampFile = Join-Path $FreshAppData 'scripts.stamp'
+        $localStamp = ''
+        if (Test-Path -LiteralPath $stampFile) {
+            $localStamp = (Get-Content -LiteralPath $stampFile -Raw -Encoding UTF8).Trim()
         }
-        $agentDev = ($agentRef -eq 'local-dev') -or (Test-Path -LiteralPath (Join-Path $FreshAppData 'repo.root'))
-        if (-not $agentDev -and $agentStamp -ne [string]$script:FreshWindowsLibEpoch) {
-            Write-Host "Scripts agent perimes (stamp '$agentStamp', epoch $($script:FreshWindowsLibEpoch)) -> sync." -ForegroundColor Yellow
+        if ($localStamp -ne [string]$script:FreshWindowsLibEpoch) {
+            Write-Host "Scripts locaux perimes (stamp '$localStamp', epoch $($script:FreshWindowsLibEpoch)) -> sync." -ForegroundColor Yellow
             Sync-GameModeLocalScripts -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl | Out-Null
         }
     }
 }
 catch {
-    Write-Host "Sync agent (epoch) ignore : $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "Sync scripts locaux (epoch) ignore : $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
 # Toujours definir ici (irm | iex) : independant du cache Core CDN
@@ -278,74 +276,6 @@ function Test-FreshWindowsIsElevated {
         return $pr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     }
     catch { return $false }
-}
-
-function Register-FreshWindowsWatchAgentLogon {
-    param(
-        [Parameter(Mandatory)][string]$FreshAppData
-    )
-
-    $taskName = 'FreshWindows-WatchAgent'
-    $cmdPath = Join-Path $FreshAppData 'Start-WatchAgent.cmd'
-    if (-not (Test-Path -LiteralPath $cmdPath)) {
-        throw "Start-WatchAgent.cmd introuvable."
-    }
-
-    # Deja presente et pointe vers le .cmd -> OK (evite Acces refuse en admin sur -Force)
-    $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-    if ($existing) {
-        foreach ($a in @($existing.Actions)) {
-            $exe = [string]$a.Execute
-            if ($exe -and ($exe -eq $cmdPath -or $exe -like '*Start-WatchAgent.cmd*')) {
-                return $taskName
-            }
-        }
-    }
-
-    $helperPs1 = Join-Path $FreshAppData 'Register-WatchAgentTask.ps1'
-    $helperCmd = Join-Path $FreshAppData 'Register-WatchAgentTask.cmd'
-    @"
-#Requires -Version 5.1
-`$ErrorActionPreference = 'Stop'
-`$taskName = 'FreshWindows-WatchAgent'
-`$dir = if (`$PSScriptRoot) { `$PSScriptRoot } else { Split-Path -Parent `$MyInvocation.MyCommand.Path }
-`$cmdPath = Join-Path `$dir 'Start-WatchAgent.cmd'
-Unregister-ScheduledTask -TaskName `$taskName -Confirm:`$false -ErrorAction SilentlyContinue
-`$action = New-ScheduledTaskAction -Execute `$cmdPath -WorkingDirectory `$dir
-`$trigger = New-ScheduledTaskTrigger -AtLogOn -User `$env:USERNAME
-`$trigger.Delay = 'PT45S'
-`$principal = New-ScheduledTaskPrincipal -UserId `$env:USERNAME -LogonType Interactive -RunLevel Limited
-`$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -DontStopOnIdleEnd
-Register-ScheduledTask -TaskName `$taskName -Action `$action -Trigger `$trigger -Principal `$principal -Settings `$settings -Description 'Fresh Windows agent tray (Limited).' -Force | Out-Null
-"@ | Set-Content -LiteralPath $helperPs1 -Encoding UTF8
-
-    @"
-@echo off
-"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%~dp0Register-WatchAgentTask.ps1"
-"@ | Set-Content -LiteralPath $helperCmd -Encoding ASCII
-
-    if (-not (Test-FreshWindowsIsElevated)) {
-        & $helperPs1
-        return $taskName
-    }
-
-    # Admin : Limited refuse souvent Register-ScheduledTask -Force -> enfant sans elevation
-    Start-Process -FilePath "$env:SystemRoot\System32\runas.exe" `
-        -ArgumentList "/trustlevel:0x20000 `"$helperCmd`"" `
-        -Wait -WindowStyle Hidden | Out-Null
-    Start-Sleep -Milliseconds 800
-
-    if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
-        return $taskName
-    }
-
-    $null = & "$env:SystemRoot\System32\schtasks.exe" /Delete /TN $taskName /F 2>&1
-    $create = & "$env:SystemRoot\System32\schtasks.exe" /Create /TN $taskName /TR "`"$cmdPath`"" /SC ONLOGON /RL LIMITED /F 2>&1
-    if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
-        return $taskName
-    }
-
-    throw ("Acces refuse pour la tache Limited. Startup .lnk reste actif. Detail: {0}" -f ($create | Out-String).Trim())
 }
 
 function Install-FullSetup {
@@ -1314,9 +1244,9 @@ function Show-Menu {
     Write-Host " 9  Taches planifiees (MAJ + maintenance + sync scripts)" -ForegroundColor DarkCyan
     Write-Host "10  GPU / Chipset (AMD, NVIDIA, Intel DSA)" -ForegroundColor DarkYellow
     Write-Host "--- Mode jeu ---" -ForegroundColor DarkCyan
-    Write-Host "11  Mode jeu (lancer / raccourci / agent)" -ForegroundColor Red
+    Write-Host "11  Mode jeu (lancer / raccourci / agent maintenance)" -ForegroundColor Red
     Write-Host "--- Maintenance ---" -ForegroundColor DarkCyan
-    Write-Host "12  Desinstallation (agent, taches, cache local)" -ForegroundColor DarkYellow
+    Write-Host "12  Desinstallation (taches, cache local)" -ForegroundColor DarkYellow
     Write-Host " 0  Quitter" -ForegroundColor DarkGray
     Write-Host ""
 }
@@ -1333,7 +1263,7 @@ function Invoke-GameModeKill {
     param([switch]$NoPause)
 
     Write-Host "`n=== MODE JEU - fermeture processus lourds ===" -ForegroundColor Red
-    Write-Host "Kill : dev / IA / sync / Bitwarden / ... Discord & Legcord proteges." -ForegroundColor DarkGray
+    Write-Host "Kill : dev / lourds / sync / Bitwarden / ... Discord & Legcord proteges." -ForegroundColor DarkGray
     Write-Host "Launchers : familles (EA/Steam/...) - session active jamais tuee." -ForegroundColor DarkGray
 
     if (-not (Import-GameModeCommon)) {
@@ -1379,13 +1309,10 @@ function Invoke-GameModeKill {
 
 function Test-WatchAgentAlreadyInstalled {
     param([string]$FreshAppData)
-
     $cmdPath = Join-Path $FreshAppData 'Start-WatchAgent.cmd'
     if (-not (Test-Path -LiteralPath $cmdPath)) { return $false }
-
     $task = Get-ScheduledTask -TaskName 'FreshWindows-WatchAgent' -ErrorAction SilentlyContinue
     if (-not $task) { return $false }
-
     foreach ($a in @($task.Actions)) {
         $exe = [string]$a.Execute
         if ($exe -and ($exe -eq $cmdPath -or $exe -like '*Start-WatchAgent.cmd*')) {
@@ -1432,45 +1359,50 @@ function Install-GameModeShortcuts {
     Write-Host "-> Raccourci Bureau : Mode Jeu.lnk (sans admin)" -ForegroundColor Green
 
     if ($IncludeWatchAgent) {
-        # Retirer l'ancien Startup .lnk (cause du double agent avec la tache)
-        $startup = [Environment]::GetFolderPath('Startup')
-        $lnkWatch = Join-Path $startup "Fresh Windows Surveillance.lnk"
-        if (Test-Path -LiteralPath $lnkWatch) {
-            Remove-Item -LiteralPath $lnkWatch -Force -ErrorAction SilentlyContinue
-            Write-Host "-> Ancien raccourci Startup retire (evite double icone)." -ForegroundColor DarkGray
-        }
-
-        if (Test-WatchAgentAlreadyInstalled -FreshAppData $FreshAppData) {
-            Write-Host "-> Agent deja installe (tache FreshWindows-WatchAgent) - skip creation." -ForegroundColor Green
+        if (-not (Get-Command Register-FreshWindowsWatchAgentLogon -ErrorAction SilentlyContinue)) {
+            Write-Host "Launcher-Core incomplet : impossible d'enregistrer l'agent." -ForegroundColor Red
         }
         else {
+            $startup = [Environment]::GetFolderPath('Startup')
+            $lnkWatch = Join-Path $startup "Fresh Windows Surveillance.lnk"
+            if (Test-Path -LiteralPath $lnkWatch) {
+                Remove-Item -LiteralPath $lnkWatch -Force -ErrorAction SilentlyContinue
+            }
+            if (Test-WatchAgentAlreadyInstalled -FreshAppData $FreshAppData) {
+                Write-Host "-> Agent deja installe (tache FreshWindows-WatchAgent)." -ForegroundColor Green
+                if (Test-Path -LiteralPath $lnkWatch) {
+                    Remove-Item -LiteralPath $lnkWatch -Force -ErrorAction SilentlyContinue
+                }
+            }
+            else {
+                try {
+                    $taskName = Register-FreshWindowsWatchAgentLogon -FreshAppData $FreshAppData
+                    Write-Host "-> Tache : $taskName (AtLogOn Limited, delai 45s)" -ForegroundColor Green
+                    if (Test-Path -LiteralPath $lnkWatch) {
+                        Remove-Item -LiteralPath $lnkWatch -Force -ErrorAction SilentlyContinue
+                    }
+                }
+                catch {
+                    Write-Host "Tache non creee : $($_.Exception.Message)" -ForegroundColor DarkYellow
+                    $w = $wsh.CreateShortcut($lnkWatch)
+                    $w.TargetPath = Join-Path $FreshAppData 'Start-WatchAgent.cmd'
+                    $w.WorkingDirectory = $FreshAppData
+                    $w.WindowStyle = 7
+                    $w.Description = 'Agent maintenance Fresh Windows (fallback Startup)'
+                    if (Test-Path -LiteralPath $iconPath) { $w.IconLocation = "$iconPath,0" }
+                    $w.Save()
+                    Write-Host "-> Fallback Startup : Fresh Windows Surveillance.lnk" -ForegroundColor Yellow
+                }
+            }
             try {
-                $taskName = Register-FreshWindowsWatchAgentLogon -FreshAppData $FreshAppData
-                Write-Host "-> Tache planifiee : $taskName (AtLogOn Limited, delai 45s)" -ForegroundColor Green
+                $started = Start-FreshWindowsUnelevated -FilePath $watchStub -WorkingDirectory $FreshAppData
+                if ($started) {
+                    Write-Host "Agent lance (systray Fresh Maintenance)." -ForegroundColor DarkCyan
+                }
             }
             catch {
-                Write-Host "Tache planifiee non creee : $($_.Exception.Message)" -ForegroundColor DarkYellow
-                # Fallback Startup uniquement si la tache echoue
-                $w = $wsh.CreateShortcut($lnkWatch)
-                $cmdWatch = Join-Path $FreshAppData 'Start-WatchAgent.cmd'
-                $w.TargetPath = $cmdWatch
-                $w.Arguments = ''
-                $w.WorkingDirectory = $FreshAppData
-                $w.WindowStyle = 7
-                $w.Description = "Agent Fresh Windows (fallback Startup)"
-                if (Test-Path -LiteralPath $iconPath) { $w.IconLocation = "$iconPath,0" }
-                $w.Save()
-                Write-Host "-> Fallback Startup : Fresh Windows Surveillance.lnk" -ForegroundColor Yellow
+                Write-Host "Lancement immediat echoue : $($_.Exception.Message)" -ForegroundColor DarkYellow
             }
-        }
-
-        Write-Host "  Clic droit sur l'icone pour Detection auto." -ForegroundColor DarkGray
-        try {
-            Start-FreshWindowsUnelevated -FilePath $watchStub -WorkingDirectory $FreshAppData
-            Write-Host "Agent lance maintenant (sans elevation). Fleche ^ si icone cachee." -ForegroundColor DarkCyan
-        }
-        catch {
-            Write-Host "Raccourci OK, mais lancement immediat echoue : $($_.Exception.Message)" -ForegroundColor DarkYellow
         }
     }
 
@@ -1481,38 +1413,39 @@ function Install-GameModeShortcuts {
 function Open-GameModeSetupMenu {
     do {
         Clear-Host
-        Write-Host "=== MODE JEU ===" -ForegroundColor Red
+        Write-Host "=== MODE JEU & MAINTENANCE ===" -ForegroundColor Red
         Write-Host "Scripts dans %LOCALAPPDATA%\FreshWindows (ref $RepoRef)." -ForegroundColor DarkGray
         Write-Host ""
         Write-Host "1. Lancer le mode jeu maintenant" -ForegroundColor Red
         Write-Host "2. Raccourci Bureau Mode Jeu" -ForegroundColor Green
-        Write-Host "3. Agent au demarrage (+ lancer maintenant)" -ForegroundColor Cyan
-        Write-Host "4. Retour" -ForegroundColor DarkGray
+        Write-Host "3. Agent maintenance au demarrage (+ lancer maintenant)" -ForegroundColor Cyan
+        Write-Host "4. Nettoyage fichiers temporaires (menu maintenance)" -ForegroundColor Yellow
+        Write-Host "5. Rapport sante hebdomadaire" -ForegroundColor Yellow
+        Write-Host "6. Retour" -ForegroundColor DarkGray
         Write-Host ""
         $sub = Read-Host "Choix"
         switch ($sub) {
             "1" { Invoke-GameModeKill | Out-Null }
             "2" { Install-GameModeShortcuts | Out-Null }
             "3" { Install-GameModeShortcuts -IncludeWatchAgent | Out-Null }
-            "4" { return }
+            "4" {
+                Write-Host 'Si winget est en cours, attente jusqu a 15 min puis nettoyage ou report.' -ForegroundColor DarkGray
+                $r = Invoke-FreshMaintenanceTempCleanup -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl -NoPause
+                Write-Host $r.message -ForegroundColor $(if ($r.ok) { 'Green' } else { 'Yellow' })
+                Wait-ForUser
+            }
+            "5" {
+                $r = Invoke-FreshMaintenanceWeeklyReport -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl
+                Write-Host $r.message -ForegroundColor $(if ($r.ok) { 'Green' } else { 'Yellow' })
+                Wait-ForUser
+            }
+            "6" { return }
             default {
                 Write-Host "Choix invalide" -ForegroundColor Red
                 Start-Sleep 1
             }
         }
     } while ($true)
-}
-
-function Start-GameModeWatchAgent {
-    param([switch]$NoPause)
-
-    $ok = Install-GameModeShortcuts -NoPause -IncludeWatchAgent
-    if (-not $ok) {
-        if (-not $NoPause) { Wait-ForUser }
-        return $false
-    }
-    if (-not $NoPause) { Wait-ForUser }
-    return $true
 }
 
 function Invoke-SilentMode {
@@ -1611,9 +1544,6 @@ function Invoke-SilentMode {
             }
             "game-mode-shortcuts" {
                 $ok = [bool](Install-GameModeShortcuts -NoPause)
-            }
-            "game-mode-watch" {
-                $ok = [bool](Start-GameModeWatchAgent -NoPause)
             }
             "powertoys-profile" {
                 $ok = [bool](Apply-PowerToysProfile)

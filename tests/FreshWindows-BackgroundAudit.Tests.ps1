@@ -10,8 +10,12 @@ Describe 'FreshWindows background audit' {
             $root = Split-Path -Parent $here
         }
         $script:RepoRoot = $root
-        . (Join-Path $root 'scripts\lib\FreshWindows-BackgroundAudit.ps1')
-        $script:Tmp = Join-Path $env:TEMP ('FreshBgAudit-{0}' -f [guid]::NewGuid().ToString('N'))
+        . (Join-Path $root 'scripts/lib/FreshWindows-BackgroundAudit.ps1')
+        $tempRoot = $env:TEMP
+        if ([string]::IsNullOrWhiteSpace($tempRoot) -or $tempRoot -match '^:') {
+            $tempRoot = if ($env:TMP -and $env:TMP -notmatch '^:') { $env:TMP } else { '/tmp' }
+        }
+        $script:Tmp = Join-Path $tempRoot ('FreshBgAudit-{0}' -f [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $script:Tmp -Force | Out-Null
     }
 
@@ -40,27 +44,35 @@ Describe 'FreshWindows background audit' {
         Test-Path -LiteralPath (Join-Path $script:Tmp 'r.txt') | Should -Be $true
     }
 
-    It 'apply and restore are symmetric for prefs (mocked tasks)' {
-        $disable = { param($tn) }
-        $enable = { param($tn) }
-        $targets = @('prefs-monitor-off', 'prefs-ai-off', 'prefs-voice-off')
-        $r1 = Invoke-FreshWindowsBackgroundAudit -Apply -NoConfirm -TargetIds $targets `
-            -FreshAppData $script:Tmp -ScheduledTaskDisable $disable -ScheduledTaskEnable $enable
-        $r1.mode | Should -Be 'apply'
-        ($r1.results | Where-Object { $_.ok }).Count | Should -Be 3
+    It 'apply and restore are symmetric for scheduled tasks (mocked)' {
+        $script:DisableCalls = [System.Collections.ArrayList]@()
+        $script:EnableCalls = [System.Collections.ArrayList]@()
+        $disable = {
+            param($tn)
+            [void]$script:DisableCalls.Add([string]$tn)
+        }
+        $enable = {
+            param($tn)
+            [void]$script:EnableCalls.Add([string]$tn)
+        }
+        $script:MockTaskState = @{ present = $true; state = 'Ready'; lastRun = $null; nextRun = $null }
+        function Get-FreshWindowsBackgroundScheduledTaskState {
+            param([Parameter(Mandatory)][string]$TaskName)
+            if (-not (Test-FreshWindowsScheduledTaskIsFresh -TaskName $TaskName)) {
+                throw "Tache hors perimetre Fresh Windows : $TaskName"
+            }
+            return $script:MockTaskState
+        }
 
-        $watchPath = Join-Path $script:Tmp 'watch-agent-user.json'
-        $aiPath = Join-Path $script:Tmp 'agent-ai.user.json'
-        (Get-Content -LiteralPath $watchPath -Raw | ConvertFrom-Json).monitorEnabled | Should -Be $false
-        (Get-Content -LiteralPath $aiPath -Raw | ConvertFrom-Json).enabled | Should -Be $false
-        (Get-Content -LiteralPath $aiPath -Raw | ConvertFrom-Json).voice.enabled | Should -Be $false
+        $r1 = Invoke-FreshWindowsBackgroundCatalogApply -TargetId 'scheduled-task-winutil' `
+            -FreshAppData $script:Tmp -ScheduledTaskDisable $disable -ScheduledTaskEnable $enable
+        $r1.ok | Should -Be $true
+        $script:DisableCalls | Should -Contain 'FreshWindows-WinUtilReapply'
 
         $rr = Restore-FreshWindowsBackgroundFromJournal -FreshAppData $script:Tmp -ScheduledTaskEnable $enable
         $rr.ok | Should -Be $true
-
-        (Get-Content -LiteralPath $watchPath -Raw | ConvertFrom-Json).monitorEnabled | Should -Be $true
-        (Get-Content -LiteralPath $aiPath -Raw | ConvertFrom-Json).enabled | Should -Be $false
-        (Get-Content -LiteralPath $aiPath -Raw | ConvertFrom-Json).voice.enabled | Should -Be $false
+        @($rr.results).Count | Should -Be 1
+        $script:EnableCalls | Should -Contain 'FreshWindows-WinUtilReapply'
     }
 
     It 'rejects scheduled task names outside Fresh catalog' {
@@ -73,28 +85,6 @@ Describe 'FreshWindows background audit' {
         Resolve-FreshWindowsKnownProcessRole -CommandLine "wt.exe -d $appdata" -ProcessName 'WindowsTerminal.exe' |
             Should -Be $null
         Resolve-FreshWindowsKnownProcessRole -CommandLine "powershell -File $appdata\Invoke-FreshWindowsBackgroundAudit.ps1" `
-            -ProcessName 'powershell.exe' -FreshAppData $appdata | Should -Be $null
-        Resolve-FreshWindowsKnownProcessRole -CommandLine 'powershell -STA -File GameMode-WatchAgent.ps1' `
-            -ProcessName 'powershell.exe' | Should -Be 'agent systray'
-        Resolve-FreshWindowsKnownProcessRole -CommandLine 'FreshAgent-BackgroundWorker.ps1 -Action Rag' `
-            -ProcessName 'powershell.exe' | Should -Be 'worker'
-    }
-
-    It 'reconnait Launch-GameModeWatch.ps1 (ligne de commande reelle systray)' {
-        $cmd = '"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe"  -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Users\Nico\AppData\Local\FreshWindows\Launch-GameModeWatch.ps1"'
-        Resolve-FreshWindowsKnownProcessRole -CommandLine $cmd -ProcessName 'powershell.exe' |
-            Should -Be 'agent systray'
-    }
-
-    It 'associe un enfant sans CommandLine au parent Fresh (enfant agent)' {
-        Get-FreshWindowsFreshChildProcessRole -ParentRole 'agent systray' | Should -Be 'enfant agent'
-        Get-FreshWindowsFreshChildProcessRole -ParentRole 'worker' | Should -Be 'enfant worker'
-        Resolve-FreshWindowsKnownProcessRole -CommandLine '' -ProcessName 'powershell.exe' | Should -Be $null
-    }
-
-    It 'Test-FreshWindowsIsHostTerminalProcess detecte Windows Terminal et conhost' {
-        Test-FreshWindowsIsHostTerminalProcess -ProcessName 'WindowsTerminal.exe' | Should -Be $true
-        Test-FreshWindowsIsHostTerminalProcess -ProcessName 'conhost.exe' | Should -Be $true
-        Test-FreshWindowsIsHostTerminalProcess -ProcessName 'powershell.exe' | Should -Be $false
+            -ProcessName 'powershell.exe' -FreshAppData $appdata | Should -Be 'maintenance'
     }
 }

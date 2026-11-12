@@ -59,7 +59,7 @@ function Set-FreshWindowsScheduledTaskTriggerLocalTime {
 }
 
 function Get-SyncLocalScriptsPowerShellCommand {
-    # Resync agent complet via scripts/Sync-FreshWindowsAgent.ps1 (ref figee a l'enregistrement)
+    # Resync scripts locaux via scripts/Sync-FreshWindowsAgent.ps1 (ref figee a l'enregistrement)
     return @"
 `$ErrorActionPreference='Stop'; try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}; `$ref='$RepoRef'; `$fresh=Join-Path `$env:LOCALAPPDATA 'FreshWindows'; New-Item -ItemType Directory -Path `$fresh -Force | Out-Null; `$raw='https://raw.githubusercontent.com/nico2511/fresh_windows/'+`$ref; `$sync=Join-Path `$fresh 'Sync-FreshWindowsAgent.ps1'; Invoke-WebRequest -Uri (`$raw+'/scripts/Sync-FreshWindowsAgent.ps1') -OutFile `$sync -UseBasicParsing; & `"$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe`" -NoProfile -ExecutionPolicy Bypass -File `$sync -RepoRef `$ref
 "@
@@ -85,8 +85,8 @@ function Register-AllScheduledTasks {
         $wingetCmd = Get-WingetUpgradePowerShellCommand
         $wingetArg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$wingetCmd`""
         $wingetAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $wingetArg
-        $wingetTrigger = New-ScheduledTaskTrigger -Daily -At "12:00"
-        $wingetTrigger = Set-FreshWindowsScheduledTaskTriggerLocalTime -Trigger $wingetTrigger -At '12:00'
+        $wingetTrigger = New-ScheduledTaskTrigger -Daily -At "11:00"
+        $wingetTrigger = Set-FreshWindowsScheduledTaskTriggerLocalTime -Trigger $wingetTrigger -At '11:00'
 
         Register-ScheduledTask `
             -TaskName $script:WingetUpgradeTaskName `
@@ -97,7 +97,7 @@ function Register-AllScheduledTasks {
             -Description "Fresh Windows: winget source update + upgrade --all (StartWhenAvailable)." `
             -Force -ErrorAction Stop | Out-Null
 
-        Write-Host "  [OK] $script:WingetUpgradeTaskName - tous les jours 12:00 (+ rattrapage)" -ForegroundColor Green
+        Write-Host "  [OK] $script:WingetUpgradeTaskName - tous les jours 11:00 (+ rattrapage, avant maintenance dimanche 12:00)" -ForegroundColor Green
     }
     catch {
         Write-Host "  [KO] Winget : $($_.Exception.Message)" -ForegroundColor Red
@@ -207,14 +207,14 @@ function Open-ScheduledTasksMenu {
             Write-Host "⚠️  Pas en admin - l'activation échouera (Accès refusé)." -ForegroundColor Red
             Write-Host ""
         }
-        Show-NamedTaskStatus -TaskName $script:WingetUpgradeTaskName -Label "Winget (quotidien 12:00)"
+        Show-NamedTaskStatus -TaskName $script:WingetUpgradeTaskName -Label "Winget (quotidien 11:00)"
         Show-NamedTaskStatus -TaskName $script:WinUtilReapplyTaskName -Label "WinUtil+ShutUp10 (dimanche 12:00)"
         Show-NamedTaskStatus -TaskName $script:SyncLocalScriptsTaskName -Label "Sync scripts locaux (dimanche 12:30)"
         Write-Host ""
         Write-Host "1. Activer toutes les tâches" -ForegroundColor Green
         Write-Host "2. Lancer la maintenance maintenant (WinUtil + ShutUp10)" -ForegroundColor Yellow
         Write-Host "3. Supprimer toutes les tâches" -ForegroundColor Red
-        Write-Host "4. Audit arrière-plan Fresh (CPU / agent / tâches)" -ForegroundColor Cyan
+        Write-Host "4. Audit arriere-plan Fresh (taches planifiees)" -ForegroundColor Cyan
         Write-Host "5. Retour" -ForegroundColor Gray
         Write-Host ""
         $c = Read-Host "Choix"

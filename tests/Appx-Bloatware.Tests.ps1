@@ -3,7 +3,27 @@ $ErrorActionPreference = 'Stop'
 
 Describe 'Appx bloatware classification' {
     BeforeAll {
-        if (-not $env:LOCALAPPDATA) { $env:LOCALAPPDATA = if ($env:TEMP) { $env:TEMP } else { '/tmp' } }
+        $script:GlobalStubNames = @(
+            'Remove-AppxPackage',
+            'Remove-AppxProvisionedPackage',
+            'Checkpoint-Computer',
+            'Enable-ComputerRestore',
+            'Get-AppxPackage',
+            'New-FreshWindowsAppxBloatwareRestorePoint'
+        )
+        function global:Remove-AppxPackage { param($Package) throw 'Remove-AppxPackage doit etre mocke dans les tests' }
+        function global:Remove-AppxProvisionedPackage { param($Online, $PackageName) throw 'Remove-AppxProvisionedPackage doit etre mocke' }
+        function global:Checkpoint-Computer { throw 'Checkpoint-Computer ne doit pas etre appele en test' }
+        function global:Enable-ComputerRestore { param($Drive) return $true }
+
+        $script:HadLocalAppData = Test-Path -LiteralPath Env:\LOCALAPPDATA
+        $script:OrigLocalAppData = $env:LOCALAPPDATA
+        $tempRoot = if ($env:TEMP -and $env:TEMP -notmatch '^:') { $env:TEMP } else { '/tmp' }
+        $script:GuidRoot = Join-Path $tempRoot ('fw-appx-{0}' -f [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $script:GuidRoot 'FreshWindows') -Force | Out-Null
+        $env:LOCALAPPDATA = $script:GuidRoot
+        $script:FreshRoot = Join-Path $script:GuidRoot 'FreshWindows'
+
         $root = Split-Path (Split-Path $PSCommandPath -Parent) -Parent
         if ([string]::IsNullOrWhiteSpace($root) -or -not (Test-Path -LiteralPath (Join-Path $root 'scripts'))) {
             $here = $PSScriptRoot
@@ -12,7 +32,22 @@ Describe 'Appx bloatware classification' {
         }
         $script:RepoRoot = $root
         . (Join-Path $root 'scripts\lib\FreshWindows-AppxBloatware.ps1')
-        $script:Config = Get-FreshWindowsAppxBloatwareConfig -RepoRoot $root
+        $script:Config = Get-FreshWindowsAppxBloatwareConfig -RepoRoot $root -FreshAppData $script:FreshRoot
+    }
+
+    AfterAll {
+        if ($null -ne $script:OrigLocalAppData) {
+            $env:LOCALAPPDATA = $script:OrigLocalAppData
+        }
+        elseif ($script:HadLocalAppData -eq $false) {
+            Remove-Item -LiteralPath Env:\LOCALAPPDATA -ErrorAction SilentlyContinue
+        }
+        foreach ($stubName in $script:GlobalStubNames) {
+            Remove-Item -LiteralPath "Function:\Global:$stubName" -ErrorAction SilentlyContinue
+        }
+        if ($script:GuidRoot -and (Test-Path -LiteralPath $script:GuidRoot)) {
+            Remove-Item -LiteralPath $script:GuidRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 
     It 'classifies protected Paint classic and remove Paint 3D' {
@@ -52,7 +87,7 @@ Describe 'Appx bloatware classification' {
     }
 
     It 'dry-run lists unknown packages as add candidates' {
-        $plan = Invoke-FreshWindowsAppxBloatwareCleanup -RepoRoot $script:RepoRoot -PackageIdentities @(
+        $plan = Invoke-FreshWindowsAppxBloatwareCleanup -RepoRoot $script:RepoRoot -FreshAppData $script:FreshRoot -PackageIdentities @(
             'Microsoft.BingNews',
             'Microsoft.Paint',
             'Unknown.PersonalApp'
@@ -62,16 +97,44 @@ Describe 'Appx bloatware classification' {
         $plan.protected | Should -Contain 'Microsoft.Paint'
         $plan.addCandidates | Should -Contain 'Unknown.PersonalApp'
         $plan.message | Should -Match 'Candidats a ajouter'
+        $plan.logPath | Should -Match ([regex]::Escape($script:FreshRoot))
     }
 
-    It 'Apply never removes unknown packages' {
-        $result = Invoke-FreshWindowsAppxBloatwareCleanup -Apply -RepoRoot $script:RepoRoot -PackageIdentities @(
+    It 'Apply never removes unknown packages and skips restore point' {
+        $script:AppxRemoved = [System.Collections.ArrayList]@()
+        $script:RestorePointCalls = 0
+        function global:Remove-AppxPackage {
+            param($Package)
+            [void]$script:AppxRemoved.Add([string]$Package)
+            return $true
+        }
+        function global:Get-AppxPackage {
+            param([switch]$AllUsers, [string]$Name)
+            if ($Name) {
+                if ($Name -eq 'Microsoft.BingNews') {
+                    return [pscustomobject]@{ Name = 'Microsoft.BingNews'; PackageFullName = 'Microsoft.BingNews_8wekyb3d8bbwe' }
+                }
+                return $null
+            }
+            return @(
+                [pscustomobject]@{ Name = 'Microsoft.BingNews'; PackageFullName = 'Microsoft.BingNews_8wekyb3d8bbwe' }
+            )
+        }
+        function global:New-FreshWindowsAppxBloatwareRestorePoint {
+            $script:RestorePointCalls++
+            throw 'restore point should be skipped'
+        }
+        $result = Invoke-FreshWindowsAppxBloatwareCleanup -Apply -SkipRestorePoint -RepoRoot $script:RepoRoot -FreshAppData $script:FreshRoot -PackageIdentities @(
             'Contoso.UnknownApp',
             'Microsoft.BingNews'
         )
         $result.dryRun | Should -Be $false
         $result.removed | Should -Not -Contain 'Contoso.UnknownApp'
+        $result.removed | Should -Contain 'Microsoft.BingNews'
         @($result.addCandidates) | Should -Contain 'Contoso.UnknownApp'
+        $script:AppxRemoved.Count | Should -BeGreaterThan 0
+        $script:AppxRemoved | Should -Contain 'Microsoft.BingNews_8wekyb3d8bbwe'
+        $script:RestorePointCalls | Should -Be 0
     }
 
     It 'prefix rules match king.com family' {
