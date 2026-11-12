@@ -156,7 +156,7 @@ function Test-FreshWatchLegacyMaintenanceMutexHeld {
         [string[]]$LegacyMutexNames
     )
     if (-not $LegacyMutexNames) {
-        $LegacyMutexNames = Get-FreshWatchLegacyMaintenanceMutexNames()
+        $LegacyMutexNames = @(Get-FreshWatchLegacyMaintenanceMutexNames)
     }
     foreach ($mutexName in $LegacyMutexNames) {
         try {

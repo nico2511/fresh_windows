@@ -22,7 +22,7 @@ Describe 'GameMode-WatchAgent mutex (code reel, noms GUID)' {
     It 'Enter-FreshWatchAgentSingleInstance -WhatIf quitte si mutex principal GUID deja tenu (processus enfant)' {
         $suffix = [guid]::NewGuid().ToString('N')
         $primary = "Global\FreshWindowsWatchAgent-Test-$suffix"
-        $sandbox = Join-Path ((if ($env:TEMP -and $env:TEMP -notmatch '^:') { $env:TEMP } else { '/tmp' })) "fw-enter-mutex-$suffix"
+        $sandbox = Join-Path $(if ($env:TEMP -and $env:TEMP -notmatch '^:') { $env:TEMP } else { '/tmp' }) "fw-enter-mutex-$suffix"
         New-Item -ItemType Directory -Path $sandbox -Force | Out-Null
         $stopFile = Join-Path $sandbox 'stop.flag'
         $logFile = Join-Path $sandbox 'child.log'
@@ -77,7 +77,7 @@ try { `$m.Dispose() } catch { }
         $legacyName = "Global\FreshAgentWatchAgent-Test-$suffix"
         $names = @($legacyName)
         Test-FreshWatchLegacyMaintenanceMutexHeld -LegacyMutexNames $names | Should -Be $false
-        $sandbox = Join-Path ((if ($env:TEMP -and $env:TEMP -notmatch '^:') { $env:TEMP } else { '/tmp' })) "fw-legacy-only-$suffix"
+        $sandbox = Join-Path $(if ($env:TEMP -and $env:TEMP -notmatch '^:') { $env:TEMP } else { '/tmp' }) "fw-legacy-only-$suffix"
         New-Item -ItemType Directory -Path $sandbox -Force | Out-Null
         $stopFile = Join-Path $sandbox 'stop.flag'
         $holder = @"
