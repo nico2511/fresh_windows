@@ -71,6 +71,7 @@ Describe 'FreshWindows background audit' {
 
         $rr = Restore-FreshWindowsBackgroundFromJournal -FreshAppData $script:Tmp -ScheduledTaskEnable $enable
         $rr.ok | Should -Be $true
+        @($rr.results).Count | Should -Be 1
         $script:EnableCalls | Should -Contain 'FreshWindows-WinUtilReapply'
     }
 

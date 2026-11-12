@@ -10,7 +10,6 @@ $files = @(
     'scripts\lib\Launcher-Tasks.ps1',
     'scripts\lib\Launcher-Core.ps1',
     'scripts\lib\FreshAgent-MaintenanceConfig.ps1',
-    'scripts\lib\FreshAgent-Log.ps1',
     'scripts\lib\FreshAgent-GameSession.ps1',
     'scripts\lib\FreshAgent-Optimize.ps1',
     'scripts\lib\FreshAgent-Health.ps1',

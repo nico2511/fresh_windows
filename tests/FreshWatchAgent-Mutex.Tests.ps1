@@ -1,27 +1,34 @@
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 
-Describe 'GameMode-WatchAgent mutex (code reel)' {
+Describe 'GameMode-WatchAgent mutex (code reel, noms GUID)' {
     BeforeAll {
         $root = Split-Path (Split-Path $PSCommandPath -Parent) -Parent
         . (Join-Path $root 'tests/lib/FreshWindows-TestAstExtract.ps1')
         $script:WatchPath = Join-Path $root 'scripts/GameMode-WatchAgent.ps1'
+
+        function script:Write-WatchLog { param($Message) }
+        function script:Get-FreshWatchAgentPeerProcesses { return @() }
+
         $legacySrc = Get-FreshWindowsFunctionAstText -FilePath $script:WatchPath -FunctionName 'Test-FreshWatchLegacyMaintenanceMutexHeld'
+        $namesSrc = Get-FreshWindowsFunctionAstText -FilePath $script:WatchPath -FunctionName 'Get-FreshWatchLegacyMaintenanceMutexNames'
+        $enterSrc = Get-FreshWindowsFunctionAstText -FilePath $script:WatchPath -FunctionName 'Enter-FreshWatchAgentSingleInstance'
+
+        . ([scriptblock]::Create($namesSrc))
         . ([scriptblock]::Create($legacySrc))
+        . ([scriptblock]::Create($enterSrc))
     }
 
-    It 'Enter-FreshWatchAgentSingleInstance refuse un mutex principal deja tenu (processus enfant)' {
+    It 'Enter-FreshWatchAgentSingleInstance -WhatIf quitte si mutex principal GUID deja tenu (processus enfant)' {
         $suffix = [guid]::NewGuid().ToString('N')
-        $mutexName = "Global\FreshWindowsWatchAgent-Test-$suffix"
-        $tempRoot = if ($env:TEMP -and $env:TEMP -notmatch '^:') { $env:TEMP } else { '/tmp' }
-        $sandbox = Join-Path $tempRoot ("fw-mutex-child-$suffix")
+        $primary = "Global\FreshWindowsWatchAgent-Test-$suffix"
+        $sandbox = Join-Path ((if ($env:TEMP -and $env:TEMP -notmatch '^:') { $env:TEMP } else { '/tmp' })) "fw-enter-mutex-$suffix"
         New-Item -ItemType Directory -Path $sandbox -Force | Out-Null
         $stopFile = Join-Path $sandbox 'stop.flag'
         $logFile = Join-Path $sandbox 'child.log'
         $holder = @"
 `$ErrorActionPreference = 'Stop'
-`$name = '$mutexName'
-`$m = New-Object System.Threading.Mutex(`$false, `$name)
+`$m = New-Object System.Threading.Mutex(`$false, '$primary')
 [void]`$m.WaitOne()
 Set-Content -LiteralPath '$logFile' -Value 'holding' -Encoding UTF8
 while (-not (Test-Path -LiteralPath '$stopFile')) { Start-Sleep -Milliseconds 100 }
@@ -29,36 +36,20 @@ try { [void]`$m.ReleaseMutex() } catch { }
 try { `$m.Dispose() } catch { }
 "@
         $proc = $null
-        $secondGot = $true
         try {
             $proc = Start-Process -FilePath (Get-Process -Id $PID).Path `
-                -ArgumentList @('-NoProfile', '-Command', $holder) `
-                -WorkingDirectory $sandbox `
-                -PassThru
+                -ArgumentList @('-NoProfile', '-Command', $holder) -WorkingDirectory $sandbox -PassThru
             $deadline = (Get-Date).AddSeconds(8)
             while ((Get-Date) -lt $deadline) {
                 if (Test-Path -LiteralPath $logFile) { break }
                 Start-Sleep -Milliseconds 100
             }
-            if (-not (Test-Path -LiteralPath $logFile)) {
-                throw 'Child mutex holder failed to start'
-            }
-            $m2 = $null
-            try {
-                $m2 = New-Object System.Threading.Mutex($false, $mutexName)
-                try { $secondGot = $m2.WaitOne(0, $false) }
-                catch [System.Threading.AbandonedMutexException] { $secondGot = $true }
-            }
-            finally {
-                if ($m2) {
-                    try { if ($secondGot) { [void]$m2.ReleaseMutex() } } catch { }
-                    try { $m2.Dispose() } catch { }
-                }
-            }
-            $secondGot | Should -Be $false
+            Test-Path -LiteralPath $logFile | Should -Be $true
+            $r = Enter-FreshWatchAgentSingleInstance -PrimaryMutexName $primary -LegacyMutexNames @("Global\Legacy-Test-$suffix") -WhatIf
+            $r.shouldExit | Should -Be $true
+            $r.reason | Should -Be 'primary-mutex-busy'
         }
         finally {
-            if (Test-Path -LiteralPath $stopFile) { Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue }
             New-Item -ItemType File -Path $stopFile -Force | Out-Null
             if ($proc -and -not $proc.HasExited) {
                 Wait-Process -Id $proc.Id -Timeout 10 -ErrorAction SilentlyContinue
@@ -68,11 +59,25 @@ try { `$m.Dispose() } catch { }
         }
     }
 
-    It 'Test-FreshWatchLegacyMaintenanceMutexHeld (extrait AST) voit Global\FreshAgentWatchAgent tenu par enfant' {
+    It 'Enter-FreshWatchAgentSingleInstance -WhatIf acquiert un mutex GUID libre' {
         $suffix = [guid]::NewGuid().ToString('N')
-        $legacyName = 'Global\FreshAgentWatchAgent'
-        $tempRoot = if ($env:TEMP -and $env:TEMP -notmatch '^:') { $env:TEMP } else { '/tmp' }
-        $sandbox = Join-Path $tempRoot ("fw-legacy-$suffix")
+        $primary = "Global\FreshWindowsWatchAgent-Test-$suffix"
+        $r = Enter-FreshWatchAgentSingleInstance -PrimaryMutexName $primary -LegacyMutexNames @("Global\Legacy-Test-$suffix") -WhatIf
+        $r.shouldExit | Should -Be $false
+        $r.acquired | Should -Be $true
+        if ($script:WatchMutex) {
+            try { [void]$script:WatchMutex.ReleaseMutex() } catch { }
+            try { $script:WatchMutex.Dispose() } catch { }
+            $script:WatchMutex = $null
+        }
+    }
+
+    It 'Test-FreshWatchLegacyMaintenanceMutexHeld ne voit que les noms GUID fournis' {
+        $suffix = [guid]::NewGuid().ToString('N')
+        $legacyName = "Global\FreshAgentWatchAgent-Test-$suffix"
+        $names = @($legacyName)
+        Test-FreshWatchLegacyMaintenanceMutexHeld -LegacyMutexNames $names | Should -Be $false
+        $sandbox = Join-Path ((if ($env:TEMP -and $env:TEMP -notmatch '^:') { $env:TEMP } else { '/tmp' })) "fw-legacy-only-$suffix"
         New-Item -ItemType Directory -Path $sandbox -Force | Out-Null
         $stopFile = Join-Path $sandbox 'stop.flag'
         $holder = @"
@@ -84,12 +89,13 @@ try { `$m.Dispose() } catch { }
 "@
         $proc = $null
         try {
-            Test-FreshWatchLegacyMaintenanceMutexHeld | Should -Be $false
             $proc = Start-Process -FilePath (Get-Process -Id $PID).Path `
-                -ArgumentList @('-NoProfile', '-Command', $holder) `
-                -WorkingDirectory $sandbox -PassThru
+                -ArgumentList @('-NoProfile', '-Command', $holder) -WorkingDirectory $sandbox -PassThru
             Start-Sleep -Seconds 1
-            Test-FreshWatchLegacyMaintenanceMutexHeld | Should -Be $true
+            Test-FreshWatchLegacyMaintenanceMutexHeld -LegacyMutexNames $names | Should -Be $true
+            $r = Enter-FreshWatchAgentSingleInstance -PrimaryMutexName "Global\FreshWindowsWatchAgent-Test-$suffix" -LegacyMutexNames $names -WhatIf
+            $r.shouldExit | Should -Be $true
+            $r.reason | Should -Be 'legacy-mutex'
         }
         finally {
             New-Item -ItemType File -Path $stopFile -Force | Out-Null

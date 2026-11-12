@@ -98,6 +98,35 @@ function Invoke-FreshAgentCleanup { param([switch]$Temp) throw 'REAL-CLEANUP-FOR
         Should -Invoke Invoke-FreshAgentCleanup -Times 0 -Exactly
     }
 
+    It 'New-FreshAgentWeeklyHealthReport ecrit sous FreshAppData GUID (sans nettoyage temp)' {
+        $root = Split-Path (Split-Path $PSCommandPath -Parent) -Parent
+        $optBody = Get-Content -LiteralPath (Join-Path $root 'scripts/lib/FreshAgent-Optimize.ps1') -Raw
+        Set-Content -LiteralPath (Join-Path $script:FreshRoot 'lib\FreshAgent-Optimize.ps1') -Value $optBody -Encoding UTF8
+        Import-FreshMaintenanceModules -FreshAppData $script:FreshRoot | Should -Be $true
+        Mock Get-CimInstance {
+            param($ClassName)
+            if ($ClassName -eq 'Win32_OperatingSystem') {
+                return [pscustomobject]@{ FreePhysicalMemory = 1024 * 1024 }
+            }
+            if ($ClassName -eq 'Win32_ComputerSystem') {
+                return [pscustomobject]@{ TotalPhysicalMemory = [int64]8589934592 }
+            }
+            if ($ClassName -eq 'Win32_Processor') {
+                return [pscustomobject]@{ LoadPercentage = 10 }
+            }
+            if ($ClassName -eq 'Win32_LogicalDisk') {
+                return [pscustomobject]@{ FreeSpace = [int64]53687091200 }
+            }
+            return $null
+        }
+        Mock Invoke-FreshAgentCleanup { throw 'nettoyage interdit dans ce test' }
+
+        $r = New-FreshAgentWeeklyHealthReport -FreshAppData $script:FreshRoot
+        $r.ok | Should -Be $true
+        Test-Path -LiteralPath (Join-Path $script:FreshRoot 'weekly-health-last.json') | Should -Be $true
+        Should -Invoke Invoke-FreshAgentCleanup -Times 0 -Exactly
+    }
+
     It 'Invoke-FreshMaintenanceTempCleanup simule 1 nettoyage si winget libre' {
         Set-Content -LiteralPath (Join-Path $script:FreshRoot 'lib\FreshAgent-Optimize.ps1') -Value @'
 #Requires -Version 5.1

@@ -163,9 +163,9 @@ Scripts locaux : `%LOCALAPPDATA%\FreshWindows\` + marqueurs `scripts.ref` / `scr
 
 ### Agent maintenance (systray)
 
-Un seul mutex `Global\FreshWindowsWatchAgent` : une seconde instance quitte immédiatement. Les anciens noms de mutex (ex. `Global\FreshAgentWatchAgent`, `…-FreshWindows`) sont détectés pour éviter deux icônes lors de la migration.
+Un seul mutex `Global\FreshWindowsWatchAgent` : une seconde instance quitte immédiatement.
 
-**Ordre au démarrage :** contrôle STA (relance en `-STA` si besoin, puis `exit` du processus parent) → mono-instance (pairs WMI, puis mutex) → dot-source `lib\Launcher-Core.ps1` (arrêt voix/ancien watch) → icône. La migration depuis un ancien agent IA repose surtout sur la préparation lancée depuis le **menu 11 → 3** (`Start-FreshWindowsUnelevated`) ou un redémarrage de session (tâche AtLogOn).
+**Ordre au démarrage :** contrôle **STA** (relance en `-STA` si besoin, puis `exit` du processus parent) → détection **mutex legacy** (`OpenExisting` sur les anciens noms) → processus **pairs WMI** (autre `GameMode-WatchAgent`) → **mutex principal** → dot-source `lib\Launcher-Core.ps1` ou `Launcher-Core.ps1` racine (prep : arrêt voix / anciens hôtes) → icône systray. Si un pair ou un mutex legacy est détecté, l’agent quitte **avant** la prep : la migration depuis un ancien agent IA repose surtout sur le **menu 11 → 3** (`Start-FreshWindowsUnelevated`, qui stoppe l’ancien watch) ou sur un redémarrage de session (tâche AtLogOn).
 
 **Nettoyage systray :** si `winget` / `WindowsPackageManager` / `AppInstaller` tourne, le menu affiche « Différé » sans attendre ni vider `%TEMP%` (le menu 11 et la maintenance hebdo attendent jusqu’à 15 min puis diffèrent si besoin).
 

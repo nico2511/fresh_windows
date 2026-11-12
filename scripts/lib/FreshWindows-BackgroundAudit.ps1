@@ -468,7 +468,7 @@ function Restore-FreshWindowsBackgroundFromJournal {
     if ($entries.Count -eq 0) {
         return @{ ok = $false; message = 'Journal vide.'; results = @() }
     }
-    $toRestore = if ($Last -gt 0) { @($entries | Select-Object -Last $Last) } else { $entries }
+    $toRestore = @(if ($Last -gt 0) { $entries | Select-Object -Last $Last } else { $entries })
     $results = @()
     for ($i = $toRestore.Count - 1; $i -ge 0; $i--) {
         $r = Restore-FreshWindowsBackgroundJournalEntry -Entry $toRestore[$i] -FreshAppData $FreshAppData `

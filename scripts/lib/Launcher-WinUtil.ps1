@@ -201,9 +201,21 @@ function Invoke-MaintenanceReapply {
     if (Get-Command Invoke-FreshMaintenanceTempCleanup -ErrorAction SilentlyContinue) {
         $tc = Invoke-FreshMaintenanceTempCleanup -FreshAppData $FreshAppData -RepoRawRoot $RepoRawRoot -Ref $RepoRef -IconUrl $IconUrl -NoPause
         $tempOk = [bool]$tc.ok
-        $tempLabel = if ($tempOk) { 'OK' } else { 'differe' }
+        $msg = if ($tc.message) { [string]$tc.message } else { '' }
+        $tempLabel = if ($tempOk) {
+            'OK'
+        }
+        elseif ($msg -match '(?i)winget') {
+            'differe (winget)'
+        }
+        elseif ($msg -match '(?i)Modules maintenance absents') {
+            'absent (modules)'
+        }
+        else {
+            'differe'
+        }
         $tempColor = if ($tempOk) { 'Green' } else { 'DarkYellow' }
-        $tempDetail = if ($tc.message) { [string]$tc.message } else { '' }
+        $tempDetail = $msg
         Write-FreshStep -Title ("[4/5] Nettoyage temp - {0}" -f $tempLabel) -Detail $tempDetail -Color $tempColor
     }
     else {

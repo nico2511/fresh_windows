@@ -142,14 +142,23 @@ function Request-WatchAgentShutdown {
     [Environment]::Exit(0)
 }
 
-function Test-FreshWatchLegacyMaintenanceMutexHeld {
-    $legacyNames = @(
+function Get-FreshWatchLegacyMaintenanceMutexNames {
+    return @(
         'Global\FreshWindows-WatchAgent-FreshWindows',
         'Global\FreshWindows-WatchAgent',
         'Global\FreshAgentWatchAgent',
         ('Global\FreshWindows-WatchAgent-{0}' -f $env:USERNAME)
     )
-    foreach ($mutexName in $legacyNames) {
+}
+
+function Test-FreshWatchLegacyMaintenanceMutexHeld {
+    param(
+        [string[]]$LegacyMutexNames
+    )
+    if (-not $LegacyMutexNames) {
+        $LegacyMutexNames = Get-FreshWatchLegacyMaintenanceMutexNames()
+    }
+    foreach ($mutexName in $LegacyMutexNames) {
         try {
             $legacy = [System.Threading.Mutex]::OpenExisting($mutexName)
             try { $legacy.Dispose() } catch { }
@@ -193,16 +202,20 @@ function Get-FreshWatchAgentPeerProcesses {
 
 function Enter-FreshWatchAgentSingleInstance {
     param(
-        [string]$PrimaryMutexName = 'Global\FreshWindowsWatchAgent'
+        [string]$PrimaryMutexName = 'Global\FreshWindowsWatchAgent',
+        [string[]]$LegacyMutexNames,
+        [switch]$WhatIf
     )
-    if (Test-FreshWatchLegacyMaintenanceMutexHeld) {
+    if (Test-FreshWatchLegacyMaintenanceMutexHeld -LegacyMutexNames $LegacyMutexNames) {
         Write-WatchLog 'Mutex legacy detecte — exit (migration ancien agent)'
+        if ($WhatIf) { return @{ shouldExit = $true; reason = 'legacy-mutex' } }
         exit 0
     }
     $peers = @(Get-FreshWatchAgentPeerProcesses)
     if ($peers.Count -gt 0) {
         $pids = ($peers | ForEach-Object { [string]$_.ProcessId }) -join ','
         Write-WatchLog ("Autre instance active (PID {0}) — exit" -f $pids)
+        if ($WhatIf) { return @{ shouldExit = $true; reason = 'peer-process'; peerPids = $pids } }
         exit 0
     }
     $script:WatchMutex = $null
@@ -218,12 +231,15 @@ function Enter-FreshWatchAgentSingleInstance {
             Write-WatchLog ("Mutex principal occupe ({0}) — exit" -f $PrimaryMutexName)
             try { $script:WatchMutex.Dispose() } catch { }
             $script:WatchMutex = $null
+            if ($WhatIf) { return @{ shouldExit = $true; reason = 'primary-mutex-busy' } }
             exit 0
         }
         Write-WatchLog ("Mutex acquis ({0}) PID $PID" -f $PrimaryMutexName)
+        if ($WhatIf) { return @{ shouldExit = $false; acquired = $true; mutex = $PrimaryMutexName } }
     }
     catch {
         Write-WatchLog ("Mutex {0}: {1}" -f $PrimaryMutexName, $_.Exception.Message)
+        if ($WhatIf) { return @{ shouldExit = $true; reason = 'mutex-error'; detail = $_.Exception.Message } }
         exit 0
     }
 }

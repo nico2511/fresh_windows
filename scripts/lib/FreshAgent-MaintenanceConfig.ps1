@@ -29,29 +29,3 @@ function Set-FreshScriptUtf8Bom {
     }
     catch { }
 }
-
-function Get-FreshMaintenanceSyncManifest {
-    return @{
-        Scripts = @(
-            'GameMode-Common.ps1',
-            'Invoke-GameModeKill.ps1',
-            'GameMode-WatchAgent.ps1',
-            'Stop-FreshWatchAgent.ps1',
-            'Sync-FreshWindowsAgent.ps1',
-            'Invoke-FreshWindowsBackgroundAudit.ps1'
-        )
-        Libs = @(
-            'lib/Launcher-Core.ps1',
-            'lib/FreshAgent-MaintenanceConfig.ps1',
-            'lib/FreshAgent-GameSession.ps1',
-            'lib/FreshAgent-Optimize.ps1',
-            'lib/FreshAgent-Health.ps1',
-            'lib/FreshWindows-AppxBloatware.ps1',
-            'lib/FreshWindows-BackgroundAudit.ps1'
-        )
-        Configs = @(
-            'configs/game-mode-watch.json',
-            'configs/maintenance-content.json'
-        )
-    }
-}
